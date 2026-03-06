@@ -1,5 +1,5 @@
 # ── Stage 1: Build Svelte frontend ────────────────────────────────────────────
-FROM node:20-alpine AS frontend
+FROM node:24-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Build Go binary ──────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26.0-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

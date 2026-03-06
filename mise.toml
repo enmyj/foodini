@@ -1,6 +1,6 @@
 [tools]
-go = "1.22"
-node = "20"
+go = "1.26.0"
+node = "24"
 
 [tasks.install]
 description = "Install frontend dependencies"

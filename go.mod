@@ -1,6 +1,6 @@
 module foodtracker
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/google/generative-ai-go v0.20.1
