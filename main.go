@@ -20,6 +20,7 @@ func main() {
 		ClientSecret: requireEnv("GOOGLE_CLIENT_SECRET"),
 		RedirectURL:  requireEnv("REDIRECT_URL"),
 		CookieSecret: requireEnv("COOKIE_SECRET"),
+		Secure:       os.Getenv("COOKIE_SECURE") == "true",
 	}
 
 	authHandler := auth.NewHandler(cfg)

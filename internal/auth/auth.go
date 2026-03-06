@@ -2,10 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/securecookie"
 	"golang.org/x/oauth2"
@@ -28,6 +29,7 @@ type Config struct {
 	ClientSecret string
 	RedirectURL  string
 	CookieSecret string
+	Secure       bool
 }
 
 type Session struct {
@@ -39,14 +41,16 @@ type Session struct {
 type Handler struct {
 	oauthCfg *oauth2.Config
 	sc       *securecookie.SecureCookie
+	secure   bool
 }
 
 func NewHandler(cfg Config) *Handler {
-	hashKey := []byte(cfg.CookieSecret)
-	encKey := []byte(cfg.CookieSecret)
-	if len(encKey) > 32 {
-		encKey = encKey[:32]
+	secret := []byte(cfg.CookieSecret)
+	if len(secret) < 64 {
+		panic("COOKIE_SECRET must be at least 64 bytes (use: openssl rand -hex 32 gives 64 hex chars)")
 	}
+	hashKey := secret[:32]
+	encKey := secret[32:64]
 	return &Handler{
 		oauthCfg: &oauth2.Config{
 			ClientID:     cfg.ClientID,
@@ -55,16 +59,42 @@ func NewHandler(cfg Config) *Handler {
 			Scopes:       scopes,
 			Endpoint:     google.Endpoint,
 		},
-		sc: securecookie.New(hashKey, encKey),
+		sc:     securecookie.New(hashKey, encKey),
+		secure: cfg.Secure,
 	}
 }
 
+// generateState returns a cryptographically random hex string for OAuth CSRF protection.
+func generateState() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	url := h.oauthCfg.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	state := generateState()
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   300, // 5 minutes
+		SameSite: http.SameSiteLaxMode,
+	})
+	url := h.oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
+	// Verify CSRF state
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil || r.URL.Query().Get("state") != stateCookie.Value {
+		http.Error(w, "invalid oauth state", http.StatusBadRequest)
+		return
+	}
+	// Clear the state cookie
+	http.SetCookie(w, &http.Cookie{Name: "oauth_state", Value: "", MaxAge: -1, Path: "/"})
+
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "missing code", http.StatusBadRequest)
@@ -75,6 +105,11 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	token, err := h.oauthCfg.Exchange(ctx, code)
 	if err != nil {
 		http.Error(w, "token exchange failed", http.StatusInternalServerError)
+		return
+	}
+
+	if token.RefreshToken == "" {
+		http.Error(w, "no refresh token: re-authorize with prompt=consent", http.StatusInternalServerError)
 		return
 	}
 
@@ -107,10 +142,12 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name:    cookieName,
-		Value:   "",
-		Expires: time.Unix(0, 0),
-		Path:    "/",
+		Name:     cookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
 	})
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
@@ -125,6 +162,7 @@ func (h *Handler) SetSession(w http.ResponseWriter, session *Session) error {
 		Value:    encoded,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   30 * 24 * 3600,
 	})

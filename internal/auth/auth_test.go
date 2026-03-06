@@ -12,7 +12,7 @@ func TestSessionRoundTrip(t *testing.T) {
 		ClientID:     "test-id",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost/callback",
-		CookieSecret: "01234567890123456789012345678901",
+		CookieSecret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	h := auth.NewHandler(cfg)
 
@@ -48,7 +48,7 @@ func TestSessionRoundTrip(t *testing.T) {
 }
 
 func TestGetSession_NoCookie(t *testing.T) {
-	cfg := auth.Config{CookieSecret: "01234567890123456789012345678901"}
+	cfg := auth.Config{CookieSecret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
 	h := auth.NewHandler(cfg)
 	req := httptest.NewRequest("GET", "/", nil)
 	_, err := h.GetSession(req)
