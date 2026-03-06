@@ -1,0 +1,46 @@
+[tools]
+go = "1.22"
+node = "20"
+
+[tasks.install]
+description = "Install frontend dependencies"
+run = "cd frontend && npm install"
+
+[tasks.build-frontend]
+description = "Build the Svelte frontend into frontend/dist"
+depends = ["install"]
+run = "cd frontend && npm run build"
+
+[tasks.build]
+description = "Build production Go binary (embeds frontend)"
+depends = ["build-frontend"]
+run = "go build -o foodtracker ."
+
+[tasks.dev-backend]
+description = "Run Go backend in dev mode (reads .env)"
+run = "export $(grep -v '^#' .env | xargs) && go run main.go"
+
+[tasks.dev-frontend]
+description = "Run Svelte dev server with API proxy on :5173"
+run = "cd frontend && npm run dev"
+
+[tasks.test]
+description = "Run all Go tests"
+run = "go test ./..."
+
+[tasks.run]
+description = "Build and run the production binary"
+depends = ["build"]
+run = "export $(grep -v '^#' .env | xargs) && ./foodtracker"
+
+[tasks.docker-build]
+description = "Build Docker image tagged as foodtracker:latest"
+run = "docker build -t foodtracker ."
+
+[tasks.docker-run]
+description = "Run the app in Docker (requires .env file)"
+run = "docker run --env-file .env -p 8080:8080 foodtracker"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -f foodtracker && rm -rf frontend/dist"
