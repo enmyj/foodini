@@ -6,6 +6,7 @@
   let editing = $state(null)
   let editValue = $state('')
   let saving = $state(false)
+  let cancelFlag = false
 
   const numFields = new Set(['calories', 'protein', 'carbs', 'fat'])
 
@@ -15,7 +16,7 @@
   }
 
   async function commitEdit() {
-    if (!editing) return
+    if (!editing || cancelFlag) return
     saving = true
     try {
       const value = numFields.has(editing) ? (parseInt(editValue) || 0) : editValue
@@ -31,7 +32,11 @@
 
   function onKeyDown(e) {
     if (e.key === 'Enter') commitEdit()
-    if (e.key === 'Escape') editing = null
+    if (e.key === 'Escape') {
+      cancelFlag = true
+      editing = null
+      setTimeout(() => { cancelFlag = false }, 0)
+    }
   }
 </script>
 

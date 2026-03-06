@@ -1,5 +1,5 @@
 export async function getLog({ date = null, week = false } = {}) {
-  const params = week ? '?week=true' : `?date=${date ?? 'today'}`
+  const params = week ? '?week=true' : date ? `?date=${date}` : ''
   const res = await fetch(`/api/log${params}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()

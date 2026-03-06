@@ -7,6 +7,7 @@
   let notes = $state('')
   let editing = $state(false)
   let saving = $state(false)
+  let saveError = $state('')
 
   onMount(async () => {
     if (!date) return
@@ -18,11 +19,14 @@
 
   async function save() {
     saving = true
+    saveError = ''
     try {
       await putActivity(date, notes)
+      editing = false
+    } catch (e) {
+      saveError = 'Failed to save. Try again.'
     } finally {
       saving = false
-      editing = false
     }
   }
 
@@ -44,6 +48,7 @@
       autofocus
     ></textarea>
     {#if saving}<span class="hint">Saving…</span>{/if}
+    {#if saveError}<span class="hint error">{saveError}</span>{/if}
   {:else}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="note" onclick={() => editing = true}>
@@ -60,4 +65,5 @@
   textarea { width: 100%; border: 1px solid #4285f4; border-radius: 6px; padding: 0.5rem; font-size: 0.9rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
   textarea:focus { outline: none; }
   .hint { font-size: 0.78rem; color: #aaa; }
+  .hint.error { color: #c62828; }
 </style>

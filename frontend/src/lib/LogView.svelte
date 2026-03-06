@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import { getLog } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
@@ -20,8 +19,6 @@
       loading = false
     }
   }
-
-  onMount(load)
 
   function groupedByMeal(entries) {
     const g = {}

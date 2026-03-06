@@ -7,6 +7,7 @@
   let input = $state('')
   let sending = $state(false)
   let inputEl = $state(null)
+  let messagesEl = $state(null)
 
   $effect(() => {
     if (open) {
@@ -14,6 +15,13 @@
     } else {
       messages = []
       input = ''
+    }
+  })
+
+  $effect(() => {
+    messages // track
+    if (messagesEl) {
+      messagesEl.scrollTop = messagesEl.scrollHeight
     }
   })
 
@@ -50,7 +58,7 @@
   <div class="overlay" onclick={onClose}></div>
   <div class="drawer" role="dialog" aria-label="Log food">
     <div class="handle"></div>
-    <div class="messages">
+    <div class="messages" bind:this={messagesEl}>
       {#if messages.length === 0}
         <p class="hint">What did you eat?<br><small>e.g. "I had oatmeal and coffee for breakfast"</small></p>
       {/if}
