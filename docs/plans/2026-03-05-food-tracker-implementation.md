@@ -2029,22 +2029,183 @@ git commit -m "docs: README with GCP setup and run instructions"
 
 ---
 
+### Task 11: mise.toml — tool versions + task runner
+
+**Files:**
+- Create: `mise.toml`
+
+mise (https://mise.jdx.dev) is a polyglot tool version manager and task runner. It pins Go and Node versions and provides `mise run <task>` commands so anyone can build/run the project without knowing the exact commands.
+
+**Step 1: Create mise.toml**
+
+```toml
+[tools]
+go = "1.22"
+node = "20"
+
+[tasks.install]
+description = "Install frontend dependencies"
+run = "cd frontend && npm install"
+
+[tasks.build-frontend]
+description = "Build the Svelte frontend into frontend/dist"
+depends = ["install"]
+run = "cd frontend && npm run build"
+
+[tasks.build]
+description = "Build production Go binary (embeds frontend)"
+depends = ["build-frontend"]
+run = "go build -o foodtracker ."
+
+[tasks.dev-backend]
+description = "Run Go backend in dev mode (reads .env)"
+run = "export $(grep -v '^#' .env | xargs) && go run main.go"
+
+[tasks.dev-frontend]
+description = "Run Svelte dev server with API proxy on :5173"
+run = "cd frontend && npm run dev"
+
+[tasks.test]
+description = "Run all Go tests"
+run = "go test ./..."
+
+[tasks.run]
+description = "Build and run the production binary"
+depends = ["build"]
+run = "export $(grep -v '^#' .env | xargs) && ./foodtracker"
+
+[tasks.docker-build]
+description = "Build Docker image tagged as foodtracker:latest"
+run = "docker build -t foodtracker ."
+
+[tasks.docker-run]
+description = "Run the app in Docker (requires .env file)"
+run = "docker run --env-file .env -p 8080:8080 foodtracker"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -f foodtracker && rm -rf frontend/dist"
+```
+
+**Step 2: Verify mise is available and tasks parse correctly**
+
+```bash
+mise tasks
+```
+Expected: all tasks listed with descriptions.
+
+**Step 3: Verify tool versions are pinned**
+
+```bash
+mise ls
+```
+Expected: go 1.22 and node 20 listed.
+
+**Step 4: Commit**
+
+```bash
+git add mise.toml
+git commit -m "chore: mise.toml — tool version pins and task runner"
+```
+
+---
+
+### Task 12: Dockerfile + .dockerignore
+
+**Files:**
+- Create: `Dockerfile`
+- Create: `.dockerignore`
+
+Multi-stage build: Node builds the Svelte frontend, Go compiles the binary with the embedded dist, a minimal distroless runtime image runs it. The final image has no shell, no package manager — just the binary.
+
+**Step 1: Create .dockerignore**
+
+```
+.git
+.env
+frontend/node_modules
+frontend/dist
+foodtracker
+*.md
+docs/
+```
+
+**Step 2: Create Dockerfile**
+
+```dockerfile
+# ── Stage 1: Build Svelte frontend ────────────────────────────────────────────
+FROM node:20-alpine AS frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: Build Go binary ──────────────────────────────────────────────────
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# Bring in the built frontend so Go's embed directive finds it
+COPY --from=frontend /app/frontend/dist ./frontend/dist
+RUN CGO_ENABLED=0 GOOS=linux go build -o foodtracker .
+
+# ── Stage 3: Minimal runtime ──────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /app/foodtracker /foodtracker
+EXPOSE 8080
+ENTRYPOINT ["/foodtracker"]
+```
+
+**Step 3: Verify the Docker build works**
+
+```bash
+docker build -t foodtracker .
+```
+Expected: all three stages complete, final image built. Check image size:
+```bash
+docker images foodtracker
+```
+Expected: image is well under 50MB (distroless + static binary).
+
+**Step 4: Verify the container starts (will fail without env vars — that's expected)**
+
+```bash
+docker run --rm foodtracker
+```
+Expected: exits with "required env var GOOGLE_CLIENT_ID not set" — confirming the binary runs and env validation works.
+
+**Step 5: Commit**
+
+```bash
+git add Dockerfile .dockerignore
+git commit -m "chore: multi-stage Dockerfile + .dockerignore"
+```
+
+---
+
 ## Development workflow
 
 **Hot-reload dev mode** (two terminals):
 
 ```bash
 # Terminal 1: Svelte dev server with proxy
-cd frontend && npm run dev        # http://localhost:5173
+mise run dev-frontend      # http://localhost:5173
 
 # Terminal 2: Go backend
-export $(grep -v '^#' .env | xargs) && go run main.go
+mise run dev-backend
 ```
 
 **Production build** (single binary with embedded frontend):
 
 ```bash
-cd frontend && npm run build && cd ..
-go build -o foodtracker .
-export $(grep -v '^#' .env | xargs) && ./foodtracker
+mise run build
+mise run run
+```
+
+**Docker:**
+```bash
+mise run docker-build
+mise run docker-run
 ```
