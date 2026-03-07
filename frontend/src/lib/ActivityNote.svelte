@@ -4,8 +4,11 @@
 
   let { date } = $props()
 
-  let notes = $state('')
-  let editing = $state(false)
+  let activity = $state('')
+  let feelingScore = $state(0)
+  let feelingNotes = $state('')
+  let editingActivity = $state(false)
+  let editingFeeling = $state(false)
   let saving = $state(false)
   let saveError = $state('')
 
@@ -13,7 +16,9 @@
     if (!date) return
     try {
       const res = await getActivity(date)
-      notes = res.notes ?? ''
+      activity = res.activity ?? ''
+      feelingScore = res.feeling_score ?? 0
+      feelingNotes = res.feeling_notes ?? ''
     } catch {}
   })
 
@@ -21,9 +26,10 @@
     saving = true
     saveError = ''
     try {
-      await putActivity(date, notes)
-      editing = false
-    } catch (e) {
+      await putActivity(date, { activity, feeling_score: feelingScore, feeling_notes: feelingNotes })
+      editingActivity = false
+      editingFeeling = false
+    } catch {
       saveError = 'Failed to save. Try again.'
     } finally {
       saving = false
@@ -32,45 +38,85 @@
 
   function onKeyDown(e) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save()
-    if (e.key === 'Escape') editing = false
+    if (e.key === 'Escape') { editingActivity = false; editingFeeling = false }
   }
 </script>
 
-<div class="activity">
-  <h3>Activity / Notes</h3>
-  {#if editing}
-    <textarea
-      bind:value={notes}
-      onblur={save}
-      onkeydown={onKeyDown}
-      placeholder="What did you do today? (exercise, stress, unusual events…)"
-      rows="3"
-      autofocus
-    ></textarea>
-    {#if saving}<span class="hint">Saving…</span>{/if}
-    {#if saveError}<span class="hint error">{saveError}</span>{/if}
-  {:else}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="note" class:placeholder={!notes} onclick={() => editing = true}>
-      {notes || 'Tap to add activity notes…'}
-    </div>
-  {/if}
+<div class="day-notes">
+  <div class="section">
+    <h3>Activity</h3>
+    {#if editingActivity}
+      <textarea
+        bind:value={activity}
+        onblur={save}
+        onkeydown={onKeyDown}
+        placeholder="Exercise, stress, unusual events…"
+        rows="2"
+        autofocus
+      ></textarea>
+    {:else}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="note" class:placeholder={!activity} onclick={() => editingActivity = true}>
+        {activity || 'Tap to add activity…'}
+      </div>
+    {/if}
+  </div>
+
+  <div class="section">
+    <h3>Feeling</h3>
+    {#if editingFeeling}
+      <div class="feeling-edit">
+        <div class="score-row">
+          <span class="score-label">Score (1–10)</span>
+          <input
+            type="number"
+            min="1"
+            max="10"
+            bind:value={feelingScore}
+            onblur={save}
+          />
+        </div>
+        <textarea
+          bind:value={feelingNotes}
+          onblur={save}
+          onkeydown={onKeyDown}
+          placeholder="Energy, digestion, mood, sleep…"
+          rows="2"
+        ></textarea>
+      </div>
+    {:else}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="note" class:placeholder={!feelingScore && !feelingNotes} onclick={() => editingFeeling = true}>
+        {#if feelingScore}
+          <span class="score">{feelingScore}/10</span>{#if feelingNotes} — {feelingNotes}{/if}
+        {:else}
+          {feelingNotes || 'Tap to add how you were feeling…'}
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  {#if saving}<p class="hint">Saving…</p>{/if}
+  {#if saveError}<p class="hint error">{saveError}</p>{/if}
 </div>
 
 <style>
-  .activity {
+  .day-notes {
     margin-top: 2rem;
-    padding-top: 1.25rem;
     border-top: 1px solid #e8e8e6;
+    padding-top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
   }
 
-  h3 {
+  .section h3 {
     text-transform: uppercase;
     font-size: 0.68rem;
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
   }
 
   .note {
@@ -86,9 +132,41 @@
     color: #bbb;
   }
 
+  .score {
+    font-weight: 500;
+  }
+
+  .feeling-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .score-label {
+    font-size: 0.82rem;
+    color: #888;
+  }
+
+  .score-row input {
+    width: 56px;
+    border: none;
+    border-bottom: 2px solid #2d2d2d;
+    padding: 2px 4px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    background: transparent;
+    outline: none;
+  }
+
   textarea {
     width: 100%;
-    border: 1px solid #e8e8e6;
+    border: none;
     border-bottom: 2px solid #2d2d2d;
     border-radius: 0;
     padding: 0.4rem 0;
