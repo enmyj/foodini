@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -238,6 +239,28 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	}
 
 	return created.SpreadsheetId, nil
+}
+
+// FindExistingSpreadsheet searches the user's Drive for a previously-created
+// "Food Tracker — {email}" spreadsheet. Returns ("", nil) if none found.
+// Uses drive.file scope so only finds files created by this app.
+func FindExistingSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail string) (string, error) {
+	driveSvc, err := drive.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return "", fmt.Errorf("drive client: %w", err)
+	}
+	// Escape single quotes in email (rare but possible)
+	escapedEmail := strings.ReplaceAll(userEmail, "'", "\\'")
+	title := fmt.Sprintf("Food Tracker \u2014 %s", escapedEmail) // \u2014 = em dash —
+	q := fmt.Sprintf("name='%s' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false", title)
+	list, err := driveSvc.Files.List().Q(q).Fields("files(id)").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("drive list: %w", err)
+	}
+	if len(list.Files) == 0 {
+		return "", nil
+	}
+	return list.Files[0].Id, nil
 }
 
 // AppendFood appends a food entry row.
