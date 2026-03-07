@@ -1,11 +1,12 @@
 <script>
-  import { chat } from './api.js'
+  import { chat, confirmChat } from './api.js'
 
   let { open, onClose, onEntriesAdded } = $props()
 
   let messages = $state([])
   let input = $state('')
   let sending = $state(false)
+  let pendingEntries = $state(null)
   let inputEl = $state(null)
   let messagesEl = $state(null)
 
@@ -15,14 +16,13 @@
     } else {
       messages = []
       input = ''
+      pendingEntries = null
     }
   })
 
   $effect(() => {
-    messages // track
-    if (messagesEl) {
-      messagesEl.scrollTop = messagesEl.scrollHeight
-    }
+    messages
+    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
   })
 
   async function send() {
@@ -30,10 +30,14 @@
     if (!text || sending) return
     messages = [...messages, { role: 'user', text }]
     input = ''
+    pendingEntries = null
     sending = true
     try {
       const res = await chat(text)
-      if (res.done) {
+      if (res.pending) {
+        pendingEntries = res.entries
+        messages = [...messages, { role: 'assistant', text: res.message }]
+      } else if (res.done) {
         onEntriesAdded(res.entries)
       } else {
         messages = [...messages, { role: 'assistant', text: res.message }]
@@ -42,6 +46,20 @@
       messages = [...messages, { role: 'assistant', text: 'Something went wrong. Please try again.' }]
     } finally {
       sending = false
+    }
+  }
+
+  async function confirm() {
+    if (!pendingEntries || sending) return
+    sending = true
+    try {
+      const res = await confirmChat(pendingEntries)
+      onEntriesAdded(res.entries)
+    } catch {
+      messages = [...messages, { role: 'assistant', text: 'Failed to save. Please try again.' }]
+    } finally {
+      sending = false
+      pendingEntries = null
     }
   }
 
@@ -80,6 +98,11 @@
       ></textarea>
       <button onclick={send} disabled={sending || !input.trim()}>Send</button>
     </div>
+    {#if pendingEntries}
+      <button class="confirm-btn" onclick={confirm} disabled={sending}>
+        Looks good, save it
+      </button>
+    {/if}
   </div>
 {/if}
 
@@ -192,6 +215,30 @@
   }
 
   button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .confirm-btn {
+    width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.6rem 1rem;
+    background: #fafaf9;
+    color: #2d2d2d;
+    border: 1px solid #2d2d2d;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    font-weight: 500;
+  }
+
+  .confirm-btn:hover {
+    background: #2d2d2d;
+    color: #fafaf9;
+  }
+
+  .confirm-btn:disabled {
     opacity: 0.35;
     cursor: default;
   }
