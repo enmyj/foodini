@@ -51,19 +51,66 @@
     {#if saveError}<span class="hint error">{saveError}</span>{/if}
   {:else}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="note" onclick={() => editing = true}>
+    <div class="note" class:placeholder={!notes} onclick={() => editing = true}>
       {notes || 'Tap to add activity notes…'}
     </div>
   {/if}
 </div>
 
 <style>
-  .activity { margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid #eee; }
-  h3 { font-size: 0.75rem; color: #999; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
-  .note { color: #555; font-size: 0.9rem; cursor: pointer; line-height: 1.5; min-height: 1.5rem; padding: 0.2rem 0; }
-  .note:hover { color: #888; }
-  textarea { width: 100%; border: 1px solid #4285f4; border-radius: 6px; padding: 0.5rem; font-size: 0.9rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
-  textarea:focus { outline: none; }
-  .hint { font-size: 0.78rem; color: #aaa; }
-  .hint.error { color: #c62828; }
+  .activity {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #e8e8e6;
+  }
+
+  h3 {
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    color: #888;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .note {
+    color: #1c1c1c;
+    font-size: 0.9rem;
+    cursor: pointer;
+    line-height: 1.55;
+    min-height: 1.55rem;
+    padding: 0.2rem 0;
+  }
+
+  .note.placeholder {
+    color: #bbb;
+  }
+
+  textarea {
+    width: 100%;
+    border: 1px solid #e8e8e6;
+    border-bottom: 2px solid #2d2d2d;
+    border-radius: 0;
+    padding: 0.4rem 0;
+    font-size: 0.9rem;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+    background: transparent;
+    color: #1c1c1c;
+  }
+
+  textarea:focus {
+    outline: none;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #aaa;
+    margin-top: 0.25rem;
+  }
+
+  .hint.error {
+    color: #b91c1c;
+  }
 </style>
