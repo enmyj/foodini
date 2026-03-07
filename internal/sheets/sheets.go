@@ -105,6 +105,51 @@ func DayLogFromRow(row []interface{}) DayLog {
 	return d
 }
 
+// UserProfile stores user context for improving Gemini macro estimates.
+// Stored in the Profile sheet as a single data row: gender | height | weight | notes
+type UserProfile struct {
+	Gender string `json:"gender"`
+	Height string `json:"height"`
+	Weight string `json:"weight"`
+	Notes  string `json:"notes"`
+}
+
+func (p UserProfile) ToRow() []interface{} {
+	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes}
+}
+
+func UserProfileFromRow(row []interface{}) UserProfile {
+	str := func(i int) string {
+		if i < len(row) {
+			return fmt.Sprintf("%v", row[i])
+		}
+		return ""
+	}
+	return UserProfile{Gender: str(0), Height: str(1), Weight: str(2), Notes: str(3)}
+}
+
+// GetProfile reads the user profile from the Profile sheet.
+// Returns an empty UserProfile if no data has been saved yet.
+func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:D2").Context(ctx).Do()
+	if err != nil {
+		return UserProfile{}, fmt.Errorf("get profile: %w", err)
+	}
+	if len(resp.Values) == 0 {
+		return UserProfile{}, nil
+	}
+	return UserProfileFromRow(resp.Values[0]), nil
+}
+
+// SetProfile writes the user profile to the Profile sheet (row 2).
+func (s *Service) SetProfile(ctx context.Context, p UserProfile) error {
+	vr := &googlesheets.ValueRange{Values: [][]interface{}{p.ToRow()}}
+	_, err := s.svc.Spreadsheets.Values.Update(
+		s.spreadsheetID, profileSheet+"!A2:D2", vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
 // Service wraps the Sheets API scoped to one user's spreadsheet.
 type Service struct {
 	svc           *googlesheets.Service

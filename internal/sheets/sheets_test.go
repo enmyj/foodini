@@ -157,3 +157,21 @@ func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 		t.Errorf("CurrentSchemaVersion: got %d, want 1", sheets.CurrentSchemaVersion)
 	}
 }
+
+func TestUserProfileRoundTrip(t *testing.T) {
+	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian"}
+	row := p.ToRow()
+	if len(row) != 4 {
+		t.Fatalf("want 4 cols, got %d", len(row))
+	}
+	if row[0] != "male" {
+		t.Errorf("gender: got %v", row[0])
+	}
+	if row[3] != "vegetarian" {
+		t.Errorf("notes: got %v", row[3])
+	}
+	got := sheets.UserProfileFromRow(row)
+	if got.Height != "5'10\"" {
+		t.Errorf("height round-trip: got %q", got.Height)
+	}
+}
