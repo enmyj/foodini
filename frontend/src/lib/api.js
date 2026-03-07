@@ -15,6 +15,16 @@ export async function chat(message) {
   return res.json()
 }
 
+export async function confirmChat(entries) {
+  const res = await fetch('/api/chat/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function patchEntry(id, entry) {
   const res = await fetch(`/api/entries/${id}`, {
     method: 'PATCH',
@@ -28,14 +38,14 @@ export async function patchEntry(id, entry) {
 export async function getActivity(date) {
   const res = await fetch(`/api/activity?date=${date}`)
   if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return res.json() // returns {date, activity, feeling_score, feeling_notes}
 }
 
-export async function putActivity(date, notes) {
+export async function putActivity(date, { activity, feeling_score, feeling_notes }) {
   const res = await fetch('/api/activity', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date, notes }),
+    body: JSON.stringify({ date, activity, feeling_score, feeling_notes }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
