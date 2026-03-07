@@ -20,8 +20,8 @@ func TestFoodEntryToRow(t *testing.T) {
 		Fat:         6,
 	}
 	row := e.ToRow()
-	if len(row) != 9 {
-		t.Fatalf("want 9 columns, got %d", len(row))
+	if len(row) != 10 {
+		t.Fatalf("want 10 columns, got %d", len(row))
 	}
 	if row[0] != "abc-123" {
 		t.Errorf("col 0 (id): got %q", row[0])
@@ -111,5 +111,42 @@ func TestDayLogToRow(t *testing.T) {
 	}
 	if row[2] != "8" {
 		t.Errorf("col 2 (feeling_score): got %v", row[2])
+	}
+}
+
+func TestFoodEntryFiber_ToRow(t *testing.T) {
+	e := sheets.FoodEntry{
+		ID: "x", Date: "2026-03-07", Time: "12:00", MealType: "lunch",
+		Description: "salad", Calories: 200, Protein: 5, Carbs: 20, Fat: 8, Fiber: 4,
+	}
+	row := e.ToRow()
+	if len(row) != 10 {
+		t.Fatalf("want 10 cols, got %d", len(row))
+	}
+	if row[9] != "4" {
+		t.Errorf("col 9 (fiber): got %v, want 4", row[9])
+	}
+}
+
+func TestFoodEntryFromRow_FiberBackwardCompat(t *testing.T) {
+	// 9-col row (no fiber column) → Fiber defaults to 0
+	row := []interface{}{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8"}
+	e, err := sheets.FoodEntryFromRow(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Fiber != 0 {
+		t.Errorf("fiber: got %d, want 0", e.Fiber)
+	}
+}
+
+func TestFoodEntryFromRow_WithFiber(t *testing.T) {
+	row := []interface{}{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8", "4"}
+	e, err := sheets.FoodEntryFromRow(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Fiber != 4 {
+		t.Errorf("fiber: got %d, want 4", e.Fiber)
 	}
 }

@@ -28,31 +28,36 @@ type FoodEntry struct {
 	Protein     int    `json:"protein"`
 	Carbs       int    `json:"carbs"`
 	Fat         int    `json:"fat"`
+	Fiber       int    `json:"fiber"`
 }
 
 func (e FoodEntry) ToRow() []interface{} {
 	return []interface{}{
 		e.ID, e.Date, e.Time, e.MealType, e.Description,
 		strconv.Itoa(e.Calories), strconv.Itoa(e.Protein),
-		strconv.Itoa(e.Carbs), strconv.Itoa(e.Fat),
+		strconv.Itoa(e.Carbs), strconv.Itoa(e.Fat), strconv.Itoa(e.Fiber),
 	}
 }
 
 func FoodEntryFromRow(row []interface{}) (*FoodEntry, error) {
 	if len(row) < 9 {
-		return nil, fmt.Errorf("row has %d columns, need 9", len(row))
+		return nil, fmt.Errorf("row has %d columns, need at least 9", len(row))
 	}
 	str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
 	num := func(v interface{}) int {
 		n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
 		return n
 	}
-	return &FoodEntry{
+	e := &FoodEntry{
 		ID: str(row[0]), Date: str(row[1]), Time: str(row[2]),
 		MealType: str(row[3]), Description: str(row[4]),
 		Calories: num(row[5]), Protein: num(row[6]),
 		Carbs: num(row[7]), Fat: num(row[8]),
-	}, nil
+	}
+	if len(row) >= 10 {
+		e.Fiber = num(row[9])
+	}
+	return e, nil
 }
 
 func DateString(t time.Time) string { return t.Format("2006-01-02") }
@@ -140,10 +145,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 
 	// Write header rows
 	foodHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"id", "date", "time", "meal_type", "description", "calories", "protein", "carbs", "fat"}},
+		Values: [][]interface{}{{"id", "date", "time", "meal_type", "description", "calories", "protein", "carbs", "fat", "fiber"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, foodSheet+"!A1:I1", foodHeaders,
+		created.SpreadsheetId, foodSheet+"!A1:J1", foodHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("food headers: %w", err)
@@ -166,7 +171,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 func (s *Service) AppendFood(ctx context.Context, entry FoodEntry) error {
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{entry.ToRow()}}
 	_, err := s.svc.Spreadsheets.Values.Append(
-		s.spreadsheetID, foodSheet+"!A:I", vr,
+		s.spreadsheetID, foodSheet+"!A:J", vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err
 }
@@ -182,7 +187,7 @@ func (s *Service) GetFoodByDateRange(ctx context.Context, start, end string) ([]
 }
 
 func (s *Service) getFoodFiltered(ctx context.Context, keep func(string) bool) ([]FoodEntry, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, foodSheet+"!A:I").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, foodSheet+"!A:J").Context(ctx).Do()
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +230,7 @@ func (s *Service) UpdateFood(ctx context.Context, id string, updated FoodEntry) 
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{updated.ToRow()}}
 	_, err = s.svc.Spreadsheets.Values.Update(
 		s.spreadsheetID,
-		fmt.Sprintf("%s!A%d:I%d", foodSheet, rowNum, rowNum),
+		fmt.Sprintf("%s!A%d:J%d", foodSheet, rowNum, rowNum),
 		vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err

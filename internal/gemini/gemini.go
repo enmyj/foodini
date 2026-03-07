@@ -25,7 +25,7 @@ Your job:
 
    Then include the JSON in a code block:
 ` + "```json" + `
-   {"entries":[{"meal_type":"breakfast","description":"oatmeal with milk","calories":300,"protein":8,"carbs":54,"fat":6}]}
+   {"entries":[{"meal_type":"breakfast","description":"oatmeal with milk","calories":300,"protein":8,"carbs":54,"fat":6,"fiber":4}]}
 ` + "```" + `
 
 4. If the user says yes / ok / looks good / save it / confirm, repeat the JSON code block exactly so it can be processed.
@@ -34,7 +34,8 @@ Rules:
 - meal_type must be one of: breakfast, snack, lunch, dinner
 - All numeric values are integers (round estimates are fine)
 - Multiple foods in one meal → multiple entries, same meal_type
-- Use reasonable common serving sizes for estimates`
+- Use reasonable common serving sizes for estimates
+- Include fiber (grams) as an estimated integer (0 if unknown/negligible)`
 
 // Entry is a structured food log entry extracted from a Gemini response.
 type Entry struct {
@@ -44,6 +45,7 @@ type Entry struct {
 	Protein     int    `json:"protein"`
 	Carbs       int    `json:"carbs"`
 	Fat         int    `json:"fat"`
+	Fiber       int    `json:"fiber"`
 }
 
 // ParseEntries attempts to extract a []Entry from a Gemini response string.
