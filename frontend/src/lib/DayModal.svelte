@@ -15,13 +15,19 @@
       { calories: 0, protein: 0, carbs: 0, fat: 0 }
     )
   }
+
+  function onWindowKeyDown(e) {
+    if (e.key === 'Escape') onClose()
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKeyDown} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="overlay" onclick={onClose}></div>
-<div class="modal" role="dialog" aria-label={day.date}>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-header">
-    <h2>{day.date}</h2>
+    <h2 id="modal-title">{day.date}</h2>
     <button class="close" onclick={onClose}>✕</button>
   </div>
 
@@ -45,8 +51,9 @@
 
   <div class="modal-section">
     <h3>Food</h3>
+    {@const grouped = groupedByMeal(day.entries)}
     {#each MEAL_ORDER as meal}
-      {@const group = groupedByMeal(day.entries)[meal] ?? []}
+      {@const group = grouped[meal] ?? []}
       {#if group.length > 0}
         <div class="meal-group">
           <h4>{meal}</h4>
@@ -77,7 +84,7 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #fff;
+    background: #fafaf9;
     border-radius: 12px;
     width: min(92vw, 520px);
     max-height: 80vh;

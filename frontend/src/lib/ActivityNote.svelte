@@ -74,6 +74,7 @@
             max="10"
             bind:value={feelingScore}
             onblur={save}
+            onkeydown={onKeyDown}
           />
         </div>
         <textarea

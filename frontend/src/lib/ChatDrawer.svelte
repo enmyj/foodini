@@ -7,8 +7,8 @@
   let input = $state('')
   let sending = $state(false)
   let pendingEntries = $state(null)
-  let inputEl = $state(null)
-  let messagesEl = $state(null)
+  let inputEl = null
+  let messagesEl = null
 
   $effect(() => {
     if (open) {
@@ -22,6 +22,7 @@
 
   $effect(() => {
     messages
+    sending
     if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
   })
 
@@ -37,8 +38,6 @@
       if (res.pending) {
         pendingEntries = res.entries
         messages = [...messages, { role: 'assistant', text: res.message }]
-      } else if (res.done) {
-        onEntriesAdded(res.entries)
       } else {
         messages = [...messages, { role: 'assistant', text: res.message }]
       }
@@ -54,6 +53,7 @@
     sending = true
     try {
       const res = await confirmChat(pendingEntries)
+      messages = [...messages, { role: 'assistant', text: 'Saved!' }]
       onEntriesAdded(res.entries)
     } catch {
       messages = [...messages, { role: 'assistant', text: 'Failed to save. Please try again.' }]
@@ -119,7 +119,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: #fff;
+    background: #fafaf9;
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
     z-index: 11;
@@ -233,7 +233,7 @@
     font-weight: 500;
   }
 
-  .confirm-btn:hover {
+  .confirm-btn:not(:disabled):hover {
     background: #2d2d2d;
     color: #fafaf9;
   }
