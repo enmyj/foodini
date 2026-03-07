@@ -149,9 +149,33 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clarifying question — nothing to write to Sheets yet
 	if len(entries) == 0 {
 		WriteJSON(w, http.StatusOK, map[string]any{"done": false, "message": responseText})
+		return
+	}
+
+	// Entries detected — return pending for user confirmation, do not save yet
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"done":    false,
+		"pending": true,
+		"entries": entries,
+		"message": responseText,
+	})
+}
+
+// POST /api/chat/confirm — body: {"entries": [...]}
+// Saves confirmed entries returned from a pending chat response.
+func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+
+	var req struct {
+		Entries []sheets.FoodEntry `json:"entries"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Entries) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -163,7 +187,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	var saved []sheets.FoodEntry
-	for _, e := range entries {
+	for _, e := range req.Entries {
 		fe := sheets.FoodEntry{
 			ID:          uuid.NewString(),
 			Date:        sheets.DateString(now),
@@ -182,6 +206,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		saved = append(saved, fe)
 	}
 
+	h.gemini.ClearConversation(session.UserEmail)
 	WriteJSON(w, http.StatusOK, map[string]any{"done": true, "entries": saved})
 }
 

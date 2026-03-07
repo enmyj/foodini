@@ -24,7 +24,7 @@ func main() {
 	}
 
 	authHandler := auth.NewHandler(cfg)
-	apiHandler := api.NewHandler(authHandler)
+	apiHandler := api.NewHandler(authHandler, requireEnv("GEMINI_API_KEY"))
 
 	mux := http.NewServeMux()
 
@@ -38,6 +38,7 @@ func main() {
 	mux.HandleFunc("GET /api/activity", apiHandler.Authenticated(apiHandler.GetActivity))
 	mux.HandleFunc("PUT /api/activity", apiHandler.Authenticated(apiHandler.PutActivity))
 	mux.HandleFunc("POST /api/chat", apiHandler.Authenticated(apiHandler.Chat))
+	mux.HandleFunc("POST /api/chat/confirm", apiHandler.Authenticated(apiHandler.ConfirmChat))
 	mux.HandleFunc("PATCH /api/entries/{id}", apiHandler.Authenticated(apiHandler.PatchEntry))
 
 	// Serve Svelte SPA
