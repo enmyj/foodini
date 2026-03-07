@@ -26,10 +26,39 @@
 {/if}
 
 <style>
-  :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
-  :global(body) { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-  .center { display: flex; align-items: center; justify-content: center; height: 100vh; color: #888; }
-  .login { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 1.5rem; }
-  .login h1 { font-size: 1.75rem; color: #333; }
-  .btn { padding: 0.75rem 1.5rem; background: #4285f4; color: white; border-radius: 4px; text-decoration: none; font-size: 1rem; }
+  .center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    color: #888;
+    font-size: 0.9rem;
+  }
+  .login {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    gap: 2rem;
+  }
+  .login h1 {
+    font-size: 1.4rem;
+    font-weight: 500;
+    color: #1c1c1c;
+    letter-spacing: -0.01em;
+  }
+  .btn {
+    padding: 0.6rem 1.25rem;
+    border: 1px solid #2d2d2d;
+    color: #2d2d2d;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.9rem;
+    letter-spacing: 0.01em;
+  }
+  .btn:hover {
+    background: #2d2d2d;
+    color: #fafaf9;
+  }
 </style>
