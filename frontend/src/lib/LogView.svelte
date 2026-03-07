@@ -12,11 +12,12 @@
   let loading = $state(true)
   let drawerOpen = $state(false)
   let selectedDay = $state(null)
+  let drawerDate = $state(null)
 
   async function load() {
     loading = true
     try {
-      data = await getLog({ week: view === 'week' })
+      data = await getLog(view === 'history' ? { days: 30 } : {})
     } finally {
       loading = false
     }
@@ -49,6 +50,15 @@
     data = { ...data, entries: data.entries.map(e => e.id === updated.id ? updated : e) }
   }
 
+  function handleDelete(id) {
+    data = { ...data, entries: (data.entries ?? []).filter(e => e.id !== id) }
+  }
+
+  function openDrawerForDate(date) {
+    drawerDate = date
+    drawerOpen = true
+  }
+
   function onEntriesAdded(newEntries) {
     data = { ...data, entries: [...(data.entries ?? []), ...newEntries] }
     drawerOpen = false
@@ -61,8 +71,8 @@
   <header>
     <div class="header-top">
       <div class="toggle">
-        <button class:active={view === 'today'} onclick={() => { view = 'today'; selectedDay = null }}>Today</button>
-        <button class:active={view === 'week'} onclick={() => view = 'week'}>Week</button>
+        <button class:active={view === 'today'} onclick={() => { view = 'today'; selectedDay = null; drawerDate = null }}>Today</button>
+        <button class:active={view === 'history'} onclick={() => view = 'history'}>History</button>
       </div>
     </div>
     {#if data?.entries}
@@ -84,7 +94,7 @@
       <section>
         <h3>{meal}</h3>
         {#each group as entry}
-          <EntryRow {entry} onUpdate={handleUpdate} />
+          <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
           <p class="empty">Nothing logged</p>
         {/each}
@@ -103,13 +113,23 @@
       </div>
     {/each}
     {#if selectedDay}
-      <DayModal day={selectedDay} onClose={() => selectedDay = null} />
+      <DayModal
+        day={selectedDay}
+        onClose={() => selectedDay = null}
+        onDelete={handleDelete}
+        onAddFood={openDrawerForDate}
+      />
     {/if}
   {/if}
 </div>
 
 <button class="fab" onclick={() => drawerOpen = true} aria-label="Add food">+</button>
-<ChatDrawer open={drawerOpen} onClose={() => drawerOpen = false} {onEntriesAdded} />
+<ChatDrawer
+  open={drawerOpen}
+  onClose={() => { drawerOpen = false; drawerDate = null }}
+  {onEntriesAdded}
+  date={drawerDate}
+/>
 
 <style>
   .wrap {
