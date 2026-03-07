@@ -309,6 +309,60 @@ func (s *Service) UpdateFood(ctx context.Context, id string, updated FoodEntry) 
 	return err
 }
 
+// DeleteFood removes the food entry row with the given ID from the Food sheet.
+func (s *Service) DeleteFood(ctx context.Context, id string) error {
+	// Get spreadsheet metadata to find the numeric sheetId for the Food sheet
+	ss, err := s.svc.Spreadsheets.Get(s.spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get spreadsheet: %w", err)
+	}
+	var sheetID int64 = -1
+	for _, sh := range ss.Sheets {
+		if sh.Properties.Title == foodSheet {
+			sheetID = sh.Properties.SheetId
+			break
+		}
+	}
+	if sheetID < 0 {
+		return fmt.Errorf("food sheet not found")
+	}
+
+	// Find the row index (0-based) for the given ID
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, foodSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get ids: %w", err)
+	}
+	rowIdx := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue // skip header
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		return fmt.Errorf("entry %q not found", id)
+	}
+
+	// Delete the row using batchUpdate
+	req := &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			DeleteDimension: &googlesheets.DeleteDimensionRequest{
+				Range: &googlesheets.DimensionRange{
+					SheetId:    sheetID,
+					Dimension:  "ROWS",
+					StartIndex: int64(rowIdx),
+					EndIndex:   int64(rowIdx + 1),
+				},
+			},
+		}},
+	}
+	_, err = s.svc.Spreadsheets.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do()
+	return err
+}
+
 // GetActivity returns the DayLog for the given date, or an empty DayLog if none.
 func (s *Service) GetActivity(ctx context.Context, date string) (DayLog, error) {
 	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:D").Context(ctx).Do()

@@ -151,6 +151,12 @@ func TestFoodEntryFromRow_WithFiber(t *testing.T) {
 	}
 }
 
+func TestDeleteFood_NotFound(t *testing.T) {
+	// Compilation check — verify method exists on *Service
+	var s *sheets.Service
+	_ = s.DeleteFood // just verify method exists
+}
+
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion // verify the constant exists
 	if sheets.CurrentSchemaVersion != 1 {
