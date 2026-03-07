@@ -61,7 +61,7 @@
   <header>
     <div class="header-top">
       <div class="toggle">
-        <button class:active={view === 'today'} onclick={() => view = 'today'}>Today</button>
+        <button class:active={view === 'today'} onclick={() => { view = 'today'; selectedDay = null }}>Today</button>
         <button class:active={view === 'week'} onclick={() => view = 'week'}>Week</button>
       </div>
     </div>
@@ -201,7 +201,7 @@
   }
 
   .week-row:hover {
-    background: #faf9f8;
+    background: #fafaf9;
   }
 
   .date {
