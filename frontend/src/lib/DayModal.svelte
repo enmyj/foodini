@@ -1,5 +1,5 @@
 <script>
-  let { day, onClose } = $props()
+  let { day, onClose, onDelete = null, onAddFood = null } = $props()
 
   const MEAL_ORDER = ['breakfast', 'snack', 'lunch', 'dinner']
 
@@ -59,7 +59,10 @@
           {#each group as entry}
             <div class="entry-row">
               <span class="entry-desc">{entry.description}</span>
-              <span class="entry-macros">{entry.calories} cal · {entry.protein}g P</span>
+              <span class="entry-macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F · {entry.fiber ?? 0}g Fb</span>
+              {#if onDelete}
+                <button class="entry-del" onclick={() => onDelete(entry.id)} aria-label="Delete">×</button>
+              {/if}
             </div>
           {/each}
         </div>
@@ -68,6 +71,11 @@
     {#each [totals(day.entries)] as t}
       <div class="day-totals">{t.calories} cal · {t.protein}g P · {t.carbs}g C · {t.fat}g F</div>
     {/each}
+    {#if onAddFood}
+      <button class="add-food-btn" onclick={() => onAddFood(day.date)}>
+        + Add food for this day
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -163,6 +171,7 @@
   .entry-row {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     padding: 0.3rem 0;
     font-size: 0.88rem;
     border-bottom: 1px solid #f3f3f2;
@@ -183,5 +192,38 @@
     font-size: 0.8rem;
     color: #888;
     font-weight: 500;
+  }
+
+  .entry-del {
+    background: none;
+    border: none;
+    color: #ccc;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0 0.15rem;
+    margin-left: 0.5rem;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .entry-del:hover {
+    color: #888;
+  }
+
+  .add-food-btn {
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.5rem 1rem;
+    background: #fafaf9;
+    color: #2d2d2d;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-family: inherit;
+  }
+
+  .add-food-btn:hover {
+    border-color: #2d2d2d;
   }
 </style>
