@@ -1,7 +1,7 @@
 <script>
   import { chat, confirmChat } from './api.js'
 
-  let { open, onClose, onEntriesAdded } = $props()
+  let { open, onClose, onEntriesAdded, date = null } = $props()
 
   let messages = $state([])
   let input = $state('')
@@ -34,7 +34,7 @@
     pendingEntries = null
     sending = true
     try {
-      const res = await chat(text)
+      const res = await chat(text, date)
       if (res.pending) {
         pendingEntries = res.entries
         messages = [...messages, { role: 'assistant', text: res.message }]
@@ -52,7 +52,7 @@
     if (!pendingEntries || sending) return
     sending = true
     try {
-      const res = await confirmChat(pendingEntries)
+      const res = await confirmChat(pendingEntries, date)
       messages = [...messages, { role: 'assistant', text: 'Saved!' }]
       onEntriesAdded(res.entries)
     } catch {
