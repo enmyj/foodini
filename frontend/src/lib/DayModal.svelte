@@ -51,9 +51,8 @@
 
   <div class="modal-section">
     <h3>Food</h3>
-    {@const grouped = groupedByMeal(day.entries)}
     {#each MEAL_ORDER as meal}
-      {@const group = grouped[meal] ?? []}
+      {@const group = (groupedByMeal(day.entries))[meal] ?? []}
       {#if group.length > 0}
         <div class="meal-group">
           <h4>{meal}</h4>
@@ -66,8 +65,9 @@
         </div>
       {/if}
     {/each}
-    {@const t = totals(day.entries)}
-    <div class="day-totals">{t.calories} cal · {t.protein}g P · {t.carbs}g C · {t.fat}g F</div>
+    {#each [totals(day.entries)] as t}
+      <div class="day-totals">{t.calories} cal · {t.protein}g P · {t.carbs}g C · {t.fat}g F</div>
+    {/each}
   </div>
 </div>
 

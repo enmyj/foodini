@@ -3,6 +3,7 @@
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
+  import DayModal from './DayModal.svelte'
 
   const MEAL_ORDER = ['breakfast', 'snack', 'lunch', 'dinner']
 
@@ -10,6 +11,7 @@
   let data = $state(null)
   let loading = $state(true)
   let drawerOpen = $state(false)
+  let selectedDay = $state(null)
 
   async function load() {
     loading = true
@@ -91,15 +93,18 @@
     <ActivityNote date={data?.date} />
   {:else}
     {#each Object.entries(groupedByDate(data?.entries ?? [])).sort() as [date, entries]}
-      {@const t = totals(entries)}
-      <div class="week-row">
+      {@const dayLog = (data?.daily_logs ?? []).find(d => d.date === date) ?? null}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="week-row" onclick={() => selectedDay = { date, entries, dayLog }}>
         <span class="date">{date}</span>
-        <span>{t.calories} cal</span>
-        <span>{t.protein}g P</span>
-        <span>{t.carbs}g C</span>
-        <span>{t.fat}g F</span>
+        <span class="feeling-score">{dayLog?.feeling_score ? `${dayLog.feeling_score}/10` : '—'}</span>
+        <span class="activity-tick">{dayLog?.activity ? '✓' : ''}</span>
+        <span class="chevron">›</span>
       </div>
     {/each}
+    {#if selectedDay}
+      <DayModal day={selectedDay} onClose={() => selectedDay = null} />
+    {/if}
   {/if}
 </div>
 
@@ -188,18 +193,41 @@
   .week-row {
     display: flex;
     justify-content: space-between;
-    padding: 0.65rem 0;
+    align-items: center;
+    padding: 0.75rem 0;
     border-bottom: 1px solid #e8e8e6;
-    font-size: 0.88rem;
-    color: #1c1c1c;
+    cursor: pointer;
+    gap: 1rem;
+  }
+
+  .week-row:hover {
+    background: #faf9f8;
   }
 
   .date {
     font-weight: 500;
+    font-size: 0.88rem;
+    flex: 1;
   }
 
-  .week-row span:not(.date) {
+  .feeling-score {
+    font-size: 0.88rem;
     color: #888;
+    min-width: 3rem;
+    text-align: right;
+  }
+
+  .activity-tick {
+    font-size: 0.82rem;
+    color: #2d2d2d;
+    min-width: 1rem;
+    text-align: center;
+  }
+
+  .chevron {
+    color: #ccc;
+    font-size: 1.1rem;
+    line-height: 1;
   }
 
   .fab {
