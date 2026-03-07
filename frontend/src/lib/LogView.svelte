@@ -57,9 +57,11 @@
 
 <div class="wrap">
   <header>
-    <div class="toggle">
-      <button class:active={view === 'today'} onclick={() => view = 'today'}>Today</button>
-      <button class:active={view === 'week'} onclick={() => view = 'week'}>Week</button>
+    <div class="header-top">
+      <div class="toggle">
+        <button class:active={view === 'today'} onclick={() => view = 'today'}>Today</button>
+        <button class:active={view === 'week'} onclick={() => view = 'week'}>Week</button>
+      </div>
     </div>
     {#if data?.entries}
       {@const t = totals(data.entries)}
@@ -105,18 +107,121 @@
 <ChatDrawer open={drawerOpen} onClose={() => drawerOpen = false} {onEntriesAdded} />
 
 <style>
-  .wrap { max-width: 640px; margin: 0 auto; padding: 1rem; padding-bottom: 6rem; }
-  header { position: sticky; top: 0; background: white; padding: 0.75rem 0; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-  .toggle button { padding: 0.3rem 0.85rem; border: 1px solid #ddd; background: none; cursor: pointer; font-size: 0.9rem; }
-  .toggle button:first-child { border-radius: 4px 0 0 4px; }
-  .toggle button:last-child { border-radius: 0 4px 4px 0; }
-  .toggle button.active { background: #4285f4; color: white; border-color: #4285f4; }
-  .totals { display: flex; gap: 0.75rem; font-size: 0.82rem; font-weight: 500; color: #333; }
-  section { margin: 1.25rem 0; }
-  h3 { text-transform: capitalize; font-size: 0.75rem; color: #999; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
-  .empty { color: #ccc; font-size: 0.85rem; font-style: italic; padding: 0.25rem 0; }
-  .state { color: #aaa; text-align: center; margin-top: 3rem; }
-  .week-row { display: flex; justify-content: space-between; padding: 0.6rem 0; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; }
-  .date { font-weight: 500; }
-  .fab { position: fixed; bottom: 2rem; right: 2rem; width: 3.5rem; height: 3.5rem; border-radius: 50%; background: #4285f4; color: white; font-size: 2rem; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; line-height: 1; }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 1.25rem 6rem;
+  }
+
+  header {
+    position: sticky;
+    top: 0;
+    background: #fafaf9;
+    padding: 1rem 0 0.75rem;
+    border-bottom: 1px solid #e8e8e6;
+    margin-bottom: 1.25rem;
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+  }
+
+  .toggle {
+    display: flex;
+    gap: 1.25rem;
+  }
+
+  .toggle button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0 0 0.2rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #888;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .toggle button.active {
+    color: #1c1c1c;
+    border-bottom-color: #2d2d2d;
+  }
+
+  .totals {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.78rem;
+    color: #888;
+    padding-bottom: 0.1rem;
+  }
+
+  section {
+    margin: 1.5rem 0;
+  }
+
+  h3 {
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    color: #888;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .empty {
+    color: #bbb;
+    font-size: 0.85rem;
+    padding: 0.3rem 0;
+  }
+
+  .state {
+    color: #aaa;
+    text-align: center;
+    margin-top: 4rem;
+    font-size: 0.9rem;
+  }
+
+  .week-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid #e8e8e6;
+    font-size: 0.88rem;
+    color: #1c1c1c;
+  }
+
+  .date {
+    font-weight: 500;
+  }
+
+  .week-row span:not(.date) {
+    color: #888;
+  }
+
+  .fab {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 50%;
+    background: #2d2d2d;
+    color: #fafaf9;
+    font-size: 1.75rem;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .fab:hover {
+    background: #1c1c1c;
+  }
 </style>
