@@ -40,6 +40,9 @@ func main() {
 	mux.HandleFunc("POST /api/chat", apiHandler.Authenticated(apiHandler.Chat))
 	mux.HandleFunc("POST /api/chat/confirm", apiHandler.Authenticated(apiHandler.ConfirmChat))
 	mux.HandleFunc("PATCH /api/entries/{id}", apiHandler.Authenticated(apiHandler.PatchEntry))
+	mux.HandleFunc("DELETE /api/entries/{id}", apiHandler.Authenticated(apiHandler.DeleteEntry))
+	mux.HandleFunc("GET /api/profile", apiHandler.Authenticated(apiHandler.GetProfile))
+	mux.HandleFunc("PUT /api/profile", apiHandler.Authenticated(apiHandler.PutProfile))
 
 	// Serve Svelte SPA
 	distFS, err := fs.Sub(frontendDist, "frontend/dist")

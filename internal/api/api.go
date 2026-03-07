@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,25 +44,73 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
+// formatProfileContext builds the profile preamble injected into Gemini's system prompt.
+// Returns "" if all profile fields are empty.
+func formatProfileContext(p sheets.UserProfile) string {
+	var parts []string
+	if p.Gender != "" {
+		parts = append(parts, p.Gender)
+	}
+	if p.Height != "" {
+		parts = append(parts, p.Height)
+	}
+	if p.Weight != "" {
+		parts = append(parts, p.Weight)
+	}
+	if len(parts) == 0 && p.Notes == "" {
+		return ""
+	}
+	ctx := "User profile: " + strings.Join(parts, ", ")
+	if p.Notes != "" {
+		ctx += ". " + p.Notes
+	}
+	return ctx
+}
+
 func (h *Handler) sheetsSvc(r *http.Request, session *auth.Session) (*sheets.Service, error) {
 	ts := h.auth.TokenSource(r.Context(), session)
 	return sheets.NewService(r.Context(), ts, session.SpreadsheetID)
 }
 
-// ensureSpreadsheet creates the user's spreadsheet on first login.
-// Updates the session cookie with the new spreadsheet ID.
+// ensureSpreadsheet finds or creates the user's spreadsheet.
+// Updates the session cookie with the spreadsheet ID.
 // Returns false and writes an error response if it fails.
 func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, session *auth.Session) bool {
 	if session.SpreadsheetID != "" {
 		return true
 	}
 	ts := h.auth.TokenSource(r.Context(), session)
-	id, err := sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
+
+	// Search Drive for an existing spreadsheet from a previous session
+	id, err := sheets.FindExistingSpreadsheet(r.Context(), ts, session.UserEmail)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to create spreadsheet: "+err.Error())
+		writeErr(w, http.StatusInternalServerError, "failed to search for spreadsheet: "+err.Error())
 		return false
 	}
-	session.SpreadsheetID = id
+
+	if id != "" {
+		// Found an existing spreadsheet — check its schema version
+		svc, err := sheets.NewService(r.Context(), ts, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		version, err := svc.GetSchemaVersion(r.Context())
+		if err != nil || version < sheets.CurrentSchemaVersion {
+			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
+			return false
+		}
+		session.SpreadsheetID = id
+	} else {
+		// No existing spreadsheet — create a new one
+		id, err = sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "failed to create spreadsheet: "+err.Error())
+			return false
+		}
+		session.SpreadsheetID = id
+	}
+
 	if err := h.auth.SetSession(w, session); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session save failed")
 		return false
@@ -84,8 +133,12 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 
 	today := sheets.DateString(time.Now())
 
-	if r.URL.Query().Get("week") == "true" {
-		start := sheets.DateString(time.Now().AddDate(0, 0, -6))
+	if daysStr := r.URL.Query().Get("days"); daysStr != "" {
+		days, err := strconv.Atoi(daysStr)
+		if err != nil || days < 1 || days > 365 {
+			days = 30
+		}
+		start := sheets.DateString(time.Now().AddDate(0, 0, -(days - 1)))
 		entries, err := svc.GetFoodByDateRange(r.Context(), start, today)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -126,9 +179,9 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/chat — body: {"message": "..."}
+// POST /api/chat — body: {"message": "...", "date": "YYYY-MM-DD"}
 // Returns {"done": false, "message": "..."} for clarifying questions.
-// Returns {"done": true, "entries": [...]} when entries are logged.
+// Returns {"done": false, "pending": true, "entries": [...]} when entries are ready for confirmation.
 func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
 	if !h.ensureSpreadsheet(w, r, session) {
@@ -137,13 +190,28 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Message string `json:"message"`
+		Date    string `json:"date"` // optional; defaults to today
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Message) == "" {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, req.Message)
+	targetDate := req.Date
+	if targetDate == "" {
+		targetDate = sheets.DateString(time.Now())
+	}
+
+	// Fetch user profile for Gemini context (ignore errors — use empty profile)
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	profile, _ := svc.GetProfile(r.Context())
+	profileCtx := formatProfileContext(profile)
+
+	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, req.Message, profileCtx)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
@@ -154,7 +222,6 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Entries detected — return pending for user confirmation, do not save yet
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"done":    false,
 		"pending": true,
@@ -163,7 +230,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/chat/confirm — body: {"entries": [...]}
+// POST /api/chat/confirm — body: {"entries": [...], "date": "YYYY-MM-DD"}
 // Saves confirmed entries returned from a pending chat response.
 func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
@@ -173,10 +240,16 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Entries []sheets.FoodEntry `json:"entries"`
+		Date    string             `json:"date"` // optional; defaults to today
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Entries) == 0 {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	targetDate := req.Date
+	if targetDate == "" {
+		targetDate = sheets.DateString(time.Now())
 	}
 
 	svc, err := h.sheetsSvc(r, session)
@@ -190,7 +263,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 	for _, e := range req.Entries {
 		fe := sheets.FoodEntry{
 			ID:          uuid.NewString(),
-			Date:        sheets.DateString(now),
+			Date:        targetDate,
 			Time:        sheets.TimeString(now),
 			MealType:    e.MealType,
 			Description: e.Description,
@@ -198,6 +271,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 			Protein:     e.Protein,
 			Carbs:       e.Carbs,
 			Fat:         e.Fat,
+			Fiber:       e.Fiber,
 		}
 		if err := svc.AppendFood(r.Context(), fe); err != nil {
 			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("sheet write: %v", err))
@@ -206,8 +280,64 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 		saved = append(saved, fe)
 	}
 
-	h.gemini.ClearConversation(session.UserEmail)
+	h.gemini.ClearConversation(session.UserEmail, targetDate)
 	WriteJSON(w, http.StatusOK, map[string]any{"done": true, "entries": saved})
+}
+
+// DELETE /api/entries/{id}
+func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := svc.DeleteFood(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/profile
+func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	p, err := svc.GetProfile(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, p)
+}
+
+// PUT /api/profile — body: {gender, height, weight, notes}
+func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	var req sheets.UserProfile
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := svc.SetProfile(r.Context(), req); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, req)
 }
 
 // PATCH /api/entries/{id} — body: FoodEntry JSON (all fields)
