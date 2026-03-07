@@ -91,10 +91,16 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		dailyLogs, err := svc.GetActivityByDateRange(r.Context(), start, today)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		WriteJSON(w, http.StatusOK, map[string]any{
-			"entries": entries,
-			"start":   start,
-			"end":     today,
+			"entries":    entries,
+			"daily_logs": dailyLogs,
+			"start":      start,
+			"end":        today,
 		})
 		return
 	}
@@ -108,11 +114,11 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	activity, _ := svc.GetActivity(r.Context(), date)
+	dayLog, _ := svc.GetActivity(r.Context(), date)
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"entries":  entries,
-		"activity": activity,
-		"date":     date,
+		"entries": entries,
+		"day_log": dayLog,
+		"date":    date,
 	})
 }
 
