@@ -84,18 +84,115 @@
 {/if}
 
 <style>
-  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 10; }
-  .drawer { position: fixed; bottom: 0; left: 0; right: 0; background: white; border-radius: 16px 16px 0 0; box-shadow: 0 -4px 24px rgba(0,0,0,0.12); z-index: 11; display: flex; flex-direction: column; max-height: 65vh; padding: 0.75rem 1rem 1.25rem; }
-  .handle { width: 40px; height: 4px; background: #ddd; border-radius: 2px; margin: 0 auto 0.75rem; }
-  .messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.25rem 0; }
-  .hint { color: #bbb; font-size: 0.9rem; text-align: center; margin-top: 0.5rem; line-height: 1.6; }
-  .msg { padding: 0.5rem 0.75rem; border-radius: 12px; max-width: 85%; font-size: 0.9rem; line-height: 1.4; }
-  .msg.user { background: #4285f4; color: white; align-self: flex-end; }
-  .msg.assistant { background: #f1f1f1; color: #333; align-self: flex-start; }
-  .typing { color: #bbb; }
-  .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
-  textarea { flex: 1; border: 1px solid #ddd; border-radius: 8px; padding: 0.5rem; font-size: 0.95rem; resize: none; font-family: inherit; }
-  textarea:focus { outline: none; border-color: #4285f4; }
-  button { padding: 0.5rem 1rem; background: #4285f4; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; white-space: nowrap; }
-  button:disabled { opacity: 0.45; cursor: default; }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.2);
+    z-index: 10;
+  }
+
+  .drawer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
+    z-index: 11;
+    display: flex;
+    flex-direction: column;
+    max-height: 65vh;
+    padding: 0.75rem 1.25rem 1.5rem;
+  }
+
+  .handle {
+    width: 36px;
+    height: 3px;
+    background: #e8e8e6;
+    border-radius: 2px;
+    margin: 0 auto 1rem;
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+    padding: 0.25rem 0;
+  }
+
+  .hint {
+    color: #bbb;
+    font-size: 0.88rem;
+    text-align: center;
+    margin-top: 0.5rem;
+    line-height: 1.6;
+  }
+
+  .msg {
+    padding: 0.5rem 0.75rem;
+    border-radius: 12px;
+    max-width: 85%;
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .msg.user {
+    background: #2d2d2d;
+    color: #fafaf9;
+    align-self: flex-end;
+  }
+
+  .msg.assistant {
+    background: #f3f3f2;
+    color: #1c1c1c;
+    align-self: flex-start;
+  }
+
+  .typing {
+    color: #bbb;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+  }
+
+  textarea {
+    flex: 1;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.95rem;
+    resize: none;
+    font-family: inherit;
+    background: #fafaf9;
+    color: #1c1c1c;
+  }
+
+  textarea:focus {
+    outline: none;
+    border-color: #2d2d2d;
+  }
+
+  button {
+    padding: 0.5rem 1rem;
+    background: #2d2d2d;
+    color: #fafaf9;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
 </style>
