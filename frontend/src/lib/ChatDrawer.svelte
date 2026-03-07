@@ -7,8 +7,8 @@
   let input = $state('')
   let sending = $state(false)
   let pendingEntries = $state(null)
-  let inputEl = null
-  let messagesEl = null
+  let inputEl = $state(null)
+  let messagesEl = $state(null)
 
   $effect(() => {
     if (open) {
