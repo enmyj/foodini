@@ -114,7 +114,11 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dayLog, _ := svc.GetActivity(r.Context(), date)
+	dayLog, err := svc.GetActivity(r.Context(), date)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"entries": entries,
 		"day_log": dayLog,
