@@ -58,6 +58,44 @@ func FoodEntryFromRow(row []interface{}) (*FoodEntry, error) {
 func DateString(t time.Time) string { return t.Format("2006-01-02") }
 func TimeString(t time.Time) string { return t.Format("15:04") }
 
+// DayLog is one row in the Activity sheet.
+// Schema: date | activity | feeling_score | feeling_notes
+// Backward compat: old 2-column rows (date | notes) map notes → activity.
+type DayLog struct {
+	Date         string `json:"date"`
+	Activity     string `json:"activity"`
+	FeelingScore int    `json:"feeling_score"` // 0 = not set, 1–10
+	FeelingNotes string `json:"feeling_notes"`
+}
+
+func (d DayLog) ToRow() []interface{} {
+	return []interface{}{
+		d.Date, d.Activity, strconv.Itoa(d.FeelingScore), d.FeelingNotes,
+	}
+}
+
+func DayLogFromRow(row []interface{}) DayLog {
+	str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+	num := func(v interface{}) int {
+		n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
+		return n
+	}
+	d := DayLog{}
+	if len(row) >= 1 {
+		d.Date = str(row[0])
+	}
+	if len(row) >= 2 {
+		d.Activity = str(row[1])
+	}
+	if len(row) >= 3 {
+		d.FeelingScore = num(row[2])
+	}
+	if len(row) >= 4 {
+		d.FeelingNotes = str(row[3])
+	}
+	return d
+}
+
 // Service wraps the Sheets API scoped to one user's spreadsheet.
 type Service struct {
 	svc           *googlesheets.Service
@@ -112,10 +150,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	}
 
 	actHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"date", "notes"}},
+		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, activitySheet+"!A1:B1", actHeaders,
+		created.SpreadsheetId, activitySheet+"!A1:D1", actHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("activity headers: %w", err)
@@ -193,50 +231,69 @@ func (s *Service) UpdateFood(ctx context.Context, id string, updated FoodEntry) 
 	return err
 }
 
-// GetActivity returns the activity note for the given date, or "" if none.
-func (s *Service) GetActivity(ctx context.Context, date string) (string, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:B").Context(ctx).Do()
+// GetActivity returns the DayLog for the given date, or an empty DayLog if none.
+func (s *Service) GetActivity(ctx context.Context, date string) (DayLog, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:D").Context(ctx).Do()
 	if err != nil {
-		return "", err
+		return DayLog{}, err
 	}
 	for i, row := range resp.Values {
-		if i == 0 || len(row) < 2 {
+		if i == 0 || len(row) < 1 {
 			continue
 		}
 		if fmt.Sprintf("%v", row[0]) == date {
-			return fmt.Sprintf("%v", row[1]), nil
+			return DayLogFromRow(row), nil
 		}
 	}
-	return "", nil
+	return DayLog{Date: date}, nil
 }
 
-// SetActivity upserts the activity note for a given date.
-func (s *Service) SetActivity(ctx context.Context, date, notes string) error {
+// SetActivity upserts the DayLog for its date.
+func (s *Service) SetActivity(ctx context.Context, log DayLog) error {
 	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:A").Context(ctx).Do()
 	if err != nil {
 		return err
 	}
-	vr := &googlesheets.ValueRange{Values: [][]interface{}{{date, notes}}}
+	vr := &googlesheets.ValueRange{Values: [][]interface{}{log.ToRow()}}
 	rowNum := -1
 	for i, row := range resp.Values {
 		if i == 0 {
 			continue
 		}
-		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == date {
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == log.Date {
 			rowNum = i + 1
 			break
 		}
 	}
 	if rowNum < 0 {
 		_, err = s.svc.Spreadsheets.Values.Append(
-			s.spreadsheetID, activitySheet+"!A:B", vr,
+			s.spreadsheetID, activitySheet+"!A:D", vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	} else {
 		_, err = s.svc.Spreadsheets.Values.Update(
 			s.spreadsheetID,
-			fmt.Sprintf("%s!A%d:B%d", activitySheet, rowNum, rowNum),
+			fmt.Sprintf("%s!A%d:D%d", activitySheet, rowNum, rowNum),
 			vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	}
 	return err
+}
+
+// GetActivityByDateRange returns DayLogs where start <= date <= end.
+func (s *Service) GetActivityByDateRange(ctx context.Context, start, end string) ([]DayLog, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:D").Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	var out []DayLog
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 1 {
+			continue
+		}
+		d := fmt.Sprintf("%v", row[0])
+		if d >= start && d <= end {
+			out = append(out, DayLogFromRow(row))
+		}
+	}
+	return out, nil
 }

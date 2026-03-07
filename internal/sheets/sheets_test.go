@@ -68,3 +68,48 @@ func TestTimeString(t *testing.T) {
 		t.Errorf("got %q, want 08:30", s)
 	}
 }
+
+func TestDayLogFromRow_Full(t *testing.T) {
+	row := []interface{}{"2026-03-06", "ran 5k", "7", "felt good"}
+	d := sheets.DayLogFromRow(row)
+	if d.Date != "2026-03-06" {
+		t.Errorf("Date: got %q", d.Date)
+	}
+	if d.Activity != "ran 5k" {
+		t.Errorf("Activity: got %q", d.Activity)
+	}
+	if d.FeelingScore != 7 {
+		t.Errorf("FeelingScore: got %d, want 7", d.FeelingScore)
+	}
+	if d.FeelingNotes != "felt good" {
+		t.Errorf("FeelingNotes: got %q", d.FeelingNotes)
+	}
+}
+
+func TestDayLogFromRow_LegacyTwoColumn(t *testing.T) {
+	row := []interface{}{"2026-03-06", "old activity notes"}
+	d := sheets.DayLogFromRow(row)
+	if d.Activity != "old activity notes" {
+		t.Errorf("Activity: got %q", d.Activity)
+	}
+	if d.FeelingScore != 0 {
+		t.Errorf("FeelingScore: got %d, want 0", d.FeelingScore)
+	}
+	if d.FeelingNotes != "" {
+		t.Errorf("FeelingNotes: got %q, want empty", d.FeelingNotes)
+	}
+}
+
+func TestDayLogToRow(t *testing.T) {
+	d := sheets.DayLog{Date: "2026-03-06", Activity: "yoga", FeelingScore: 8, FeelingNotes: "great day"}
+	row := d.ToRow()
+	if len(row) != 4 {
+		t.Fatalf("want 4 cols, got %d", len(row))
+	}
+	if row[0] != "2026-03-06" {
+		t.Errorf("col 0: got %v", row[0])
+	}
+	if row[2] != "8" {
+		t.Errorf("col 2 (feeling_score): got %v", row[2])
+	}
+}

@@ -21,10 +21,10 @@ type Handler struct {
 	gemini *gemini.Service
 }
 
-func NewHandler(authHandler *auth.Handler) *Handler {
+func NewHandler(authHandler *auth.Handler, geminiAPIKey string) *Handler {
 	return &Handler{
 		auth:   authHandler,
-		gemini: gemini.NewService(),
+		gemini: gemini.NewService(geminiAPIKey),
 	}
 }
 
@@ -133,8 +133,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ts := h.auth.TokenSource(r.Context(), session)
-	responseText, entries, err := h.gemini.Chat(r.Context(), ts, session.UserEmail, req.Message)
+	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, req.Message)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
@@ -215,21 +214,18 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	if date == "" {
 		date = sheets.DateString(time.Now())
 	}
-	notes, err := svc.GetActivity(r.Context(), date)
+	dayLog, err := svc.GetActivity(r.Context(), date)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"date": date, "notes": notes})
+	WriteJSON(w, http.StatusOK, dayLog)
 }
 
-// PUT /api/activity — body: {"date": "YYYY-MM-DD", "notes": "..."}
+// PUT /api/activity — body: {"date": "YYYY-MM-DD", "activity": "...", "feeling_score": 0, "feeling_notes": "..."}
 func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
-	var req struct {
-		Date  string `json:"date"`
-		Notes string `json:"notes"`
-	}
+	var req sheets.DayLog
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
@@ -242,9 +238,9 @@ func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := svc.SetActivity(r.Context(), req.Date, req.Notes); err != nil {
+	if err := svc.SetActivity(r.Context(), req); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"date": req.Date, "notes": req.Notes})
+	WriteJSON(w, http.StatusOK, req)
 }
