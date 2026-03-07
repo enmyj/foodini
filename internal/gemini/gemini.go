@@ -78,7 +78,7 @@ func ParseEntries(raw string) ([]Entry, bool) {
 type Service struct {
 	apiKey string
 	mu     sync.Mutex
-	convs  map[string][]*genai.Content // keyed by userEmail
+	convs  map[string][]*genai.Content // keyed by userEmail|date
 }
 
 func NewService(apiKey string) *Service {
@@ -88,7 +88,7 @@ func NewService(apiKey string) *Service {
 // Chat sends a user message and returns (responseText, entries, error).
 // If Gemini returns structured entries, history is cleared and entries are non-nil.
 // If Gemini asks a clarifying question, history is preserved for the next turn.
-func (s *Service) Chat(ctx context.Context, userEmail, message string) (string, []Entry, error) {
+func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string) (string, []Entry, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini client: %w", err)
@@ -96,12 +96,17 @@ func (s *Service) Chat(ctx context.Context, userEmail, message string) (string, 
 	defer client.Close()
 
 	model := client.GenerativeModel("gemini-2.5-flash")
+	systemInstr := systemPrompt
+	if profileCtx != "" {
+		systemInstr = profileCtx + "\n\n" + systemPrompt
+	}
 	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(systemPrompt)},
+		Parts: []genai.Part{genai.Text(systemInstr)},
 	}
 
+	key := userEmail + "|" + date
 	s.mu.Lock()
-	history := s.convs[userEmail]
+	history := s.convs[key]
 	s.mu.Unlock()
 
 	chatSession := model.StartChat()
@@ -120,10 +125,8 @@ func (s *Service) Chat(ctx context.Context, userEmail, message string) (string, 
 
 	entries, ok := ParseEntries(responseText)
 
-	// Always persist conversation history.
-	// Clearing happens when the user confirms via /api/chat/confirm.
 	s.mu.Lock()
-	s.convs[userEmail] = chatSession.History
+	s.convs[key] = chatSession.History
 	s.mu.Unlock()
 
 	if ok {
@@ -132,9 +135,9 @@ func (s *Service) Chat(ctx context.Context, userEmail, message string) (string, 
 	return responseText, nil, nil
 }
 
-// ClearConversation discards in-progress conversation for a user.
-func (s *Service) ClearConversation(userEmail string) {
+// ClearConversation discards in-progress conversation for a user on a given date.
+func (s *Service) ClearConversation(userEmail, date string) {
 	s.mu.Lock()
-	delete(s.convs, userEmail)
+	delete(s.convs, userEmail+"|"+date)
 	s.mu.Unlock()
 }
