@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/google/generative-ai-go/genai"
-	"golang.org/x/oauth2"
 	"google.golang.org/api/option"
 )
 
@@ -17,15 +16,24 @@ const systemPrompt = `You are a food tracking assistant. The user describes what
 Your job:
 1. Extract food items and estimate macros (calories, protein, carbs, fat in grams).
 2. If quantities are ambiguous, ask ONE short clarifying question — nothing more.
-3. Once you have enough information, respond ONLY with this exact JSON format, no other text:
+3. Once you have enough information, show a friendly human-readable summary:
 
-{"entries":[{"meal_type":"breakfast","description":"oatmeal with milk","calories":300,"protein":8,"carbs":54,"fat":6}]}
+   Here's what I'm logging:
+   • [description] ([meal_type]) — [calories] cal, [protein]g P, [carbs]g C, [fat]g F
+
+   Does this look right?
+
+   Then include the JSON in a code block:
+` + "```json" + `
+   {"entries":[{"meal_type":"breakfast","description":"oatmeal with milk","calories":300,"protein":8,"carbs":54,"fat":6}]}
+` + "```" + `
+
+4. If the user says yes / ok / looks good / save it / confirm, repeat the JSON code block exactly so it can be processed.
 
 Rules:
 - meal_type must be one of: breakfast, snack, lunch, dinner
 - All numeric values are integers (round estimates are fine)
 - Multiple foods in one meal → multiple entries, same meal_type
-- Do NOT include any text outside the JSON when logging entries
 - Use reasonable common serving sizes for estimates`
 
 // Entry is a structured food log entry extracted from a Gemini response.
@@ -66,25 +74,26 @@ func ParseEntries(raw string) ([]Entry, bool) {
 
 // Service manages per-user Gemini conversation history in memory.
 type Service struct {
-	mu    sync.Mutex
-	convs map[string][]*genai.Content // keyed by userEmail
+	apiKey string
+	mu     sync.Mutex
+	convs  map[string][]*genai.Content // keyed by userEmail
 }
 
-func NewService() *Service {
-	return &Service{convs: make(map[string][]*genai.Content)}
+func NewService(apiKey string) *Service {
+	return &Service{apiKey: apiKey, convs: make(map[string][]*genai.Content)}
 }
 
 // Chat sends a user message and returns (responseText, entries, error).
 // If Gemini returns structured entries, history is cleared and entries are non-nil.
 // If Gemini asks a clarifying question, history is preserved for the next turn.
-func (s *Service) Chat(ctx context.Context, ts oauth2.TokenSource, userEmail, message string) (string, []Entry, error) {
-	client, err := genai.NewClient(ctx, option.WithTokenSource(ts))
+func (s *Service) Chat(ctx context.Context, userEmail, message string) (string, []Entry, error) {
+	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini client: %w", err)
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-2.0-flash")
+	model := client.GenerativeModel("gemini-2.5-flash")
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(systemPrompt)},
 	}
@@ -108,18 +117,16 @@ func (s *Service) Chat(ctx context.Context, ts oauth2.TokenSource, userEmail, me
 	responseText := sb.String()
 
 	entries, ok := ParseEntries(responseText)
-	if ok {
-		// Entry confirmed — clear conversation for next log
-		s.mu.Lock()
-		delete(s.convs, userEmail)
-		s.mu.Unlock()
-		return responseText, entries, nil
-	}
 
-	// Clarifying question — persist history for next turn
+	// Always persist conversation history.
+	// Clearing happens when the user confirms via /api/chat/confirm.
 	s.mu.Lock()
 	s.convs[userEmail] = chatSession.History
 	s.mu.Unlock()
+
+	if ok {
+		return responseText, entries, nil
+	}
 	return responseText, nil, nil
 }
 
