@@ -1,14 +1,15 @@
 <script>
-  import { patchEntry } from './api.js'
+  import { patchEntry, deleteEntry } from './api.js'
 
-  let { entry, onUpdate } = $props()
+  let { entry, onUpdate, onDelete } = $props()
 
   let editing = $state(null)
   let editValue = $state('')
   let saving = $state(false)
+  let deleting = $state(false)
   let cancelFlag = false
 
-  const numFields = new Set(['calories', 'protein', 'carbs', 'fat'])
+  const numFields = new Set(['calories', 'protein', 'carbs', 'fat', 'fiber'])
 
   function startEdit(field) {
     editing = field
@@ -30,6 +31,18 @@
     }
   }
 
+  async function handleDelete() {
+    if (deleting) return
+    deleting = true
+    try {
+      await deleteEntry(entry.id)
+      onDelete(entry.id)
+    } catch (e) {
+      console.error('delete failed', e)
+      deleting = false
+    }
+  }
+
   function onKeyDown(e) {
     if (e.key === 'Enter') commitEdit()
     if (e.key === 'Escape') {
@@ -40,7 +53,7 @@
   }
 </script>
 
-<div class="row">
+<div class="row" class:fading={deleting}>
   <div class="desc">
     {#if editing === 'description'}
       <input bind:value={editValue} onblur={commitEdit} onkeydown={onKeyDown} autofocus />
@@ -49,7 +62,7 @@
     {/if}
   </div>
   <div class="macros">
-    {#each ['calories', 'protein', 'carbs', 'fat'] as field}
+    {#each ['calories', 'protein', 'carbs', 'fat', 'fiber'] as field}
       {#if editing === field}
         <input class="num-input" type="number" bind:value={editValue}
                onblur={commitEdit} onkeydown={onKeyDown} autofocus />
@@ -60,6 +73,7 @@
       {/if}
     {/each}
   </div>
+  <button class="del" onclick={handleDelete} disabled={deleting} aria-label="Delete entry">×</button>
 </div>
 
 <style>
@@ -70,6 +84,10 @@
     padding: 0.65rem 0;
     border-bottom: 1px solid #e8e8e6;
     gap: 1rem;
+  }
+
+  .row.fading {
+    opacity: 0.4;
   }
 
   .desc {
@@ -101,6 +119,26 @@
 
   .macro:hover {
     color: #555;
+  }
+
+  .del {
+    background: none;
+    border: none;
+    color: #ccc;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.15rem;
+    flex-shrink: 0;
+  }
+
+  .del:hover {
+    color: #888;
+  }
+
+  .del:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
 
   input {
