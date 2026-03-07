@@ -15,6 +15,10 @@ import (
 const (
 	foodSheet     = "Food"
 	activitySheet = "Activity"
+	metaSheet     = "Meta"
+	profileSheet  = "Profile"
+
+	CurrentSchemaVersion = 1
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -136,6 +140,8 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 		Sheets: []*googlesheets.Sheet{
 			{Properties: &googlesheets.SheetProperties{Title: foodSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: activitySheet}},
+			{Properties: &googlesheets.SheetProperties{Title: metaSheet}},
+			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
 		},
 	}
 	created, err := sheetsSvc.Spreadsheets.Create(ss).Context(ctx).Do()
@@ -162,6 +168,28 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("activity headers: %w", err)
+	}
+
+	// Meta sheet: A1 = header "schema_version", A2 = value
+	metaData := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"schema_version"}, {strconv.Itoa(CurrentSchemaVersion)}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, metaSheet+"!A1:A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("meta init: %w", err)
+	}
+
+	// Profile sheet: headers row
+	profHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"gender", "height", "weight", "notes"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, profileSheet+"!A1:D1", profHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("profile headers: %w", err)
 	}
 
 	return created.SpreadsheetId, nil
@@ -282,6 +310,21 @@ func (s *Service) SetActivity(ctx context.Context, log DayLog) error {
 		).ValueInputOption("RAW").Context(ctx).Do()
 	}
 	return err
+}
+
+// GetSchemaVersion reads the schema_version value from the Meta sheet.
+// Returns 0 if the Meta sheet doesn't exist or has no value.
+func (s *Service) GetSchemaVersion(ctx context.Context) (int, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, metaSheet+"!A2").Context(ctx).Do()
+	if err != nil {
+		// 400 or 404 means sheet doesn't exist → version 0
+		return 0, nil
+	}
+	if len(resp.Values) == 0 || len(resp.Values[0]) == 0 {
+		return 0, nil
+	}
+	n, _ := strconv.Atoi(fmt.Sprintf("%v", resp.Values[0][0]))
+	return n, nil
 }
 
 // GetActivityByDateRange returns DayLogs where start <= date <= end.

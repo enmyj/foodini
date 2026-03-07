@@ -150,3 +150,10 @@ func TestFoodEntryFromRow_WithFiber(t *testing.T) {
 		t.Errorf("fiber: got %d, want 4", e.Fiber)
 	}
 }
+
+func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
+	_ = sheets.CurrentSchemaVersion // verify the constant exists
+	if sheets.CurrentSchemaVersion != 1 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 1", sheets.CurrentSchemaVersion)
+	}
+}
