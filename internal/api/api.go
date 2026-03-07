@@ -119,7 +119,7 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 }
 
 // GET /api/log?date=YYYY-MM-DD   → today's entries grouped with activity note
-// GET /api/log?week=true          → last 7 days aggregated
+// GET /api/log?days=N             → last N days (1-365, default 30)
 func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
 	if !h.ensureSpreadsheet(w, r, session) {
