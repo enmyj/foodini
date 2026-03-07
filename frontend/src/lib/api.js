@@ -1,25 +1,29 @@
-export async function getLog({ date = null, week = false } = {}) {
-  const params = week ? '?week=true' : date ? `?date=${date}` : ''
+export async function getLog({ date = null, days = null } = {}) {
+  const params = days ? `?days=${days}` : date ? `?date=${date}` : ''
   const res = await fetch(`/api/log${params}`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-export async function chat(message) {
+export async function chat(message, date = null) {
+  const body = { message }
+  if (date) body.date = date
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
-export async function confirmChat(entries) {
+export async function confirmChat(entries, date = null) {
+  const body = { entries }
+  if (date) body.date = date
   const res = await fetch('/api/chat/confirm', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ entries }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
@@ -35,10 +39,15 @@ export async function patchEntry(id, entry) {
   return res.json()
 }
 
+export async function deleteEntry(id) {
+  const res = await fetch(`/api/entries/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
+}
+
 export async function getActivity(date) {
   const res = await fetch(`/api/activity?date=${date}`)
   if (!res.ok) throw new Error(await res.text())
-  return res.json() // returns {date, activity, feeling_score, feeling_notes}
+  return res.json()
 }
 
 export async function putActivity(date, { activity, feeling_score, feeling_notes }) {
@@ -46,6 +55,22 @@ export async function putActivity(date, { activity, feeling_score, feeling_notes
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date, activity, feeling_score, feeling_notes }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getProfile() {
+  const res = await fetch('/api/profile')
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function putProfile(profile) {
+  const res = await fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
