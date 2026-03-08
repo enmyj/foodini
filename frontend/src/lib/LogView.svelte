@@ -1,5 +1,5 @@
 <script>
-  import { getLog } from './api.js'
+  import { getLog, confirmChat } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
@@ -17,6 +17,8 @@
   let selectedDay = $state(null)
   let drawerDate = $state(null)
   let drawerPrefill = $state('')
+  let yesterdayByMeal = $state({})
+  let repeating = $state(null)
 
   async function load() {
     loading = true
@@ -34,6 +36,23 @@
       ;(g[e.meal_type] ??= []).push(e)
     }
     return g
+  }
+
+  function yesterdayString() {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  async function loadYesterday() {
+    try {
+      const res = await getLog({ date: yesterdayString() })
+      const g = {}
+      for (const e of res.entries ?? []) {
+        ;(g[e.meal_type] ??= []).push(e)
+      }
+      yesterdayByMeal = g
+    } catch {}
   }
 
   function groupedByDate(entries) {
@@ -70,7 +89,12 @@
     drawerOpen = false
   }
 
-  $effect(() => { if (view) load() })
+  $effect(() => {
+    if (view) {
+      load()
+      if (view === 'today') loadYesterday()
+    }
+  })
 </script>
 
 <div class="wrap">
