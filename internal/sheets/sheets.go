@@ -69,7 +69,7 @@ func DateString(t time.Time) string { return t.Format("2006-01-02") }
 func TimeString(t time.Time) string { return t.Format("15:04") }
 
 // DayLog is one row in the Activity sheet.
-// Schema: date | activity | feeling_score | feeling_notes
+// Schema: date | activity | feeling_score | feeling_notes | poop | poop_notes
 // Backward compat: old 2-column rows (date | notes) map notes → activity.
 type DayLog struct {
 	Date         string `json:"date"`
