@@ -61,6 +61,7 @@
     try {
       const res = await confirmChat(yesterdayByMeal[meal], data?.date ?? yesterdayString())
       data = { ...data, entries: [...(data.entries ?? []), ...res.entries] }
+      yesterdayByMeal = { ...yesterdayByMeal, [meal]: [] }
     } catch {
       // silent fail — user can tap again
     } finally {
