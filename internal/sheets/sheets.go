@@ -19,7 +19,7 @@ const (
 	metaSheet     = "Meta"
 	profileSheet  = "Profile"
 
-	CurrentSchemaVersion = 1
+	CurrentSchemaVersion = 2
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -76,11 +76,14 @@ type DayLog struct {
 	Activity     string `json:"activity"`
 	FeelingScore int    `json:"feeling_score"` // 0 = not set, 1–10
 	FeelingNotes string `json:"feeling_notes"`
+	Poop         bool   `json:"poop"`
+	PoopNotes    string `json:"poop_notes"`
 }
 
 func (d DayLog) ToRow() []interface{} {
 	return []interface{}{
 		d.Date, d.Activity, strconv.Itoa(d.FeelingScore), d.FeelingNotes,
+		strconv.FormatBool(d.Poop), d.PoopNotes,
 	}
 }
 
@@ -102,6 +105,12 @@ func DayLogFromRow(row []interface{}) DayLog {
 	}
 	if len(row) >= 4 {
 		d.FeelingNotes = str(row[3])
+	}
+	if len(row) >= 5 {
+		d.Poop = str(row[4]) == "true"
+	}
+	if len(row) >= 6 {
+		d.PoopNotes = str(row[5])
 	}
 	return d
 }
@@ -207,10 +216,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	}
 
 	actHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes"}},
+		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, activitySheet+"!A1:D1", actHeaders,
+		created.SpreadsheetId, activitySheet+"!A1:F1", actHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("activity headers: %w", err)
@@ -388,7 +397,7 @@ func (s *Service) DeleteFood(ctx context.Context, id string) error {
 
 // GetActivity returns the DayLog for the given date, or an empty DayLog if none.
 func (s *Service) GetActivity(ctx context.Context, date string) (DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:D").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:F").Context(ctx).Do()
 	if err != nil {
 		return DayLog{}, err
 	}
@@ -422,12 +431,12 @@ func (s *Service) SetActivity(ctx context.Context, log DayLog) error {
 	}
 	if rowNum < 0 {
 		_, err = s.svc.Spreadsheets.Values.Append(
-			s.spreadsheetID, activitySheet+"!A:D", vr,
+			s.spreadsheetID, activitySheet+"!A:F", vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	} else {
 		_, err = s.svc.Spreadsheets.Values.Update(
 			s.spreadsheetID,
-			fmt.Sprintf("%s!A%d:D%d", activitySheet, rowNum, rowNum),
+			fmt.Sprintf("%s!A%d:F%d", activitySheet, rowNum, rowNum),
 			vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	}
@@ -451,7 +460,7 @@ func (s *Service) GetSchemaVersion(ctx context.Context) (int, error) {
 
 // GetActivityByDateRange returns DayLogs where start <= date <= end.
 func (s *Service) GetActivityByDateRange(ctx context.Context, start, end string) ([]DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:D").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:F").Context(ctx).Do()
 	if err != nil {
 		return nil, err
 	}

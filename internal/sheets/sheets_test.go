@@ -103,14 +103,20 @@ func TestDayLogFromRow_LegacyTwoColumn(t *testing.T) {
 func TestDayLogToRow(t *testing.T) {
 	d := sheets.DayLog{Date: "2026-03-06", Activity: "yoga", FeelingScore: 8, FeelingNotes: "great day"}
 	row := d.ToRow()
-	if len(row) != 4 {
-		t.Fatalf("want 4 cols, got %d", len(row))
+	if len(row) != 6 {
+		t.Fatalf("want 6 cols, got %d", len(row))
 	}
 	if row[0] != "2026-03-06" {
 		t.Errorf("col 0: got %v", row[0])
 	}
 	if row[2] != "8" {
 		t.Errorf("col 2 (feeling_score): got %v", row[2])
+	}
+	if row[4] != "false" {
+		t.Errorf("col 4 (poop): got %v, want false", row[4])
+	}
+	if row[5] != "" {
+		t.Errorf("col 5 (poop_notes): got %v, want empty", row[5])
 	}
 }
 
@@ -158,9 +164,9 @@ func TestDeleteFood_NotFound(t *testing.T) {
 }
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
-	_ = sheets.CurrentSchemaVersion // verify the constant exists
-	if sheets.CurrentSchemaVersion != 1 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 1", sheets.CurrentSchemaVersion)
+	_ = sheets.CurrentSchemaVersion
+	if sheets.CurrentSchemaVersion != 2 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 2", sheets.CurrentSchemaVersion)
 	}
 }
 
@@ -179,5 +185,42 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	got := sheets.UserProfileFromRow(row)
 	if got.Height != "5'10\"" {
 		t.Errorf("height round-trip: got %q", got.Height)
+	}
+}
+
+func TestDayLogFromRow_WithPoop(t *testing.T) {
+	row := []interface{}{"2026-03-07", "ran 5k", "8", "felt good", "true", "solid, once"}
+	d := sheets.DayLogFromRow(row)
+	if !d.Poop {
+		t.Error("Poop: want true")
+	}
+	if d.PoopNotes != "solid, once" {
+		t.Errorf("PoopNotes: got %q", d.PoopNotes)
+	}
+}
+
+func TestDayLogFromRow_BackwardCompatNoPoop(t *testing.T) {
+	// 4-col row (old schema) — Poop defaults to false, PoopNotes to ""
+	row := []interface{}{"2026-03-07", "yoga", "7", "good"}
+	d := sheets.DayLogFromRow(row)
+	if d.Poop {
+		t.Error("Poop: want false for old-schema row")
+	}
+	if d.PoopNotes != "" {
+		t.Errorf("PoopNotes: want empty, got %q", d.PoopNotes)
+	}
+}
+
+func TestDayLogToRow_WithPoop(t *testing.T) {
+	d := sheets.DayLog{Date: "2026-03-07", Poop: true, PoopNotes: "once"}
+	row := d.ToRow()
+	if len(row) != 6 {
+		t.Fatalf("want 6 cols, got %d", len(row))
+	}
+	if row[4] != "true" {
+		t.Errorf("col 4 (poop): got %v, want true", row[4])
+	}
+	if row[5] != "once" {
+		t.Errorf("col 5 (poop_notes): got %v, want once", row[5])
 	}
 }
