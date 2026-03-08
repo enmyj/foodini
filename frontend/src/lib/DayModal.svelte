@@ -49,6 +49,15 @@
     </div>
   {/if}
 
+  {#if day.dayLog?.poop || day.dayLog?.poop_notes}
+    <div class="modal-section">
+      <h3>💩</h3>
+      <p>
+        {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
+      </p>
+    </div>
+  {/if}
+
   <div class="modal-section">
     <h3>Food</h3>
     {#each MEAL_ORDER as meal}

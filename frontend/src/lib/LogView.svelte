@@ -179,6 +179,7 @@
         <span class="date">{date}</span>
         <span class="feeling-score">{dayLog?.feeling_score ? `${dayLog.feeling_score}/10` : '—'}</span>
         <span class="activity-tick">{dayLog?.activity ? '✓' : ''}</span>
+        <span class="poop-tick">{dayLog?.poop ? '💩' : ''}</span>
         <span class="chevron">›</span>
       </div>
     {/each}
@@ -366,6 +367,12 @@
   .activity-tick {
     font-size: 0.82rem;
     color: #2d2d2d;
+    min-width: 1rem;
+    text-align: center;
+  }
+
+  .poop-tick {
+    font-size: 0.82rem;
     min-width: 1rem;
     text-align: center;
   }
