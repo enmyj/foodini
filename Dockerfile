@@ -14,6 +14,8 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
+# tzdata is needed so time.LoadLocation works in the distroless runtime image
+RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -27,6 +29,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 # ── Stage 3: Minimal runtime ──────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12
+# Required for time.LoadLocation (user timezone support)
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /app/foodtracker /foodtracker
 EXPOSE 8080
 ENTRYPOINT ["/foodtracker"]
