@@ -48,12 +48,15 @@
     {#if editingActivity}
       <textarea
         bind:value={activity}
-        onblur={save}
         onkeydown={onKeyDown}
         placeholder="Exercise, stress, unusual events…"
         rows="2"
         autofocus
       ></textarea>
+      <div class="edit-actions">
+        <button class="save-btn" onclick={save} disabled={saving}>Save</button>
+        <button class="cancel-btn" onclick={() => editingActivity = false}>Cancel</button>
+      </div>
     {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <div class="note" class:placeholder={!activity} onclick={() => editingActivity = true}>
@@ -73,17 +76,19 @@
             min="1"
             max="10"
             bind:value={feelingScore}
-            onblur={save}
             onkeydown={onKeyDown}
           />
         </div>
         <textarea
           bind:value={feelingNotes}
-          onblur={save}
           onkeydown={onKeyDown}
           placeholder="Energy, digestion, mood, sleep…"
           rows="2"
         ></textarea>
+        <div class="edit-actions">
+          <button class="save-btn" onclick={save} disabled={saving}>Save</button>
+          <button class="cancel-btn" onclick={() => editingFeeling = false}>Cancel</button>
+        </div>
       </div>
     {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -181,6 +186,47 @@
 
   textarea:focus {
     outline: none;
+  }
+
+  .edit-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .save-btn {
+    padding: 0.3rem 0.85rem;
+    background: #2d2d2d;
+    color: #fafaf9;
+    border: none;
+    border-radius: 5px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: #1c1c1c;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .cancel-btn {
+    padding: 0.3rem 0.85rem;
+    background: none;
+    color: #888;
+    border: 1px solid #e8e8e6;
+    border-radius: 5px;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .cancel-btn:hover {
+    border-color: #888;
   }
 
   .hint {

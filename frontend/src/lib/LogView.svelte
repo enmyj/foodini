@@ -95,7 +95,8 @@
     {#each MEAL_ORDER as meal}
       {@const group = (groupedByMeal(data?.entries)[meal] ?? [])}
       <section>
-        <h3>{meal}</h3>
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <h3 onclick={() => drawerOpen = true}>{meal}</h3>
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
@@ -201,6 +202,12 @@
     letter-spacing: 0.08em;
     font-weight: 600;
     margin-bottom: 0.5rem;
+    cursor: pointer;
+    display: inline-block;
+  }
+
+  h3:hover {
+    color: #2d2d2d;
   }
 
   .empty {
