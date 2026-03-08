@@ -44,7 +44,10 @@
   }
 
   function onKeyDown(e) {
-    if (e.key === 'Enter') commitEdit()
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitEdit()
+    }
     if (e.key === 'Escape') {
       cancelFlag = true
       editing = null
@@ -53,10 +56,10 @@
   }
 </script>
 
-<div class="row" class:fading={deleting}>
+<div class="row" class:fading={deleting} class:editing-desc={editing === 'description'}>
   <div class="desc">
     {#if editing === 'description'}
-      <input bind:value={editValue} onblur={commitEdit} onkeydown={onKeyDown} autofocus />
+      <textarea class="desc-input" bind:value={editValue} onblur={commitEdit} onkeydown={onKeyDown} autofocus rows="2"></textarea>
     {:else}
       <span class="editable" onclick={() => startEdit('description')}>{entry.description}</span>
     {/if}
@@ -141,7 +144,11 @@
     cursor: default;
   }
 
-  input {
+  .row.editing-desc {
+    align-items: flex-start;
+  }
+
+  input, textarea {
     border: none;
     border-bottom: 2px solid #2d2d2d;
     border-radius: 0;
@@ -150,6 +157,12 @@
     font-size: inherit;
     background: transparent;
     outline: none;
+  }
+
+  .desc-input {
+    width: 100%;
+    resize: none;
+    line-height: 1.4;
   }
 
   .num-input {

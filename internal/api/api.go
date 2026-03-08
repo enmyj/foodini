@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"foodtracker/internal/auth"
@@ -18,15 +19,53 @@ import (
 // Handler holds references to auth and gemini services.
 // The sheets service is created per-request using the user's token source.
 type Handler struct {
-	auth   *auth.Handler
-	gemini *gemini.Service
+	auth    *auth.Handler
+	gemini  *gemini.Service
+	cacheMu sync.RWMutex
+	cache   map[string]cacheItem
 }
+
+type cacheItem struct {
+	data    []byte
+	expires time.Time
+}
+
+const cacheTTL = 60 * time.Second
 
 func NewHandler(authHandler *auth.Handler, geminiAPIKey string) *Handler {
 	return &Handler{
 		auth:   authHandler,
 		gemini: gemini.NewService(geminiAPIKey),
+		cache:  make(map[string]cacheItem),
 	}
+}
+
+func (h *Handler) cacheGet(key string) ([]byte, bool) {
+	h.cacheMu.RLock()
+	item, ok := h.cache[key]
+	h.cacheMu.RUnlock()
+	if !ok || time.Now().After(item.expires) {
+		return nil, false
+	}
+	return item.data, true
+}
+
+func (h *Handler) cacheSet(key string, data []byte) {
+	h.cacheMu.Lock()
+	h.cache[key] = cacheItem{data: data, expires: time.Now().Add(cacheTTL)}
+	h.cacheMu.Unlock()
+}
+
+// cacheInvalidate removes all log cache entries for a spreadsheet.
+func (h *Handler) cacheInvalidate(spreadsheetID string) {
+	prefix := spreadsheetID + "|"
+	h.cacheMu.Lock()
+	for k := range h.cache {
+		if strings.HasPrefix(k, prefix) {
+			delete(h.cache, k)
+		}
+	}
+	h.cacheMu.Unlock()
 }
 
 // Authenticated delegates to the auth handler's middleware.
@@ -138,6 +177,12 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		if err != nil || days < 1 || days > 365 {
 			days = 30
 		}
+		cacheKey := session.SpreadsheetID + "|days|" + strconv.Itoa(days)
+		if cached, ok := h.cacheGet(cacheKey); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(cached)
+			return
+		}
 		start := sheets.DateString(time.Now().AddDate(0, 0, -(days - 1)))
 		entries, err := svc.GetFoodByDateRange(r.Context(), start, today)
 		if err != nil {
@@ -149,18 +194,27 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{
+		data, _ := json.Marshal(map[string]any{
 			"entries":    entries,
 			"daily_logs": dailyLogs,
 			"start":      start,
 			"end":        today,
 		})
+		h.cacheSet(cacheKey, data)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
 		return
 	}
 
 	date := r.URL.Query().Get("date")
 	if date == "" {
 		date = today
+	}
+	cacheKey := session.SpreadsheetID + "|date|" + date
+	if cached, ok := h.cacheGet(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(cached)
+		return
 	}
 	entries, err := svc.GetFoodByDate(r.Context(), date)
 	if err != nil {
@@ -172,11 +226,14 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{
+	data, _ := json.Marshal(map[string]any{
 		"entries": entries,
 		"day_log": dayLog,
 		"date":    date,
 	})
+	h.cacheSet(cacheKey, data)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 // POST /api/chat — body: {"message": "...", "date": "YYYY-MM-DD"}
@@ -281,6 +338,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.gemini.ClearConversation(session.UserEmail, targetDate)
+	h.cacheInvalidate(session.SpreadsheetID)
 	WriteJSON(w, http.StatusOK, map[string]any{"done": true, "entries": saved})
 }
 
@@ -301,6 +359,7 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.cacheInvalidate(session.SpreadsheetID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -364,6 +423,7 @@ func (h *Handler) PatchEntry(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.cacheInvalidate(session.SpreadsheetID)
 	WriteJSON(w, http.StatusOK, entry)
 }
 
@@ -407,5 +467,6 @@ func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.cacheInvalidate(session.SpreadsheetID)
 	WriteJSON(w, http.StatusOK, req)
 }

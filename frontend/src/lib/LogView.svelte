@@ -100,7 +100,8 @@
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
-          <p class="empty">Nothing logged</p>
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <p class="empty" onclick={() => drawerOpen = true}>Nothing logged</p>
         {/each}
       </section>
     {/each}
@@ -214,6 +215,11 @@
     color: #bbb;
     font-size: 0.85rem;
     padding: 0.3rem 0;
+    cursor: pointer;
+  }
+
+  .empty:hover {
+    color: #888;
   }
 
   .state {
