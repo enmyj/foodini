@@ -19,6 +19,7 @@
   let drawerPrefill = $state('')
   let yesterdayByMeal = $state({})
   let repeating = $state(null)
+  let repeatedMeals = $state(new Set())
 
   async function load() {
     loading = true
@@ -51,6 +52,9 @@
       for (const e of res.entries ?? []) {
         ;(g[e.meal_type] ??= []).push(e)
       }
+      for (const meal of repeatedMeals) {
+        g[meal] = []
+      }
       yesterdayByMeal = g
     } catch {}
   }
@@ -62,6 +66,7 @@
       const res = await confirmChat(yesterdayByMeal[meal], data?.date ?? yesterdayString())
       data = { ...data, entries: [...(data.entries ?? []), ...res.entries] }
       yesterdayByMeal = { ...yesterdayByMeal, [meal]: [] }
+      repeatedMeals = new Set([...repeatedMeals, meal])
     } catch {
       // silent fail — user can tap again
     } finally {
