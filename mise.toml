@@ -37,6 +37,10 @@ run = "export $(grep -v '^#' .env | xargs) && ./foodtracker"
 description = "Build Docker image tagged as foodtracker:latest"
 run = "docker build -t foodtracker ."
 
+[tasks.docker-build-arm]
+description = "Build Docker image for linux/arm/v7 and export to foodini.tar"
+run = "docker buildx build --platform linux/arm/v7 -t foodini:latest --output type=docker,dest=foodini.tar ."
+
 [tasks.docker-run]
 description = "Run the app in Docker (requires .env file)"
 run = "docker run --env-file .env -p 8080:8080 foodtracker"
