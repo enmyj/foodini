@@ -1,10 +1,12 @@
 package sheets_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"foodtracker/internal/sheets"
+	"golang.org/x/oauth2"
 )
 
 func TestFoodEntryToRow(t *testing.T) {
@@ -223,4 +225,9 @@ func TestDayLogToRow_WithPoop(t *testing.T) {
 	if row[5] != "once" {
 		t.Errorf("col 5 (poop_notes): got %v, want once", row[5])
 	}
+}
+
+func TestMigrateSpreadsheet_FunctionExists(t *testing.T) {
+	// Compilation check — verify the function signature exists
+	var _ func(context.Context, oauth2.TokenSource, string) error = sheets.MigrateSpreadsheet
 }

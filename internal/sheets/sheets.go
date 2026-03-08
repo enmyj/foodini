@@ -250,6 +250,40 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	return created.SpreadsheetId, nil
 }
 
+// MigrateSpreadsheet upgrades an existing spreadsheet from schema v1 to v2.
+// It extends the Activity sheet header to include poop and poop_notes columns,
+// then bumps the schema_version in the Meta sheet to CurrentSchemaVersion.
+func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	// Write full 6-column Activity header (safe to overwrite; data rows start at row 2)
+	actHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, activitySheet+"!A1:F1", actHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate activity header: %w", err)
+	}
+
+	// Bump schema version
+	metaData := &googlesheets.ValueRange{
+		Values: [][]interface{}{{strconv.Itoa(CurrentSchemaVersion)}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate schema version: %w", err)
+	}
+
+	return nil
+}
+
 // FindExistingSpreadsheet searches the user's Drive for a previously-created
 // "Food Tracker — {email}" spreadsheet. Returns ("", nil) if none found.
 // Uses drive.file scope so only finds files created by this app.

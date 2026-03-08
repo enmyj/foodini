@@ -148,7 +148,17 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 			return false
 		}
 		version, err := svc.GetSchemaVersion(r.Context())
-		if err != nil || version < sheets.CurrentSchemaVersion {
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "schema check failed")
+			return false
+		}
+		if version == 1 {
+			// Migrate v1 → v2: add poop columns to Activity sheet header
+			if err := sheets.MigrateSpreadsheet(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+		} else if version < 1 {
 			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
 			return false
 		}
