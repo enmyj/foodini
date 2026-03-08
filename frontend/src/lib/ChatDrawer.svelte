@@ -1,7 +1,7 @@
 <script>
   import { chat, confirmChat } from './api.js'
 
-  let { open, onClose, onEntriesAdded, date = null } = $props()
+  let { open, onClose, onEntriesAdded, date = null, prefill = '' } = $props()
 
   let messages = $state([])
   let input = $state('')
@@ -12,6 +12,7 @@
 
   $effect(() => {
     if (open) {
+      input = prefill || ''
       setTimeout(() => inputEl?.focus(), 60)
     } else {
       messages = []
@@ -222,7 +223,7 @@
     border: 1px solid #e8e8e6;
     border-radius: 8px;
     padding: 0.5rem 0.75rem;
-    font-size: 0.95rem;
+    font-size: 1rem;
     resize: none;
     font-family: inherit;
     background: #fafaf9;

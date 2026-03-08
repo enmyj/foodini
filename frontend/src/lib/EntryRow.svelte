@@ -3,30 +3,50 @@
 
   let { entry, onUpdate, onDelete } = $props()
 
-  let editing = $state(null)
-  let editValue = $state('')
+  const MEALS = ['breakfast', 'snack', 'lunch', 'dinner']
+
+  let modalOpen = $state(false)
+  let editDesc = $state('')
+  let editMeal = $state('')
+  let editCal = $state(0)
+  let editProtein = $state(0)
+  let editCarbs = $state(0)
+  let editFat = $state(0)
+  let editFiber = $state(0)
   let saving = $state(false)
   let deleting = $state(false)
-  let cancelFlag = false
 
-  const numFields = new Set(['calories', 'protein', 'carbs', 'fat', 'fiber'])
-
-  function startEdit(field) {
-    editing = field
-    editValue = String(entry[field])
+  function openModal() {
+    editDesc = entry.description
+    editMeal = entry.meal_type
+    editCal = entry.calories
+    editProtein = entry.protein
+    editCarbs = entry.carbs
+    editFat = entry.fat
+    editFiber = entry.fiber ?? 0
+    modalOpen = true
   }
 
-  async function commitEdit() {
-    if (!editing || cancelFlag) return
+  async function save() {
+    if (saving) return
     saving = true
     try {
-      const value = numFields.has(editing) ? (parseInt(editValue) || 0) : editValue
-      const saved = await patchEntry(entry.id, { ...entry, [editing]: value })
+      const updated = {
+        ...entry,
+        description: editDesc,
+        meal_type: editMeal,
+        calories: editCal,
+        protein: editProtein,
+        carbs: editCarbs,
+        fat: editFat,
+        fiber: editFiber,
+      }
+      const saved = await patchEntry(entry.id, updated)
       onUpdate(saved)
+      modalOpen = false
     } catch (e) {
       console.error('patch failed', e)
     } finally {
-      editing = null
       saving = false
     }
   }
@@ -44,95 +64,123 @@
   }
 
   function onKeyDown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      commitEdit()
-    }
-    if (e.key === 'Escape') {
-      cancelFlag = true
-      editing = null
-      setTimeout(() => { cancelFlag = false }, 0)
-    }
+    if (e.key === 'Escape') modalOpen = false
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save()
   }
 </script>
 
-<div class="row" class:fading={deleting} class:editing-desc={editing === 'description'}>
-  <div class="desc">
-    {#if editing === 'description'}
-      <textarea class="desc-input" bind:value={editValue} onblur={commitEdit} onkeydown={onKeyDown} autofocus rows="2"></textarea>
-    {:else}
-      <span class="editable" onclick={() => startEdit('description')}>{entry.description}</span>
-    {/if}
-  </div>
-  <div class="macros">
-    {#each ['calories', 'protein', 'carbs', 'fat', 'fiber'] as field}
-      {#if editing === field}
-        <input class="num-input" type="number" bind:value={editValue}
-               onblur={commitEdit} onkeydown={onKeyDown} autofocus />
-      {:else}
-        <span class="editable macro" title={field} onclick={() => startEdit(field)}>
-          {entry[field]}{field === 'calories' ? ' cal' : 'g'}
-        </span>
-      {/if}
-    {/each}
+<div class="row" class:fading={deleting}>
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="main" onclick={openModal}>
+    <span class="desc">{entry.description}</span>
+    <span class="macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F{entry.fiber ? ` · ${entry.fiber}g Fb` : ''}</span>
   </div>
   <button class="del" onclick={handleDelete} disabled={deleting} aria-label="Delete entry">×</button>
 </div>
 
+{#if modalOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="overlay" onclick={() => modalOpen = false}></div>
+  <div class="modal" role="dialog" aria-label="Edit entry" tabindex="-1" onkeydown={onKeyDown}>
+    <h3>Edit entry</h3>
+
+    <label class="field">
+      <span class="label">Description</span>
+      <textarea bind:value={editDesc} rows="2" disabled={saving}></textarea>
+    </label>
+
+    <label class="field">
+      <span class="label">Meal</span>
+      <select bind:value={editMeal} disabled={saving}>
+        {#each MEALS as m}
+          <option value={m}>{m}</option>
+        {/each}
+      </select>
+    </label>
+
+    <div class="num-grid">
+      <label class="field">
+        <span class="label">Calories</span>
+        <input type="number" bind:value={editCal} disabled={saving} />
+      </label>
+      <label class="field">
+        <span class="label">Protein (g)</span>
+        <input type="number" bind:value={editProtein} disabled={saving} />
+      </label>
+      <label class="field">
+        <span class="label">Carbs (g)</span>
+        <input type="number" bind:value={editCarbs} disabled={saving} />
+      </label>
+      <label class="field">
+        <span class="label">Fat (g)</span>
+        <input type="number" bind:value={editFat} disabled={saving} />
+      </label>
+      <label class="field">
+        <span class="label">Fiber (g)</span>
+        <input type="number" bind:value={editFiber} disabled={saving} />
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="save-btn" onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+      <button class="cancel-btn" onclick={() => modalOpen = false} disabled={saving}>Cancel</button>
+    </div>
+  </div>
+{/if}
+
 <style>
   .row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 0.65rem 0;
+    padding: 0.75rem 0;
     border-bottom: 1px solid #e8e8e6;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .row.fading {
     opacity: 0.4;
   }
 
-  .desc {
+  .main {
     flex: 1;
     min-width: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .main:hover .desc {
+    color: #555;
+  }
+
+  .desc {
     font-size: 0.95rem;
     line-height: 1.4;
-  }
-
-  .editable {
-    cursor: pointer;
-  }
-
-  .editable:hover {
-    color: #555;
+    color: #1c1c1c;
   }
 
   .macros {
-    display: flex;
-    gap: 0.75rem;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     color: #888;
-    flex-shrink: 0;
-  }
-
-  .macro {
-    cursor: pointer;
-  }
-
-  .macro:hover {
-    color: #555;
+    line-height: 1.3;
   }
 
   .del {
     background: none;
     border: none;
     color: #ccc;
-    font-size: 1rem;
+    font-size: 1.1rem;
     line-height: 1;
     cursor: pointer;
-    padding: 0 0.15rem;
+    padding: 0;
     flex-shrink: 0;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
   }
 
   .del:hover {
@@ -144,28 +192,137 @@
     cursor: default;
   }
 
-  .row.editing-desc {
-    align-items: flex-start;
+  /* Modal */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.25);
+    z-index: 30;
   }
 
-  input, textarea {
-    border: none;
-    border-bottom: 2px solid #2d2d2d;
-    border-radius: 0;
-    padding: 2px 4px;
+  .modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fafaf9;
+    border-radius: 12px;
+    width: min(92vw, 420px);
+    max-height: 85vh;
+    overflow-y: auto;
+    z-index: 31;
+    padding: 1.5rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  }
+
+  .modal h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1c1c1c;
+    margin-bottom: 1.25rem;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
+  }
+
+  .label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #888;
+  }
+
+  textarea, input, select {
+    border: 1px solid #e8e8e6;
+    border-radius: 6px;
+    padding: 0.5rem 0.6rem;
     font-family: inherit;
-    font-size: inherit;
-    background: transparent;
+    font-size: 1rem;
+    background: #fff;
+    color: #1c1c1c;
     outline: none;
+    width: 100%;
+    box-sizing: border-box;
   }
 
-  .desc-input {
-    width: 100%;
+  textarea:focus, input:focus, select:focus {
+    border-color: #2d2d2d;
+  }
+
+  textarea {
     resize: none;
     line-height: 1.4;
   }
 
-  .num-input {
-    width: 56px;
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 2rem;
+    cursor: pointer;
+  }
+
+  .num-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .num-grid .field {
+    margin-bottom: 0;
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .save-btn {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    background: #2d2d2d;
+    color: #fafaf9;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    font-weight: 500;
+    touch-action: manipulation;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: #1c1c1c;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .cancel-btn {
+    padding: 0.6rem 1rem;
+    background: none;
+    color: #888;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    touch-action: manipulation;
+  }
+
+  .cancel-btn:hover:not(:disabled) {
+    border-color: #888;
   }
 </style>

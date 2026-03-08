@@ -10,16 +10,19 @@
 
   let view = $state('today')
   let profileOpen = $state(false)
+  let spreadsheetUrl = $state('')
   let data = $state(null)
   let loading = $state(true)
   let drawerOpen = $state(false)
   let selectedDay = $state(null)
   let drawerDate = $state(null)
+  let drawerPrefill = $state('')
 
   async function load() {
     loading = true
     try {
       data = await getLog(view === 'history' ? { days: 30 } : {})
+      if (data?.spreadsheet_url && !spreadsheetUrl) spreadsheetUrl = data.spreadsheet_url
     } finally {
       loading = false
     }
@@ -57,6 +60,7 @@
   }
 
   function openDrawerForDate(date) {
+    selectedDay = null
     drawerDate = date
     drawerOpen = true
   }
@@ -76,7 +80,14 @@
         <button class:active={view === 'today'} onclick={() => { view = 'today'; selectedDay = null; drawerDate = null }}>Today</button>
         <button class:active={view === 'history'} onclick={() => view = 'history'}>History</button>
       </div>
-      <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings">⚙</button>
+      <div class="header-actions">
+        {#if spreadsheetUrl}
+          <a class="sheet-link" href={spreadsheetUrl} target="_blank" rel="noopener" aria-label="Open Google Sheet">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </a>
+        {/if}
+        <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings">⚙</button>
+      </div>
     </div>
     {#if data?.entries}
       {@const t = totals(data.entries)}
@@ -96,12 +107,12 @@
       {@const group = (groupedByMeal(data?.entries)[meal] ?? [])}
       <section>
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <h3 onclick={() => drawerOpen = true}>{meal}</h3>
+        <h3 onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</h3>
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <p class="empty" onclick={() => drawerOpen = true}>Nothing logged</p>
+          <p class="empty" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>Nothing logged</p>
         {/each}
       </section>
     {/each}
@@ -128,12 +139,13 @@
   {/if}
 </div>
 
-<button class="fab" onclick={() => drawerOpen = true} aria-label="Add food">+</button>
+<button class="fab" onclick={() => { drawerPrefill = ''; drawerOpen = true }} aria-label="Add food">+</button>
 <ChatDrawer
   open={drawerOpen}
-  onClose={() => { drawerOpen = false; drawerDate = null }}
+  onClose={() => { drawerOpen = false; drawerDate = null; drawerPrefill = '' }}
   {onEntriesAdded}
   date={drawerDate}
+  prefill={drawerPrefill}
 />
 {#if profileOpen}
   <ProfilePanel onClose={() => profileOpen = false} />
@@ -205,6 +217,8 @@
     margin-bottom: 0.5rem;
     cursor: pointer;
     display: inline-block;
+    padding: 0.3rem 0;
+    touch-action: manipulation;
   }
 
   h3:hover {
@@ -214,8 +228,9 @@
   .empty {
     color: #bbb;
     font-size: 0.85rem;
-    padding: 0.3rem 0;
+    padding: 0.6rem 0;
     cursor: pointer;
+    touch-action: manipulation;
   }
 
   .empty:hover {
@@ -233,10 +248,11 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 0;
+    padding: 0.85rem 0;
     border-bottom: 1px solid #e8e8e6;
     cursor: pointer;
     gap: 1rem;
+    touch-action: manipulation;
   }
 
   .week-row:hover {
@@ -273,8 +289,8 @@
     position: fixed;
     bottom: 2rem;
     right: 2rem;
-    width: 3.25rem;
-    height: 3.25rem;
+    width: 3.5rem;
+    height: 3.5rem;
     border-radius: 50%;
     background: #2d2d2d;
     color: #fafaf9;
@@ -286,10 +302,30 @@
     align-items: center;
     justify-content: center;
     line-height: 1;
+    touch-action: manipulation;
   }
 
   .fab:hover {
     background: #1c1c1c;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .sheet-link {
+    display: flex;
+    align-items: center;
+    color: #888;
+    padding: 0.5rem 0.4rem;
+    text-decoration: none;
+    touch-action: manipulation;
+  }
+
+  .sheet-link:hover {
+    color: #2d2d2d;
   }
 
   .settings-btn {
@@ -298,8 +334,9 @@
     font-size: 1.1rem;
     color: #888;
     cursor: pointer;
-    padding: 0.1rem 0.25rem;
+    padding: 0.5rem 0.5rem;
     line-height: 1;
+    touch-action: manipulation;
   }
 
   .settings-btn:hover {

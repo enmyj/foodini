@@ -195,10 +195,11 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data, _ := json.Marshal(map[string]any{
-			"entries":    entries,
-			"daily_logs": dailyLogs,
-			"start":      start,
-			"end":        today,
+			"entries":         entries,
+			"daily_logs":      dailyLogs,
+			"start":           start,
+			"end":             today,
+			"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 		})
 		h.cacheSet(cacheKey, data)
 		w.Header().Set("Content-Type", "application/json")
@@ -227,9 +228,10 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, _ := json.Marshal(map[string]any{
-		"entries": entries,
-		"day_log": dayLog,
-		"date":    date,
+		"entries":         entries,
+		"day_log":         dayLog,
+		"date":            date,
+		"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 	})
 	h.cacheSet(cacheKey, data)
 	w.Header().Set("Content-Type", "application/json")
