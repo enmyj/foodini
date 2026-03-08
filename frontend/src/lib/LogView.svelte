@@ -55,6 +55,19 @@
     } catch {}
   }
 
+  async function repeatMeal(meal) {
+    if (repeating !== null) return
+    repeating = meal
+    try {
+      const res = await confirmChat(yesterdayByMeal[meal], data?.date ?? yesterdayString())
+      data = { ...data, entries: [...(data.entries ?? []), ...res.entries] }
+    } catch {
+      // silent fail — user can tap again
+    } finally {
+      repeating = null
+    }
+  }
+
   function groupedByDate(entries) {
     const g = {}
     for (const e of entries ?? []) {
@@ -130,8 +143,19 @@
     {#each MEAL_ORDER as meal}
       {@const group = (groupedByMeal(data?.entries)[meal] ?? [])}
       <section>
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <h3 onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</h3>
+        <div class="meal-header">
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <h3 onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</h3>
+          {#if yesterdayByMeal[meal]?.length}
+            <button
+              class="repeat-btn"
+              class:spinning={repeating === meal}
+              onclick={() => repeatMeal(meal)}
+              disabled={repeating !== null}
+              aria-label="Repeat yesterday's {meal}"
+            >↻</button>
+          {/if}
+        </div>
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
@@ -238,7 +262,6 @@
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;
-    margin-bottom: 0.5rem;
     cursor: pointer;
     display: inline-block;
     padding: 0.3rem 0;
@@ -247,6 +270,44 @@
 
   h3:hover {
     color: #2d2d2d;
+  }
+
+  .meal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .repeat-btn {
+    background: none;
+    border: none;
+    color: #ccc;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.2rem 0.3rem;
+    touch-action: manipulation;
+    display: flex;
+    align-items: center;
+  }
+
+  .repeat-btn:hover:not(:disabled) {
+    color: #555;
+  }
+
+  .repeat-btn:disabled {
+    cursor: default;
+  }
+
+  .repeat-btn.spinning {
+    animation: spin 0.7s linear infinite;
+    color: #888;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   .empty {
