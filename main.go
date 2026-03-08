@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	_ "time/tzdata"
 
 	"foodtracker/internal/api"
 	"foodtracker/internal/auth"
