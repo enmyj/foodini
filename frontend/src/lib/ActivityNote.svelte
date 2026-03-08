@@ -9,6 +9,9 @@
   let feelingNotes = $state('')
   let editingActivity = $state(false)
   let editingFeeling = $state(false)
+  let poop = $state(false)
+  let poopNotes = $state('')
+  let editingPoop = $state(false)
   let saving = $state(false)
   let saveError = $state('')
 
@@ -19,6 +22,8 @@
       activity = res.activity ?? ''
       feelingScore = res.feeling_score ?? 0
       feelingNotes = res.feeling_notes ?? ''
+      poop = res.poop ?? false
+      poopNotes = res.poop_notes ?? ''
     } catch {}
   })
 
@@ -26,9 +31,10 @@
     saving = true
     saveError = ''
     try {
-      await putActivity(date, { activity, feeling_score: feelingScore, feeling_notes: feelingNotes })
+      await putActivity(date, { activity, feeling_score: feelingScore, feeling_notes: feelingNotes, poop, poop_notes: poopNotes })
       editingActivity = false
       editingFeeling = false
+      editingPoop = false
     } catch {
       saveError = 'Failed to save. Try again.'
     } finally {
@@ -38,7 +44,7 @@
 
   function onKeyDown(e) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save()
-    if (e.key === 'Escape') { editingActivity = false; editingFeeling = false }
+    if (e.key === 'Escape') { editingActivity = false; editingFeeling = false; editingPoop = false }
   }
 </script>
 
@@ -97,6 +103,47 @@
           <span class="score">{feelingScore}/10</span>{#if feelingNotes} — {feelingNotes}{/if}
         {:else}
           {feelingNotes || 'Tap to add how you were feeling…'}
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <div class="section">
+    <h3>💩</h3>
+    {#if editingPoop}
+      <div class="poop-edit">
+        <div class="poop-toggle">
+          <button
+            class="toggle-btn"
+            class:selected={poop}
+            onclick={() => poop = true}
+          >Yes</button>
+          <button
+            class="toggle-btn"
+            class:selected={!poop}
+            onclick={() => poop = false}
+          >No</button>
+        </div>
+        <textarea
+          bind:value={poopNotes}
+          onkeydown={onKeyDown}
+          placeholder="Any details…"
+          rows="2"
+        ></textarea>
+        <div class="edit-actions">
+          <button class="save-btn" onclick={save} disabled={saving}>Save</button>
+          <button class="cancel-btn" onclick={() => editingPoop = false}>Cancel</button>
+        </div>
+      </div>
+    {:else}
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="note" class:placeholder={!poop && !poopNotes} onclick={() => editingPoop = true}>
+        {#if poop}
+          Yes{#if poopNotes} — {poopNotes}{/if}
+        {:else if poopNotes}
+          No — {poopNotes}
+        {:else}
+          Tap to log…
         {/if}
       </div>
     {/if}
@@ -237,5 +284,33 @@
 
   .hint.error {
     color: #b91c1c;
+  }
+
+  .poop-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .poop-toggle {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .toggle-btn {
+    padding: 0.25rem 0.75rem;
+    border: 1px solid #e8e8e6;
+    border-radius: 5px;
+    background: none;
+    color: #888;
+    font-size: 0.82rem;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .toggle-btn.selected {
+    background: #2d2d2d;
+    color: #fafaf9;
+    border-color: #2d2d2d;
   }
 </style>
