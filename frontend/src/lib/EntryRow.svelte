@@ -70,8 +70,8 @@
 </script>
 
 <div class="row" class:fading={deleting}>
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="main" onclick={openModal}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="main" role="button" tabindex="0" onclick={openModal}>
     <span class="desc">{entry.description}</span>
     <span class="macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F{entry.fiber ? ` · ${entry.fiber}g Fb` : ''}</span>
   </div>
@@ -79,8 +79,8 @@
 </div>
 
 {#if modalOpen}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="overlay" onclick={() => modalOpen = false}></div>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="overlay" aria-hidden="true" onclick={() => modalOpen = false}></div>
   <div class="modal" role="dialog" aria-label="Edit entry" tabindex="-1" onkeydown={onKeyDown}>
     <h3>Edit entry</h3>
 

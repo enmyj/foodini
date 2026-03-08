@@ -52,6 +52,7 @@
   <div class="section">
     <h3>Activity</h3>
     {#if editingActivity}
+      <!-- svelte-ignore a11y_autofocus -->
       <textarea
         bind:value={activity}
         onkeydown={onKeyDown}
@@ -64,8 +65,8 @@
         <button class="cancel-btn" onclick={() => editingActivity = false}>Cancel</button>
       </div>
     {:else}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="note" class:placeholder={!activity} onclick={() => editingActivity = true}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="note" role="button" tabindex="0" class:placeholder={!activity} onclick={() => editingActivity = true}>
         {activity || 'Tap to add activity…'}
       </div>
     {/if}
@@ -97,8 +98,8 @@
         </div>
       </div>
     {:else}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="note" class:placeholder={!feelingScore && !feelingNotes} onclick={() => editingFeeling = true}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="note" role="button" tabindex="0" class:placeholder={!feelingScore && !feelingNotes} onclick={() => editingFeeling = true}>
         {#if feelingScore}
           <span class="score">{feelingScore}/10</span>{#if feelingNotes} — {feelingNotes}{/if}
         {:else}
@@ -136,8 +137,8 @@
         </div>
       </div>
     {:else}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="note" class:placeholder={!poop && !poopNotes} onclick={() => editingPoop = true}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="note" role="button" tabindex="0" class:placeholder={!poop && !poopNotes} onclick={() => editingPoop = true}>
         {#if poop}
           Yes{#if poopNotes} — {poopNotes}{/if}
         {:else if poopNotes}

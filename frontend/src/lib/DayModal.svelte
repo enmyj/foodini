@@ -23,8 +23,8 @@
 
 <svelte:window onkeydown={onWindowKeyDown} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="overlay" onclick={onClose}></div>
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<div class="overlay" aria-hidden="true" onclick={onClose}></div>
 <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-header">
     <h2 id="modal-title">{day.date}</h2>

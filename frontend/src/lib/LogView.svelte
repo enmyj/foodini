@@ -150,8 +150,7 @@
       {@const group = (groupedByMeal(data?.entries)[meal] ?? [])}
       <section>
         <div class="meal-header">
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <h3 onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</h3>
+          <button class="meal-name" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</button>
           {#if yesterdayByMeal[meal]?.length}
             <button
               class="repeat-btn"
@@ -165,8 +164,7 @@
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
-          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-          <p class="empty" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>Nothing logged</p>
+          <button class="empty" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>Nothing logged</button>
         {/each}
       </section>
     {/each}
@@ -174,8 +172,8 @@
   {:else}
     {#each Object.entries(groupedByDate(data?.entries ?? [])).sort() as [date, entries]}
       {@const dayLog = (data?.daily_logs ?? []).find(d => d.date === date) ?? null}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="week-row" onclick={() => selectedDay = { date, entries, dayLog }}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="week-row" role="button" tabindex="0" onclick={() => selectedDay = { date, entries, dayLog }}>
         <span class="date">{date}</span>
         <span class="feeling-score">{dayLog?.feeling_score ? `${dayLog.feeling_score}/10` : '—'}</span>
         <span class="activity-tick">{dayLog?.activity ? '✓' : ''}</span>
@@ -263,7 +261,10 @@
     margin: 1.5rem 0;
   }
 
-  h3 {
+  .meal-name {
+    background: none;
+    border: none;
+    font-family: inherit;
     text-transform: uppercase;
     font-size: 0.68rem;
     color: #888;
@@ -275,7 +276,7 @@
     touch-action: manipulation;
   }
 
-  h3:hover {
+  .meal-name:hover {
     color: #2d2d2d;
   }
 
@@ -318,11 +319,16 @@
   }
 
   .empty {
+    background: none;
+    border: none;
+    font-family: inherit;
+    text-align: left;
     color: #bbb;
     font-size: 0.85rem;
     padding: 0.6rem 0;
     cursor: pointer;
     touch-action: manipulation;
+    width: 100%;
   }
 
   .empty:hover {
