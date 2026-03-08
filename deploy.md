@@ -37,13 +37,25 @@ In the Google Cloud Console, ensure `https://food.ianmyjer.com/auth/callback` is
 
 `imagePullPolicy: Never` means the image must exist in k3s's local containerd store before deploying.
 
-**Option A — build on dev machine, copy to Pi (ARM64 cross-compile):**
+**Option A — build on dev machine, copy to Pi (cross-compile):**
 
+For a 32-bit ARMv7 OS (Raspberry Pi OS 32-bit):
+```bash
+docker buildx build --platform linux/arm/v7 -t foodini:latest --output type=docker,dest=foodini.tar .
+scp foodini.tar pi@<pi-ip>:~/
+ssh pi@<pi-ip> "sudo k3s ctr images import ~/foodini.tar"
+```
+
+For a 64-bit ARM64 OS (Raspberry Pi OS 64-bit):
 ```bash
 docker buildx build --platform linux/arm64 -t foodini:latest --output type=docker,dest=foodini.tar .
 scp foodini.tar pi@<pi-ip>:~/
 ssh pi@<pi-ip> "sudo k3s ctr images import ~/foodini.tar"
 ```
+
+> The Dockerfile uses `--platform=$BUILDPLATFORM` for all build stages so the
+> frontend (bun) and Go compiler always run natively — only the output binary
+> targets the Pi's architecture.
 
 **Option B — build directly on the Pi:**
 

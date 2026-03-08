@@ -1,5 +1,7 @@
-# ── Stage 1: Build Svelte frontend ────────────────────────────────────────────
-FROM oven/bun:1-alpine AS frontend
+# syntax=docker/dockerfile:1
+
+# ── Stage 1: Build Svelte frontend (always runs on host platform) ─────────────
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/bun.lock* ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
@@ -7,8 +9,11 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 COPY frontend/ ./
 RUN bun run build
 
-# ── Stage 2: Build Go binary ──────────────────────────────────────────────────
-FROM golang:1.26.0-alpine AS builder
+# ── Stage 2: Build Go binary (cross-compiles for target platform) ─────────────
+FROM --platform=$BUILDPLATFORM golang:1.26.0-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -18,7 +23,7 @@ COPY . .
 COPY --from=frontend /app/frontend/dist ./frontend/dist
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -o foodtracker .
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} CGO_ENABLED=0 go build -o foodtracker .
 
 # ── Stage 3: Minimal runtime ──────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12
