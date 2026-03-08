@@ -1,15 +1,15 @@
 [tools]
 go = "1.26.0"
-node = "24"
+bun = "latest"
 
 [tasks.install]
 description = "Install frontend dependencies"
-run = "cd frontend && npm install"
+run = "cd frontend && bun install"
 
 [tasks.build-frontend]
 description = "Build the Svelte frontend into frontend/dist"
 depends = ["install"]
-run = "cd frontend && npm run build"
+run = "cd frontend && bun run build"
 
 [tasks.build]
 description = "Build production Go binary (embeds frontend)"
@@ -22,7 +22,7 @@ run = "export $(grep -v '^#' .env | xargs) && go run main.go"
 
 [tasks.dev-frontend]
 description = "Run Svelte dev server with API proxy on :5173"
-run = "cd frontend && npm run dev"
+run = "cd frontend && bun run dev"
 
 [tasks.test]
 description = "Run all Go tests"

@@ -28,6 +28,7 @@
     saveError = ''
     try {
       await putProfile({ gender, height, weight, notes })
+      onClose()
     } catch {
       saveError = 'Failed to save. Try again.'
     } finally {
@@ -56,28 +57,31 @@
     <div class="fields">
       <label>
         <span>Gender</span>
-        <input type="text" bind:value={gender} onblur={save} placeholder="e.g. male, female, non-binary" />
+        <input type="text" bind:value={gender} placeholder="e.g. male, female, non-binary" disabled={saving} />
       </label>
       <label>
         <span>Height</span>
-        <input type="text" bind:value={height} onblur={save} placeholder="e.g. 5'10&quot; or 178cm" />
+        <input type="text" bind:value={height} placeholder="e.g. 5'10&quot; or 178cm" disabled={saving} />
       </label>
       <label>
         <span>Weight</span>
-        <input type="text" bind:value={weight} onblur={save} placeholder="e.g. 170lbs or 77kg" />
+        <input type="text" bind:value={weight} placeholder="e.g. 170lbs or 77kg" disabled={saving} />
       </label>
       <label>
         <span>Notes</span>
         <textarea
           bind:value={notes}
-          onblur={save}
           placeholder="Dietary restrictions, goals, allergies…"
           rows="3"
+          disabled={saving}
         ></textarea>
       </label>
     </div>
-    {#if saving}<p class="status">Saving…</p>{/if}
     {#if saveError}<p class="status error">{saveError}</p>{/if}
+    <div class="actions">
+      <button class="save-btn" onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+      <button class="cancel-btn" onclick={onClose} disabled={saving}>Cancel</button>
+    </div>
   {:else}
     <p class="status">Loading…</p>
   {/if}
@@ -160,7 +164,7 @@
     border: none;
     border-bottom: 2px solid #2d2d2d;
     padding: 0.3rem 0;
-    font-size: 0.9rem;
+    font-size: 1rem;
     font-family: inherit;
     background: transparent;
     color: #1c1c1c;
@@ -176,5 +180,50 @@
 
   .status.error {
     color: #b91c1c;
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+  }
+
+  .save-btn {
+    flex: 1;
+    padding: 0.6rem 1rem;
+    background: #2d2d2d;
+    color: #fafaf9;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    font-weight: 500;
+    touch-action: manipulation;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: #1c1c1c;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .cancel-btn {
+    padding: 0.6rem 1rem;
+    background: none;
+    color: #888;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    touch-action: manipulation;
+  }
+
+  .cancel-btn:hover:not(:disabled) {
+    border-color: #888;
   }
 </style>
