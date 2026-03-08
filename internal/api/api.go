@@ -83,6 +83,19 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
+// LocalNow returns the current time in the user's local timezone.
+// It reads the IANA timezone name from the X-Timezone request header.
+// Falls back to server time if the header is missing or invalid.
+func LocalNow(r *http.Request) time.Time {
+	tz := r.Header.Get("X-Timezone")
+	if tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return time.Now().In(loc)
+		}
+	}
+	return time.Now()
+}
+
 // formatProfileContext builds the profile preamble injected into Gemini's system prompt.
 // Returns "" if all profile fields are empty.
 func formatProfileContext(p sheets.UserProfile) string {
@@ -170,7 +183,7 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	today := sheets.DateString(time.Now())
+	today := sheets.DateString(LocalNow(r))
 
 	if daysStr := r.URL.Query().Get("days"); daysStr != "" {
 		days, err := strconv.Atoi(daysStr)
@@ -183,7 +196,7 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 			w.Write(cached)
 			return
 		}
-		start := sheets.DateString(time.Now().AddDate(0, 0, -(days - 1)))
+		start := sheets.DateString(LocalNow(r).AddDate(0, 0, -(days - 1)))
 		entries, err := svc.GetFoodByDateRange(r.Context(), start, today)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
@@ -258,7 +271,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	targetDate := req.Date
 	if targetDate == "" {
-		targetDate = sheets.DateString(time.Now())
+		targetDate = sheets.DateString(LocalNow(r))
 	}
 
 	// Fetch user profile for Gemini context (ignore errors — use empty profile)
@@ -308,7 +321,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 
 	targetDate := req.Date
 	if targetDate == "" {
-		targetDate = sheets.DateString(time.Now())
+		targetDate = sheets.DateString(LocalNow(r))
 	}
 
 	svc, err := h.sheetsSvc(r, session)
@@ -317,7 +330,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now()
+	now := LocalNow(r)
 	var saved []sheets.FoodEntry
 	for _, e := range req.Entries {
 		fe := sheets.FoodEntry{
@@ -439,7 +452,7 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	date := r.URL.Query().Get("date")
 	if date == "" {
-		date = sheets.DateString(time.Now())
+		date = sheets.DateString(LocalNow(r))
 	}
 	dayLog, err := svc.GetActivity(r.Context(), date)
 	if err != nil {
@@ -458,7 +471,7 @@ func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Date == "" {
-		req.Date = sheets.DateString(time.Now())
+		req.Date = sheets.DateString(LocalNow(r))
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
