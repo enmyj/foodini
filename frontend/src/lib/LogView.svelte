@@ -4,10 +4,12 @@
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
   import DayModal from './DayModal.svelte'
+  import ProfilePanel from './ProfilePanel.svelte'
 
   const MEAL_ORDER = ['breakfast', 'snack', 'lunch', 'dinner']
 
   let view = $state('today')
+  let profileOpen = $state(false)
   let data = $state(null)
   let loading = $state(true)
   let drawerOpen = $state(false)
@@ -74,6 +76,7 @@
         <button class:active={view === 'today'} onclick={() => { view = 'today'; selectedDay = null; drawerDate = null }}>Today</button>
         <button class:active={view === 'history'} onclick={() => view = 'history'}>History</button>
       </div>
+      <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings">⚙</button>
     </div>
     {#if data?.entries}
       {@const t = totals(data.entries)}
@@ -130,6 +133,9 @@
   {onEntriesAdded}
   date={drawerDate}
 />
+{#if profileOpen}
+  <ProfilePanel onClose={() => profileOpen = false} />
+{/if}
 
 <style>
   .wrap {
@@ -271,5 +277,19 @@
 
   .fab:hover {
     background: #1c1c1c;
+  }
+
+  .settings-btn {
+    background: none;
+    border: none;
+    font-size: 1.1rem;
+    color: #888;
+    cursor: pointer;
+    padding: 0.1rem 0.25rem;
+    line-height: 1;
+  }
+
+  .settings-btn:hover {
+    color: #2d2d2d;
   }
 </style>
