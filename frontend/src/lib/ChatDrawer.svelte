@@ -37,7 +37,7 @@
       const res = await chat(text, date)
       if (res.pending) {
         pendingEntries = res.entries
-        messages = [...messages, { role: 'assistant', text: res.message }]
+        messages = [...messages, { role: 'assistant', entries: res.entries }]
       } else {
         messages = [...messages, { role: 'assistant', text: res.message }]
       }
@@ -81,7 +81,18 @@
         <p class="hint">What did you eat?<br><small>e.g. "I had oatmeal and coffee for breakfast"</small></p>
       {/if}
       {#each messages as msg}
-        <div class="msg {msg.role}">{msg.text}</div>
+        {#if msg.entries}
+          <div class="msg assistant">
+            {#each msg.entries as e}
+              <div class="entry-line">
+                <span class="entry-desc">{e.description}</span>
+                <span class="entry-meta">({e.meal_type}) — {e.calories} cal, {e.protein}g P, {e.carbs}g C, {e.fat}g F{e.fiber ? `, ${e.fiber}g Fb` : ''}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="msg {msg.role}">{msg.text}</div>
+        {/if}
       {/each}
       {#if sending}
         <div class="msg assistant typing">…</div>
@@ -177,6 +188,27 @@
 
   .typing {
     color: #bbb;
+  }
+
+  .entry-line {
+    line-height: 1.55;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.4rem;
+    align-items: baseline;
+  }
+
+  .entry-line + .entry-line {
+    margin-top: 0.25rem;
+  }
+
+  .entry-desc {
+    font-weight: 500;
+  }
+
+  .entry-meta {
+    color: #888;
+    font-size: 0.82rem;
   }
 
   .input-row {
