@@ -188,8 +188,8 @@
     cursor: pointer;
     padding: 0;
     flex-shrink: 0;
-    min-width: 2.5rem;
-    min-height: 2.5rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
     display: flex;
     align-items: center;
     justify-content: center;

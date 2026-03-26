@@ -16,12 +16,13 @@
   <div class="section-header">Other</div>
   {#each [
     { label: 'Activity', value: data?.activity, field: 'activity' },
-    { label: 'Feeling', value: data?.feeling_score ? `${data.feeling_score}/10${data.feeling_notes ? ` — ${data.feeling_notes}` : ''}` : data?.feeling_notes, field: 'feeling' },
+    { label: 'Feeling', value: data?.feeling_notes || (data?.feeling_score ? `${data.feeling_score}/10` : null), field: 'feeling' },
     { label: '💩', value: data?.poop ? (data.poop_notes ? `Yes — ${data.poop_notes}` : 'Yes') : data?.poop_notes ? `No — ${data.poop_notes}` : null, field: 'poop' },
+    { label: '💧', value: data?.hydration ? `${data.hydration} L` : null, field: 'hydration' },
   ] as section}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="section" role="button" tabindex="0" onclick={() => onOpen(section.field)}>
-      <span class="section-label">{section.label}<span class="plus">+</span></span>
+      <span class="section-label">{section.label}</span>
       <span class="section-value" class:placeholder={!section.value}>{section.value || '—'}</span>
     </div>
   {/each}
@@ -37,7 +38,7 @@
 
   .section-header {
     text-transform: uppercase;
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;
@@ -70,7 +71,7 @@
   }
 
   .section-label {
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: 600;
@@ -80,18 +81,6 @@
     align-items: center;
     gap: 0.2rem;
     min-width: 4.5rem;
-  }
-
-  .plus {
-    font-size: 0.75rem;
-    opacity: 0.6;
-    font-weight: 600;
-  }
-
-  @media (hover: hover) {
-    .section:hover .plus {
-      opacity: 1;
-    }
   }
 
   .section-value {

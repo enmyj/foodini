@@ -166,7 +166,7 @@
     }
 
     .about h2 {
-        font-size: 0.68rem;
+        font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: #aaa;

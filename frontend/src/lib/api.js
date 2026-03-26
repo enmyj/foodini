@@ -54,11 +54,11 @@ export async function getActivity(date) {
   return res.json()
 }
 
-export async function putActivity(date, { activity, feeling_score, feeling_notes, poop, poop_notes }) {
+export async function putActivity(date, { activity, feeling_score, feeling_notes, poop, poop_notes, hydration }) {
   const res = await fetch('/api/activity', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
-    body: JSON.stringify({ date, activity, feeling_score, feeling_notes, poop, poop_notes }),
+    body: JSON.stringify({ date, activity, feeling_score, feeling_notes, poop, poop_notes, hydration }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()

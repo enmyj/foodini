@@ -168,11 +168,20 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		}
 		if version == 1 {
 			// Migrate v1 → v2: add poop columns to Activity sheet header
-			if err := sheets.MigrateSpreadsheet(r.Context(), ts, id); err != nil {
+			if err := sheets.MigrateV1toV2(r.Context(), ts, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}
-		} else if version < 1 {
+			version = 2
+		}
+		if version == 2 {
+			// Migrate v2 → v3: add hydration column to Activity sheet header
+			if err := sheets.MigrateV2toV3(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+		}
+		if version < 1 {
 			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
 			return false
 		}

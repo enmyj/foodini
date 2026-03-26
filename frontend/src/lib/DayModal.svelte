@@ -69,13 +69,11 @@
     </div>
   {/if}
 
-  {#if day.dayLog?.feeling_score || day.dayLog?.feeling_notes}
+  {#if day.dayLog?.feeling_notes || day.dayLog?.feeling_score}
     <div class="modal-section">
       <h3>Feeling</h3>
       <p>
-        {#if day.dayLog.feeling_score}<span class="score">{day.dayLog.feeling_score}/10</span>{/if}
-        {#if day.dayLog.feeling_score && day.dayLog.feeling_notes} — {/if}
-        {#if day.dayLog.feeling_notes}{day.dayLog.feeling_notes}{/if}
+        {#if day.dayLog.feeling_notes}{day.dayLog.feeling_notes}{:else}{day.dayLog.feeling_score}/10{/if}
       </p>
     </div>
   {/if}
@@ -86,6 +84,13 @@
       <p>
         {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
       </p>
+    </div>
+  {/if}
+
+  {#if day.dayLog?.hydration}
+    <div class="modal-section">
+      <h3>💧 Water</h3>
+      <p>{day.dayLog.hydration} L</p>
     </div>
   {/if}
 </div>
@@ -150,7 +155,7 @@
 
   h3 {
     text-transform: uppercase;
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;

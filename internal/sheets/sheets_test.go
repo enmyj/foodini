@@ -105,8 +105,8 @@ func TestDayLogFromRow_LegacyTwoColumn(t *testing.T) {
 func TestDayLogToRow(t *testing.T) {
 	d := sheets.DayLog{Date: "2026-03-06", Activity: "yoga", FeelingScore: 8, FeelingNotes: "great day"}
 	row := d.ToRow()
-	if len(row) != 6 {
-		t.Fatalf("want 6 cols, got %d", len(row))
+	if len(row) != 7 {
+		t.Fatalf("want 7 cols, got %d", len(row))
 	}
 	if row[0] != "2026-03-06" {
 		t.Errorf("col 0: got %v", row[0])
@@ -119,6 +119,9 @@ func TestDayLogToRow(t *testing.T) {
 	}
 	if row[5] != "" {
 		t.Errorf("col 5 (poop_notes): got %v, want empty", row[5])
+	}
+	if row[6] != "0" {
+		t.Errorf("col 6 (hydration): got %v, want 0", row[6])
 	}
 }
 
@@ -167,8 +170,8 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 2 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 2", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 3 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 3", sheets.CurrentSchemaVersion)
 	}
 }
 
@@ -216,14 +219,17 @@ func TestDayLogFromRow_BackwardCompatNoPoop(t *testing.T) {
 func TestDayLogToRow_WithPoop(t *testing.T) {
 	d := sheets.DayLog{Date: "2026-03-07", Poop: true, PoopNotes: "once"}
 	row := d.ToRow()
-	if len(row) != 6 {
-		t.Fatalf("want 6 cols, got %d", len(row))
+	if len(row) != 7 {
+		t.Fatalf("want 7 cols, got %d", len(row))
 	}
 	if row[4] != "true" {
 		t.Errorf("col 4 (poop): got %v, want true", row[4])
 	}
 	if row[5] != "once" {
 		t.Errorf("col 5 (poop_notes): got %v, want once", row[5])
+	}
+	if row[6] != "0" {
+		t.Errorf("col 6 (hydration): got %v, want 0", row[6])
 	}
 }
 

@@ -31,14 +31,15 @@
 
   // Activity
   let activityTextareaEl = $state(null)
-  let feelingScoreEl = $state(null)
+  let feelingNotesEl = $state(null)
   let poopNotesEl = $state(null)
+  let hydrationEl = $state(null)
 
   let activityText = $state('')
-  let feelingScore = $state('')
   let feelingNotes = $state('')
   let poop = $state(false)
   let poopNotes = $state('')
+  let hydration = $state('')
   let activitySaving = $state(false)
   let activityError = $state('')
   let activityLoadedFor = $state(null) // date string for which data is loaded
@@ -94,8 +95,9 @@
       if (initialTab === 'activity' && initialField) {
         setTimeout(() => {
           if (initialField === 'activity') activityTextareaEl?.focus()
-          else if (initialField === 'feeling') feelingScoreEl?.focus()
+          else if (initialField === 'feeling') feelingNotesEl?.focus()
           else if (initialField === 'poop') poopNotesEl?.focus()
+          else if (initialField === 'hydration') hydrationEl?.focus()
         }, 120)
       }
     } else {
@@ -109,10 +111,10 @@
       pendingEntries = null
       pendingImage = null
       activityText = ''
-      feelingScore = ''
       feelingNotes = ''
       poop = false
       poopNotes = ''
+      hydration = ''
       activitySaving = false
       activityError = ''
       activityLoadedFor = null
@@ -131,10 +133,10 @@
     try {
       const res = await getActivity(d)
       activityText = res.activity ?? ''
-      feelingScore = res.feeling_score ? String(res.feeling_score) : ''
       feelingNotes = res.feeling_notes ?? ''
       poop = res.poop ?? false
       poopNotes = res.poop_notes ?? ''
+      hydration = res.hydration ? String(res.hydration) : ''
     } catch {}
   }
 
@@ -144,10 +146,11 @@
     try {
       await putActivity(selectedDate, {
         activity: activityText,
-        feeling_score: feelingScore ? parseInt(feelingScore) : 0,
+        feeling_score: 0,
         feeling_notes: feelingNotes,
         poop,
         poop_notes: poopNotes,
+        hydration: hydration ? parseFloat(hydration) : 0,
       })
       onClose()
     } catch {
@@ -271,15 +274,12 @@
   >
     <div class="handle"></div>
 
-    <!-- Tab switcher -->
-    <div class="tabs">
-      <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}><span class="tab-icon" aria-hidden="true">🌯</span>Food</button>
-      <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}><span class="tab-icon" aria-hidden="true">🌯</span>Activity</button>
-    </div>
-
-    <!-- Date row (shared) -->
-    <div class="date-wrap">
-      <span class="date-label">Date</span>
+    <!-- Tab switcher + date -->
+    <div class="drawer-top">
+      <div class="tabs">
+        <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}><span class="tab-icon" aria-hidden="true">🌯</span>Food</button>
+        <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}><span class="tab-icon" aria-hidden="true">🌯</span>Activity</button>
+      </div>
       <input class="date-input" type="date" bind:value={selectedDate} max={todayStr()} />
     </div>
 
@@ -287,7 +287,6 @@
       <!-- Meal pills -->
       {#if messages.length === 0}
         <div class="meal-pills-wrap" class:shake={mealError}>
-          <span class="meal-pills-label">Meal</span>
           <div class="meal-pills">
             {#each MEALS as m}
               <button
@@ -377,18 +376,26 @@
           <textarea id="act-activity" bind:this={activityTextareaEl} bind:value={activityText} placeholder="Exercise, stress, unusual events…" rows="2"></textarea>
         </div>
         <div class="activity-field">
-          <label class="field-label" for="act-feeling-score">Feeling</label>
-          <div class="feeling-row">
-            <input id="act-feeling-score" bind:this={feelingScoreEl} class="score-input" type="number" min="1" max="10" bind:value={feelingScore} placeholder="1–10" />
-            <textarea bind:value={feelingNotes} placeholder="Energy, digestion, mood, sleep…" rows="2"></textarea>
-          </div>
+          <label class="field-label" for="act-feeling">Feeling</label>
+          <textarea id="act-feeling" bind:this={feelingNotesEl} bind:value={feelingNotes} placeholder="Energy, digestion, mood, sleep…" rows="2"></textarea>
         </div>
         <div class="activity-field">
-          <span class="field-label">💩</span>
-          <div class="poop-row">
-            <button class="toggle-btn" class:selected={poop === true} onclick={() => poop = true}>Yes</button>
-            <button class="toggle-btn" class:selected={poop === false} onclick={() => poop = false}>No</button>
-            <textarea bind:this={poopNotesEl} bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
+          <div class="field-header">
+            <span class="field-label">💩</span>
+            <div class="toggle-group">
+              <button class="toggle-btn" class:selected={poop === true} onclick={() => poop = true}>Yes</button>
+              <button class="toggle-btn" class:selected={poop === false} onclick={() => poop = false}>No</button>
+            </div>
+          </div>
+          <textarea bind:this={poopNotesEl} bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
+        </div>
+        <div class="activity-field">
+          <div class="field-header">
+            <label class="field-label" for="act-hydration">💧 Water</label>
+            <div class="hydration-inline">
+              <input id="act-hydration" bind:this={hydrationEl} class="hydration-input" type="number" min="0" max="10" step="0.1" bind:value={hydration} placeholder="0.0" />
+              <span class="hydration-unit">L</span>
+            </div>
           </div>
         </div>
         {#if activityError}
@@ -415,13 +422,15 @@
     bottom: 0;
     left: 0;
     right: 0;
+    max-width: 640px;
+    margin: 0 auto;
     background: #fafaf9;
     border-radius: 16px 16px 0 0;
     box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
     z-index: 11;
     display: flex;
     flex-direction: column;
-    height: min(60vh, 460px);
+    height: min(72vh, 540px);
     padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
     transition: transform 0.2s ease;
     will-change: transform;
@@ -435,23 +444,30 @@
     margin: 0 auto 0.75rem;
   }
 
-  /* --- Tabs --- */
+  /* --- Top header row (tabs + date) --- */
+  .drawer-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
   .tabs {
     display: flex;
     gap: 0.4rem;
-    margin-bottom: 0.75rem;
   }
 
   .tab-btn {
     background: none;
     border: none;
     border-radius: 999px;
-    padding: 0.25rem 0.75rem;
-    font-size: 0.85rem;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.9rem;
     font-weight: 500;
     color: #888;
     cursor: pointer;
     font-family: inherit;
+    min-height: 2.75rem;
   }
 
   .tab-btn.active {
@@ -469,23 +485,7 @@
     opacity: 1;
   }
 
-  /* --- Date row --- */
-  .date-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .date-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    color: #aaa;
-    flex-shrink: 0;
-  }
-
+  /* --- Date input --- */
   .date-input {
     border: 1px solid #d0d0ce;
     border-radius: 8px;
@@ -516,20 +516,7 @@
 
   /* --- Meal pills --- */
   .meal-pills-wrap {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
     margin-bottom: 0.75rem;
-  }
-
-  .meal-pills-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    color: #aaa;
-    flex-shrink: 0;
   }
 
   .meal-pills {
@@ -697,13 +684,13 @@
 
   .photo-remove {
     position: absolute;
-    top: -8px; right: -8px;
-    width: 22px; height: 22px;
+    top: -10px; right: -10px;
+    width: 28px; height: 28px;
     border-radius: 50%;
     background: #2d2d2d;
     color: #fafaf9;
     border: none;
-    font-size: 0.65rem;
+    font-size: 0.72rem;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -801,7 +788,7 @@
   .activity-form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.5rem;
     overflow-y: auto;
     flex: 1;
   }
@@ -809,7 +796,7 @@
   .activity-field {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.45rem;
   }
 
   .field-label {
@@ -820,32 +807,23 @@
     color: #aaa;
   }
 
-  .feeling-row {
+  .field-header {
     display: flex;
-    gap: 0.5rem;
     align-items: center;
+    gap: 0.75rem;
   }
 
-  .score-input {
-    width: 58px;
-    flex-shrink: 0;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
-    padding: 0.5rem 0.5rem;
-    font-size: 1rem;
-    font-family: inherit;
-    background: #fafaf9;
-    color: #1c1c1c;
-    text-align: center;
-  }
-
-  .score-input:focus { outline: none; border-color: #2d2d2d; }
-
-  .poop-row {
+  .toggle-group {
     display: flex;
     gap: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  .hydration-inline {
+    display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-shrink: 0;
   }
 
   .toggle-btn {
@@ -866,6 +844,30 @@
     background: #2d2d2d;
     border-color: #2d2d2d;
     color: #fafaf9;
+  }
+
+
+  .hydration-input {
+    width: 80px;
+    flex-shrink: 0;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    padding: 0.5rem 0.5rem;
+    font-size: 1rem;
+    font-family: inherit;
+    background: #fafaf9;
+    color: #1c1c1c;
+    text-align: center;
+  }
+
+  .hydration-input::-webkit-outer-spin-button,
+  .hydration-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .hydration-input:focus { outline: none; border-color: #2d2d2d; }
+
+  .hydration-unit {
+    font-size: 0.82rem;
+    color: #aaa;
   }
 
   .activity-error {

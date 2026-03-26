@@ -19,7 +19,7 @@ const (
 	metaSheet     = "Meta"
 	profileSheet  = "Profile"
 
-	CurrentSchemaVersion = 2
+	CurrentSchemaVersion = 3
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -69,7 +69,7 @@ func DateString(t time.Time) string { return t.Format("2006-01-02") }
 func TimeString(t time.Time) string { return t.Format("15:04") }
 
 // DayLog is one row in the Activity sheet.
-// Schema: date | activity | feeling_score | feeling_notes | poop | poop_notes
+// Schema: date | activity | feeling_score | feeling_notes | poop | poop_notes | hydration
 // Backward compat: old 2-column rows (date | notes) map notes → activity.
 type DayLog struct {
 	Date         string `json:"date"`
@@ -78,12 +78,13 @@ type DayLog struct {
 	FeelingNotes string `json:"feeling_notes"`
 	Poop         bool   `json:"poop"`
 	PoopNotes    string `json:"poop_notes"`
+	Hydration    float64 `json:"hydration"` // litres, 0 = not set
 }
 
 func (d DayLog) ToRow() []interface{} {
 	return []interface{}{
 		d.Date, d.Activity, strconv.Itoa(d.FeelingScore), d.FeelingNotes,
-		strconv.FormatBool(d.Poop), d.PoopNotes,
+		strconv.FormatBool(d.Poop), d.PoopNotes, strconv.FormatFloat(d.Hydration, 'f', -1, 64),
 	}
 }
 
@@ -92,6 +93,10 @@ func DayLogFromRow(row []interface{}) DayLog {
 	num := func(v interface{}) int {
 		n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
 		return n
+	}
+	fnum := func(v interface{}) float64 {
+		f, _ := strconv.ParseFloat(fmt.Sprintf("%v", v), 64)
+		return f
 	}
 	d := DayLog{}
 	if len(row) >= 1 {
@@ -111,6 +116,9 @@ func DayLogFromRow(row []interface{}) DayLog {
 	}
 	if len(row) >= 6 {
 		d.PoopNotes = str(row[5])
+	}
+	if len(row) >= 7 {
+		d.Hydration = fnum(row[6])
 	}
 	return d
 }
@@ -216,10 +224,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	}
 
 	actHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes"}},
+		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes", "hydration"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, activitySheet+"!A1:F1", actHeaders,
+		created.SpreadsheetId, activitySheet+"!A1:G1", actHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("activity headers: %w", err)
@@ -250,16 +258,14 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	return created.SpreadsheetId, nil
 }
 
-// MigrateSpreadsheet upgrades an existing spreadsheet from schema v1 to v2.
-// It extends the Activity sheet header to include poop and poop_notes columns,
-// then bumps the schema_version in the Meta sheet to CurrentSchemaVersion.
-func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+// MigrateV1toV2 upgrades an existing spreadsheet from schema v1 to v2.
+// It extends the Activity sheet header to include poop and poop_notes columns.
+func MigrateV1toV2(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
 	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
 	if err != nil {
 		return fmt.Errorf("sheets client: %w", err)
 	}
 
-	// Write full 6-column Activity header (safe to overwrite; data rows start at row 2)
 	actHeaders := &googlesheets.ValueRange{
 		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes"}},
 	}
@@ -267,21 +273,44 @@ func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetI
 		spreadsheetID, activitySheet+"!A1:F1", actHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
-		return fmt.Errorf("migrate activity header: %w", err)
+		return fmt.Errorf("migrate v1→v2 activity header: %w", err)
 	}
 
-	// Bump schema version
-	metaData := &googlesheets.ValueRange{
-		Values: [][]interface{}{{strconv.Itoa(CurrentSchemaVersion)}},
-	}
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"2"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV2toV3 upgrades an existing spreadsheet from schema v2 to v3.
+// It adds the hydration column to the Activity sheet header.
+func MigrateV2toV3(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
 	if err != nil {
-		return fmt.Errorf("migrate schema version: %w", err)
+		return fmt.Errorf("sheets client: %w", err)
 	}
 
-	return nil
+	actHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes", "hydration"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, activitySheet+"!A1:G1", actHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v2→v3 activity header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{strconv.Itoa(CurrentSchemaVersion)}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateSpreadsheet is an alias kept for backwards compatibility; calls MigrateV1toV2.
+func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	return MigrateV1toV2(ctx, ts, spreadsheetID)
 }
 
 // FindExistingSpreadsheet searches the user's Drive for a previously-created
@@ -431,7 +460,7 @@ func (s *Service) DeleteFood(ctx context.Context, id string) error {
 
 // GetActivity returns the DayLog for the given date, or an empty DayLog if none.
 func (s *Service) GetActivity(ctx context.Context, date string) (DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:F").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
 	if err != nil {
 		return DayLog{}, err
 	}
@@ -465,12 +494,12 @@ func (s *Service) SetActivity(ctx context.Context, log DayLog) error {
 	}
 	if rowNum < 0 {
 		_, err = s.svc.Spreadsheets.Values.Append(
-			s.spreadsheetID, activitySheet+"!A:F", vr,
+			s.spreadsheetID, activitySheet+"!A:G", vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	} else {
 		_, err = s.svc.Spreadsheets.Values.Update(
 			s.spreadsheetID,
-			fmt.Sprintf("%s!A%d:F%d", activitySheet, rowNum, rowNum),
+			fmt.Sprintf("%s!A%d:G%d", activitySheet, rowNum, rowNum),
 			vr,
 		).ValueInputOption("RAW").Context(ctx).Do()
 	}
@@ -494,7 +523,7 @@ func (s *Service) GetSchemaVersion(ctx context.Context) (int, error) {
 
 // GetActivityByDateRange returns DayLogs where start <= date <= end.
 func (s *Service) GetActivityByDateRange(ctx context.Context, start, end string) ([]DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:F").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
 	if err != nil {
 		return nil, err
 	}

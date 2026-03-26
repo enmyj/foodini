@@ -142,6 +142,9 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           </a>
         {/if}
+        <button class="refresh-btn" onclick={() => location.reload()} aria-label="Refresh" title="Refresh">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
         <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings" title="Profile settings">⚙</button>
         <a class="signout-btn" href="/auth/logout" aria-label="Sign out" title="Sign out">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -181,7 +184,7 @@
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
-          <button class="empty" onclick={() => { drawerMeal = meal; drawerOpen = true }}>+ Nothing logged</button>
+          <button class="empty" onclick={() => { drawerMeal = meal; drawerOpen = true }}>Nothing logged</button>
         {/each}
       </section>
     {/each}
@@ -192,9 +195,9 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="week-row" role="button" tabindex="0" onclick={() => selectedDay = { date, entries, dayLog }}>
         <span class="date">{date}</span>
-        <span class="feeling-score">{dayLog?.feeling_score ? `${dayLog.feeling_score}/10` : '—'}</span>
         <span class="activity-tick">{dayLog?.activity ? '✓' : ''}</span>
         <span class="poop-tick">{dayLog?.poop ? '💩' : ''}</span>
+        <span class="hydration-tick">{dayLog?.hydration ? '💧' : ''}</span>
         <span class="chevron">›</span>
       </div>
     {/each}
@@ -235,6 +238,7 @@
   header {
     position: sticky;
     top: 0;
+    z-index: 10;
     background: #fafaf9;
     padding: 1rem 0 0.75rem;
     border-bottom: 1px solid #e8e8e6;
@@ -287,7 +291,7 @@
     border: none;
     font-family: inherit;
     text-transform: uppercase;
-    font-size: 0.68rem;
+    font-size: 0.72rem;
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;
@@ -363,7 +367,7 @@
     text-align: left;
     color: #bbb;
     font-size: 0.85rem;
-    padding: 0.6rem 0;
+    padding: 0.75rem 0;
     cursor: pointer;
     touch-action: manipulation;
     width: 100%;
@@ -405,13 +409,6 @@
     flex: 1;
   }
 
-  .feeling-score {
-    font-size: 0.88rem;
-    color: #888;
-    min-width: 3rem;
-    text-align: right;
-  }
-
   .activity-tick {
     font-size: 0.82rem;
     color: #2d2d2d;
@@ -420,6 +417,12 @@
   }
 
   .poop-tick {
+    font-size: 0.82rem;
+    min-width: 1rem;
+    text-align: center;
+  }
+
+  .hydration-tick {
     font-size: 0.82rem;
     min-width: 1rem;
     text-align: center;
@@ -468,10 +471,30 @@
     padding: 0.5rem 0.4rem;
     text-decoration: none;
     touch-action: manipulation;
+    min-height: 2.75rem;
   }
 
   @media (hover: hover) {
     .sheet-link:hover {
+      color: #2d2d2d;
+    }
+  }
+
+  .refresh-btn {
+    background: none;
+    border: none;
+    display: flex;
+    align-items: center;
+    color: #888;
+    cursor: pointer;
+    padding: 0.5rem 0.4rem;
+    line-height: 1;
+    touch-action: manipulation;
+    min-height: 2.75rem;
+  }
+
+  @media (hover: hover) {
+    .refresh-btn:hover {
       color: #2d2d2d;
     }
   }
@@ -485,6 +508,7 @@
     padding: 0.5rem 0.5rem;
     line-height: 1;
     touch-action: manipulation;
+    min-height: 2.75rem;
   }
 
   @media (hover: hover) {
@@ -500,6 +524,7 @@
     padding: 0.5rem 0.4rem;
     text-decoration: none;
     touch-action: manipulation;
+    min-height: 2.75rem;
   }
 
   @media (hover: hover) {
