@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"foodtracker/internal/sheets"
 
 	"github.com/google/uuid"
+	"google.golang.org/api/googleapi"
 )
 
 // Handler holds references to auth and gemini services.
@@ -83,6 +85,17 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
+// writeGoogleErr checks if err is a Google API 403 (insufficient scopes) and
+// writes the appropriate response. Falls back to a 500 for other errors.
+func writeGoogleErr(w http.ResponseWriter, err error) {
+	var ge *googleapi.Error
+	if errors.As(err, &ge) && ge.Code == 403 {
+		writeErr(w, http.StatusForbidden, "insufficient_scopes")
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err.Error())
+}
+
 // LocalNow returns the current time in the user's local timezone.
 // It reads the IANA timezone name from the X-Timezone request header.
 // Falls back to server time if the header is missing or invalid.
@@ -136,7 +149,7 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 	// Search Drive for an existing spreadsheet from a previous session
 	id, err := sheets.FindExistingSpreadsheet(r.Context(), ts, session.UserEmail)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to search for spreadsheet: "+err.Error())
+		writeGoogleErr(w, err)
 		return false
 	}
 
@@ -144,12 +157,12 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		// Found an existing spreadsheet — check its schema version
 		svc, err := sheets.NewService(r.Context(), ts, id)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			writeGoogleErr(w, err)
 			return false
 		}
 		version, err := svc.GetSchemaVersion(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "schema check failed")
+			writeGoogleErr(w, err)
 			return false
 		}
 		if version == 1 {
@@ -167,7 +180,7 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		// No existing spreadsheet — create a new one
 		id, err = sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "failed to create spreadsheet: "+err.Error())
+			writeGoogleErr(w, err)
 			return false
 		}
 		session.SpreadsheetID = id

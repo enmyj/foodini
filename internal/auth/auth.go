@@ -80,7 +80,18 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   300, // 5 minutes
 		SameSite: http.SameSiteLaxMode,
 	})
-	url := h.oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOffline}
+	if r.URL.Query().Get("consent") == "1" {
+		// Force the consent screen to guarantee a refresh token (used when the
+		// default flow didn't return one, or when re-authorizing after scope errors).
+		opts = append(opts, oauth2.ApprovalForce)
+	} else {
+		// Show only the account picker; skip the permissions review if the user
+		// has already authorized. The callback falls back to ?consent=1 if Google
+		// doesn't issue a refresh token.
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "select_account"))
+	}
+	url := h.oauthCfg.AuthCodeURL(state, opts...)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
@@ -108,7 +119,9 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if token.RefreshToken == "" {
-		http.Error(w, "no refresh token: re-authorize with prompt=consent", http.StatusInternalServerError)
+		// Google didn't issue a refresh token (already granted this client before).
+		// Redirect to the consent flow to force one.
+		http.Redirect(w, r, "/auth/login?consent=1", http.StatusTemporaryRedirect)
 		return
 	}
 
