@@ -125,11 +125,14 @@
       </div>
       <div class="header-actions">
         {#if spreadsheetUrl}
-          <a class="sheet-link" href={spreadsheetUrl} target="_blank" rel="noopener" aria-label="Open Google Sheet">
+          <a class="sheet-link" href={spreadsheetUrl} target="_blank" rel="noopener" aria-label="Open Google Sheet" title="Open Google Sheet">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           </a>
         {/if}
-        <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings">⚙</button>
+        <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings" title="Profile settings">⚙</button>
+        <a class="signout-btn" href="/auth/logout" aria-label="Sign out" title="Sign out">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </a>
       </div>
     </div>
     {#if data?.entries}
@@ -444,6 +447,19 @@
   }
 
   .settings-btn:hover {
+    color: #2d2d2d;
+  }
+
+  .signout-btn {
+    display: flex;
+    align-items: center;
+    color: #888;
+    padding: 0.5rem 0.4rem;
+    text-decoration: none;
+    touch-action: manipulation;
+  }
+
+  .signout-btn:hover {
     color: #2d2d2d;
   }
 </style>

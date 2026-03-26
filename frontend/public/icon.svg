@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="108" fill="#2d2d2d"/>
+
+  <!-- Pencil (behind burrito) -->
+  <g transform="translate(348,270) rotate(32)">
+    <!-- eraser -->
+    <rect x="-15" y="-118" width="30" height="20" rx="5" fill="#f08080"/>
+    <!-- ferrule -->
+    <rect x="-15" y="-98" width="30" height="10" fill="#aaaaaa"/>
+    <!-- body -->
+    <rect x="-15" y="-88" width="30" height="185" fill="#ffd43b"/>
+    <!-- wood -->
+    <polygon points="-15,97 15,97 0,132" fill="#c8966c"/>
+    <!-- tip -->
+    <polygon points="-7,122 7,122 0,136" fill="#333333"/>
+  </g>
+
+  <!-- Burrito wrap (front layer, covers pencil middle) -->
+  <g transform="translate(216,256) rotate(-14)">
+    <!-- tortilla outer -->
+    <rect x="-82" y="-158" width="164" height="316" rx="82" fill="#e8c99a"/>
+    <!-- inner fill/shadow -->
+    <rect x="-58" y="-136" width="116" height="272" rx="58" fill="#c8966c"/>
+    <!-- filling visible at open top end -->
+    <ellipse cx="0" cy="-140" rx="52" ry="22" fill="#a86c40"/>
+    <ellipse cx="-19" cy="-144" rx="20" ry="13" fill="#5c8c48"/>
+    <ellipse cx="17" cy="-145" rx="17" ry="12" fill="#c03828"/>
+    <ellipse cx="0" cy="-139" rx="13" ry="8" fill="#f0d090"/>
+    <!-- tortilla fold lines -->
+    <path d="M-82,-55 C-42,-34 42,-34 82,-55" stroke="#d4aa78" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <path d="M-82,45 C-42,66 42,66 82,45" stroke="#d4aa78" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <path d="M-82,138 C-42,158 42,158 82,138" stroke="#d4aa78" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <!-- bottom tuck -->
+    <ellipse cx="0" cy="148" rx="68" ry="24" fill="#c0905a"/>
+  </g>
+</svg>

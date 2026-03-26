@@ -82,9 +82,6 @@
       <button class="save-btn" onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       <button class="cancel-btn" onclick={onClose} disabled={saving}>Cancel</button>
     </div>
-    <div class="signout-row">
-      <a href="/auth/logout" class="signout-link">Sign out</a>
-    </div>
   {:else}
     <p class="status">Loading…</p>
   {/if}
@@ -230,20 +227,4 @@
     border-color: #888;
   }
 
-  .signout-row {
-    margin-top: 1rem;
-    text-align: center;
-  }
-
-  .signout-link {
-    font-size: 0.82rem;
-    color: #aaa;
-    text-decoration: none;
-  }
-
-  .signout-link:hover {
-    color: #888;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
 </style>
