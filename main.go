@@ -2,10 +2,12 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"time"
 	_ "time/tzdata"
 
 	"foodtracker/internal/api"
@@ -28,6 +30,12 @@ func main() {
 	apiHandler := api.NewHandler(authHandler, requireEnv("GEMINI_API_KEY"))
 
 	mux := http.NewServeMux()
+
+	// Health check
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintln(w, "ok")
+	})
 
 	// Auth routes
 	mux.HandleFunc("GET /auth/login", authHandler.Login)
@@ -54,7 +62,27 @@ func main() {
 
 	port := getEnv("PORT", "8080")
 	log.Printf("Listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Fatal(http.ListenAndServe(":"+port, logRequests(mux)))
+}
+
+// logRequests logs method, path, status code, and latency for every request.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start))
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	sw.status = code
+	sw.ResponseWriter.WriteHeader(code)
 }
 
 func requireEnv(key string) string {
