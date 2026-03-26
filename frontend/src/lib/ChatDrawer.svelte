@@ -1,7 +1,7 @@
 <script>
   import { chat, confirmChat, getActivity, putActivity } from './api.js'
 
-  let { open, onClose, onEntriesAdded, date = null, meal = null, initialTab = 'food' } = $props()
+  let { open, onClose, onEntriesAdded, date = null, meal = null, initialTab = 'food', initialField = null } = $props()
 
   const MEALS = ['breakfast', 'snack', 'lunch', 'dinner']
 
@@ -30,6 +30,10 @@
   let fileInputEl = $state(null)
 
   // Activity
+  let activityTextareaEl = $state(null)
+  let feelingScoreEl = $state(null)
+  let poopNotesEl = $state(null)
+
   let activityText = $state('')
   let feelingScore = $state('')
   let feelingNotes = $state('')
@@ -38,6 +42,7 @@
   let activitySaving = $state(false)
   let activityError = $state('')
   let activityLoadedFor = $state(null) // date string for which data is loaded
+  let mealError = $state(false)
 
   // Drag-to-dismiss
   let dragStartY = null
@@ -86,6 +91,13 @@
       pendingEntries = null
       pendingImage = null
       activityError = ''
+      if (initialTab === 'activity' && initialField) {
+        setTimeout(() => {
+          if (initialField === 'activity') activityTextareaEl?.focus()
+          else if (initialField === 'feeling') feelingScoreEl?.focus()
+          else if (initialField === 'poop') poopNotesEl?.focus()
+        }, 120)
+      }
     } else {
       tab = 'food'
       selectedDate = ''
@@ -195,6 +207,11 @@
 
   async function send() {
     if (sending) return
+    if (!selectedMeal) {
+      mealError = true
+      setTimeout(() => { mealError = false }, 600)
+      return
+    }
     const img = pendingImage
     const text = img ? caption.trim() : input.trim()
     if (!img && !text) return
@@ -256,8 +273,8 @@
 
     <!-- Tab switcher -->
     <div class="tabs">
-      <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}>{tab === 'food' ? '🌯 ' : ''}Food</button>
-      <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}>{tab === 'activity' ? '🌯 ' : ''}Activity</button>
+      <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}><span class="tab-icon" aria-hidden="true">🌯</span>Food</button>
+      <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}><span class="tab-icon" aria-hidden="true">🌯</span>Activity</button>
     </div>
 
     <!-- Date row (shared) -->
@@ -269,7 +286,7 @@
     {#if tab === 'food'}
       <!-- Meal pills -->
       {#if messages.length === 0}
-        <div class="meal-pills-wrap">
+        <div class="meal-pills-wrap" class:shake={mealError}>
           <span class="meal-pills-label">Meal</span>
           <div class="meal-pills">
             {#each MEALS as m}
@@ -289,6 +306,9 @@
 
       <!-- Messages -->
       <div class="messages" bind:this={messagesEl}>
+        {#if messages.length === 0 && mode === 'describe'}
+          <p class="messages-hint">Describe what you ate and I'll estimate the macros.</p>
+        {/if}
         {#each messages as msg}
           {#if msg.entries}
             <div class="msg assistant">
@@ -335,13 +355,13 @@
           </div>
           <div class="caption-row">
             <textarea bind:this={captionEl} bind:value={caption} onkeydown={onKeyDown} placeholder="Add a note… (optional)" rows="1" disabled={sending}></textarea>
-            <button onclick={send} disabled={sending || !selectedMeal}>Send</button>
+            <button onclick={send} disabled={sending}>Send</button>
           </div>
         </div>
       {:else}
         <div class="input-row">
           <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="2" disabled={sending}></textarea>
-          <button onclick={send} disabled={sending || !input.trim() || !selectedMeal}>Send</button>
+          <button onclick={send} disabled={sending || !input.trim()}>Send</button>
         </div>
       {/if}
 
@@ -354,12 +374,12 @@
       <div class="activity-form">
         <div class="activity-field">
           <label class="field-label" for="act-activity">Activity</label>
-          <textarea id="act-activity" bind:value={activityText} placeholder="Exercise, stress, unusual events…" rows="2"></textarea>
+          <textarea id="act-activity" bind:this={activityTextareaEl} bind:value={activityText} placeholder="Exercise, stress, unusual events…" rows="2"></textarea>
         </div>
         <div class="activity-field">
           <label class="field-label" for="act-feeling-score">Feeling</label>
           <div class="feeling-row">
-            <input id="act-feeling-score" class="score-input" type="number" min="1" max="10" bind:value={feelingScore} placeholder="1–10" />
+            <input id="act-feeling-score" bind:this={feelingScoreEl} class="score-input" type="number" min="1" max="10" bind:value={feelingScore} placeholder="1–10" />
             <textarea bind:value={feelingNotes} placeholder="Energy, digestion, mood, sleep…" rows="2"></textarea>
           </div>
         </div>
@@ -367,8 +387,8 @@
           <span class="field-label">💩</span>
           <div class="poop-row">
             <button class="toggle-btn" class:selected={poop === true} onclick={() => poop = true}>Yes</button>
-            <button class="toggle-btn" class:selected={poop === false && poopNotes === '' && activityLoadedFor !== null} onclick={() => poop = false}>No</button>
-            <textarea bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
+            <button class="toggle-btn" class:selected={poop === false} onclick={() => poop = false}>No</button>
+            <textarea bind:this={poopNotesEl} bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
           </div>
         </div>
         {#if activityError}
@@ -402,7 +422,7 @@
     display: flex;
     flex-direction: column;
     height: min(60vh, 460px);
-    padding: 0.75rem 1.25rem 1.5rem;
+    padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
     transition: transform 0.2s ease;
     will-change: transform;
   }
@@ -439,6 +459,16 @@
     color: #1c1c1c;
   }
 
+  .tab-icon {
+    display: inline-block;
+    margin-right: 0.2em;
+    opacity: 0;
+  }
+
+  .tab-btn.active .tab-icon {
+    opacity: 1;
+  }
+
   /* --- Date row --- */
   .date-wrap {
     display: flex;
@@ -470,6 +500,18 @@
   .date-input:focus {
     outline: none;
     border-color: #2d2d2d;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+
+  .meal-pills-wrap.shake {
+    animation: shake 0.5s ease;
   }
 
   /* --- Meal pills --- */
@@ -510,9 +552,11 @@
     font-weight: 500;
   }
 
-  .meal-pill:hover:not(:disabled) {
-    border-color: #2d2d2d;
-    color: #2d2d2d;
+  @media (hover: hover) {
+    .meal-pill:hover:not(:disabled) {
+      border-color: #2d2d2d;
+      color: #2d2d2d;
+    }
   }
 
   .meal-pill.selected {
@@ -586,7 +630,23 @@
     margin-bottom: 0.3rem;
   }
 
+  .messages-hint {
+    color: #bbb;
+    font-size: 0.85rem;
+    text-align: center;
+    margin: auto;
+    padding: 1rem 0;
+    pointer-events: none;
+  }
+
   .file-input { display: none; }
+
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid #2d2d2d;
+    outline-offset: 2px;
+  }
 
   /* --- Tiles --- */
   .input-tiles {
@@ -611,7 +671,9 @@
     touch-action: manipulation;
   }
 
-  .tile:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
+  @media (hover: hover) {
+    .tile:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
+  }
   .tile:disabled { opacity: 0.35; cursor: default; }
 
   /* --- Photo card --- */
@@ -666,7 +728,9 @@
     padding: 0;
   }
 
-  .photo-replace:hover:not(:disabled) { background: rgba(0,0,0,0.65); }
+  @media (hover: hover) {
+    .photo-replace:hover:not(:disabled) { background: rgba(0,0,0,0.65); }
+  }
   .photo-replace:disabled { opacity: 0.35; cursor: default; }
 
   .caption-row { display: flex; gap: 0.5rem; align-items: flex-end; }
@@ -728,7 +792,9 @@
     touch-action: manipulation;
   }
 
-  .confirm-btn:not(:disabled):hover { background: #15803d; }
+  @media (hover: hover) {
+    .confirm-btn:not(:disabled):hover { background: #15803d; }
+  }
   .confirm-btn:disabled { opacity: 0.35; cursor: default; }
 
   /* --- Activity form --- */
@@ -822,6 +888,8 @@
     margin-top: auto;
   }
 
-  .save-activity-btn:not(:disabled):hover { background: #1c1c1c; }
+  @media (hover: hover) {
+    .save-activity-btn:not(:disabled):hover { background: #1c1c1c; }
+  }
   .save-activity-btn:disabled { opacity: 0.35; cursor: default; }
 </style>

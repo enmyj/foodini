@@ -15,6 +15,8 @@
   let editFiber = $state(0)
   let saving = $state(false)
   let deleting = $state(false)
+  let pendingDelete = $state(false)
+  let deleteTimer = null
 
   function openModal() {
     editDesc = entry.description
@@ -51,8 +53,19 @@
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (deleting) return
+    if (!pendingDelete) {
+      pendingDelete = true
+      deleteTimer = setTimeout(() => { pendingDelete = false }, 2500)
+      return
+    }
+    clearTimeout(deleteTimer)
+    pendingDelete = false
+    doDelete()
+  }
+
+  async function doDelete() {
     deleting = true
     try {
       await deleteEntry(entry.id)
@@ -75,7 +88,7 @@
     <span class="desc">{entry.description}</span>
     <span class="macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F{entry.fiber ? ` · ${entry.fiber}g Fb` : ''}</span>
   </div>
-  <button class="del" onclick={handleDelete} disabled={deleting} aria-label="Delete entry">×</button>
+  <button class="del" class:confirm={pendingDelete} onclick={handleDelete} disabled={deleting} aria-label={pendingDelete ? 'Tap again to confirm delete' : 'Delete entry'}>{pendingDelete ? '?' : '×'}</button>
 </div>
 
 {#if modalOpen}
@@ -183,8 +196,20 @@
     touch-action: manipulation;
   }
 
-  .del:hover {
-    color: #888;
+  .del.confirm {
+    color: #e11d48;
+    font-weight: 600;
+  }
+
+  @media (hover: hover) {
+    .del:hover {
+      color: #888;
+    }
+  }
+
+  .del:focus-visible {
+    outline: 2px solid #2d2d2d;
+    outline-offset: 2px;
   }
 
   .del:disabled {
@@ -301,8 +326,10 @@
     touch-action: manipulation;
   }
 
-  .save-btn:hover:not(:disabled) {
-    background: #1c1c1c;
+  @media (hover: hover) {
+    .save-btn:hover:not(:disabled) {
+      background: #1c1c1c;
+    }
   }
 
   .save-btn:disabled {
@@ -322,7 +349,9 @@
     touch-action: manipulation;
   }
 
-  .cancel-btn:hover:not(:disabled) {
-    border-color: #888;
+  @media (hover: hover) {
+    .cancel-btn:hover:not(:disabled) {
+      border-color: #888;
+    }
   }
 </style>

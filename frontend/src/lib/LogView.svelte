@@ -19,6 +19,7 @@
   let selectedDay = $state(null)
   let drawerDate = $state(null)
   let drawerMeal = $state(null)
+  let drawerField = $state(null)
   let yesterdayByMeal = $state({})
   let repeating = $state(null)
   let repeatedMeals = $state(new Set())
@@ -107,7 +108,8 @@
     drawerOpen = true
   }
 
-  function openActivityDrawer() {
+  function openActivityDrawer(field = null) {
+    drawerField = field
     drawerTab = 'activity'
     drawerDate = null
     drawerMeal = null
@@ -146,7 +148,7 @@
         </a>
       </div>
     </div>
-    {#if data?.entries}
+    {#if data?.entries && view === 'today'}
       {@const t = totals(data.entries)}
       <div class="totals">
         <span>{t.calories} cal</span>
@@ -179,13 +181,13 @@
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
-          <button class="empty" onclick={() => { drawerMeal = meal; drawerOpen = true }}>Nothing logged</button>
+          <button class="empty" onclick={() => { drawerMeal = meal; drawerOpen = true }}>+ Nothing logged</button>
         {/each}
       </section>
     {/each}
     <ActivityNote date={data?.date} onOpen={openActivityDrawer} refreshKey={activityRefreshKey} />
   {:else}
-    {#each Object.entries(groupedByDate(data?.entries ?? [])).sort() as [date, entries]}
+    {#each Object.entries(groupedByDate(data?.entries ?? [])).sort((a, b) => b[0].localeCompare(a[0])) as [date, entries]}
       {@const dayLog = (data?.daily_logs ?? []).find(d => d.date === date) ?? null}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <div class="week-row" role="button" tabindex="0" onclick={() => selectedDay = { date, entries, dayLog }}>
@@ -212,11 +214,12 @@
 </button>
 <ChatDrawer
   open={drawerOpen}
-  onClose={() => { if (drawerTab === 'activity') activityRefreshKey++; drawerOpen = false; drawerDate = null; drawerMeal = null; drawerTab = 'food' }}
+  onClose={() => { if (drawerTab === 'activity') activityRefreshKey++; drawerOpen = false; drawerDate = null; drawerMeal = null; drawerTab = 'food'; drawerField = null }}
   {onEntriesAdded}
   date={drawerDate}
   meal={drawerMeal}
   initialTab={drawerTab}
+  initialField={drawerField}
 />
 {#if profileOpen}
   <ProfilePanel onClose={() => profileOpen = false} />
@@ -294,8 +297,10 @@
     touch-action: manipulation;
   }
 
-  .meal-name:hover {
-    color: #2d2d2d;
+  @media (hover: hover) {
+    .meal-name:hover {
+      color: #2d2d2d;
+    }
   }
 
   .meal-add {
@@ -305,8 +310,10 @@
     font-weight: 600;
   }
 
-  .meal-name:hover .meal-add {
-    opacity: 1;
+  @media (hover: hover) {
+    .meal-name:hover .meal-add {
+      opacity: 1;
+    }
   }
 
   .meal-header {
@@ -329,8 +336,10 @@
     align-items: center;
   }
 
-  .repeat-btn:hover:not(:disabled) {
-    color: #555;
+  @media (hover: hover) {
+    .repeat-btn:hover:not(:disabled) {
+      color: #555;
+    }
   }
 
   .repeat-btn:disabled {
@@ -360,8 +369,10 @@
     width: 100%;
   }
 
-  .empty:hover {
-    color: #888;
+  @media (hover: hover) {
+    .empty:hover {
+      color: #888;
+    }
   }
 
   .state {
@@ -382,8 +393,10 @@
     touch-action: manipulation;
   }
 
-  .week-row:hover {
-    background: #fafaf9;
+  @media (hover: hover) {
+    .week-row:hover {
+      background: #fafaf9;
+    }
   }
 
   .date {
@@ -420,7 +433,7 @@
 
   .fab {
     position: fixed;
-    bottom: 2rem;
+    bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
     right: 2rem;
     width: 3.5rem;
     height: 3.5rem;
@@ -436,8 +449,10 @@
     touch-action: manipulation;
   }
 
-  .fab:hover {
-    background: #1c1c1c;
+  @media (hover: hover) {
+    .fab:hover {
+      background: #1c1c1c;
+    }
   }
 
   .header-actions {
@@ -455,8 +470,10 @@
     touch-action: manipulation;
   }
 
-  .sheet-link:hover {
-    color: #2d2d2d;
+  @media (hover: hover) {
+    .sheet-link:hover {
+      color: #2d2d2d;
+    }
   }
 
   .settings-btn {
@@ -470,8 +487,10 @@
     touch-action: manipulation;
   }
 
-  .settings-btn:hover {
-    color: #2d2d2d;
+  @media (hover: hover) {
+    .settings-btn:hover {
+      color: #2d2d2d;
+    }
   }
 
   .signout-btn {
@@ -483,7 +502,9 @@
     touch-action: manipulation;
   }
 
-  .signout-btn:hover {
-    color: #2d2d2d;
+  @media (hover: hover) {
+    .signout-btn:hover {
+      color: #2d2d2d;
+    }
   }
 </style>

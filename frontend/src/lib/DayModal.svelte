@@ -31,33 +31,6 @@
     <button class="close" onclick={onClose}>✕</button>
   </div>
 
-  {#if day.dayLog?.feeling_score || day.dayLog?.feeling_notes}
-    <div class="modal-section">
-      <h3>Feeling</h3>
-      <p>
-        {#if day.dayLog.feeling_score}<span class="score">{day.dayLog.feeling_score}/10</span>{/if}
-        {#if day.dayLog.feeling_score && day.dayLog.feeling_notes} — {/if}
-        {#if day.dayLog.feeling_notes}{day.dayLog.feeling_notes}{/if}
-      </p>
-    </div>
-  {/if}
-
-  {#if day.dayLog?.activity}
-    <div class="modal-section">
-      <h3>Activity</h3>
-      <p>{day.dayLog.activity}</p>
-    </div>
-  {/if}
-
-  {#if day.dayLog?.poop || day.dayLog?.poop_notes}
-    <div class="modal-section">
-      <h3>💩</h3>
-      <p>
-        {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
-      </p>
-    </div>
-  {/if}
-
   <div class="modal-section">
     <h3>Food</h3>
     {#each MEAL_ORDER as meal}
@@ -88,6 +61,33 @@
       </button>
     {/if}
   </div>
+
+  {#if day.dayLog?.activity}
+    <div class="modal-section">
+      <h3>Activity</h3>
+      <p>{day.dayLog.activity}</p>
+    </div>
+  {/if}
+
+  {#if day.dayLog?.feeling_score || day.dayLog?.feeling_notes}
+    <div class="modal-section">
+      <h3>Feeling</h3>
+      <p>
+        {#if day.dayLog.feeling_score}<span class="score">{day.dayLog.feeling_score}/10</span>{/if}
+        {#if day.dayLog.feeling_score && day.dayLog.feeling_notes} — {/if}
+        {#if day.dayLog.feeling_notes}{day.dayLog.feeling_notes}{/if}
+      </p>
+    </div>
+  {/if}
+
+  {#if day.dayLog?.poop || day.dayLog?.poop_notes}
+    <div class="modal-section">
+      <h3>💩</h3>
+      <p>
+        {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
+      </p>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -224,8 +224,17 @@
     line-height: 1;
   }
 
-  .entry-del:hover {
-    color: #888;
+  @media (hover: hover) {
+    .entry-del:hover {
+      color: #888;
+    }
+  }
+
+  .entry-del:focus-visible,
+  .add-food-btn:focus-visible,
+  .close:focus-visible {
+    outline: 2px solid #2d2d2d;
+    outline-offset: 2px;
   }
 
   .add-food-btn {
@@ -241,7 +250,9 @@
     font-family: inherit;
   }
 
-  .add-food-btn:hover {
-    border-color: #2d2d2d;
+  @media (hover: hover) {
+    .add-food-btn:hover {
+      border-color: #2d2d2d;
+    }
   }
 </style>

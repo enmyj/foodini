@@ -15,12 +15,12 @@
 <div class="activity-row">
   <div class="section-header">Other</div>
   {#each [
-    { label: 'Activity', value: data?.activity },
-    { label: 'Feeling', value: data?.feeling_score ? `${data.feeling_score}/10${data.feeling_notes ? ` — ${data.feeling_notes}` : ''}` : data?.feeling_notes },
-    { label: '💩', value: data?.poop ? (data.poop_notes ? `Yes — ${data.poop_notes}` : 'Yes') : data?.poop_notes ? `No — ${data.poop_notes}` : null },
+    { label: 'Activity', value: data?.activity, field: 'activity' },
+    { label: 'Feeling', value: data?.feeling_score ? `${data.feeling_score}/10${data.feeling_notes ? ` — ${data.feeling_notes}` : ''}` : data?.feeling_notes, field: 'feeling' },
+    { label: '💩', value: data?.poop ? (data.poop_notes ? `Yes — ${data.poop_notes}` : 'Yes') : data?.poop_notes ? `No — ${data.poop_notes}` : null, field: 'poop' },
   ] as section}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="section" role="button" tabindex="0" onclick={onOpen}>
+    <div class="section" role="button" tabindex="0" onclick={() => onOpen(section.field)}>
       <span class="section-label">{section.label}<span class="plus">+</span></span>
       <span class="section-value" class:placeholder={!section.value}>{section.value || '—'}</span>
     </div>
@@ -57,8 +57,16 @@
     min-width: 0;
   }
 
-  .section:hover {
-    background: #f3f3f2;
+  @media (hover: hover) {
+    .section:hover {
+      background: #f3f3f2;
+    }
+  }
+
+  .section:focus-visible {
+    outline: 2px solid #2d2d2d;
+    outline-offset: -2px;
+    border-radius: 8px;
   }
 
   .section-label {
@@ -80,8 +88,10 @@
     font-weight: 600;
   }
 
-  .section:hover .plus {
-    opacity: 1;
+  @media (hover: hover) {
+    .section:hover .plus {
+      opacity: 1;
+    }
   }
 
   .section-value {
