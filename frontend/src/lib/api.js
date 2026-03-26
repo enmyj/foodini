@@ -7,9 +7,11 @@ export async function getLog({ date = null, days = null } = {}) {
   return res.json()
 }
 
-export async function chat(message, date = null) {
+export async function chat(message, date = null, image = null, meal = null) {
   const body = { message }
   if (date) body.date = date
+  if (image) body.image = image
+  if (meal) body.meal = meal
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },

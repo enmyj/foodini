@@ -15,7 +15,7 @@ const systemPrompt = `You are a food tracking assistant. The user describes what
 
 Your job:
 1. Extract food items and estimate macros (calories, protein, carbs, fat in grams).
-2. If quantities are ambiguous, ask ONE short clarifying question — nothing more.
+2. If a photo is provided, estimate quantities from the image — do not ask about anything visible in the photo. If quantities are genuinely impossible to determine even from a photo, ask ONE short clarifying question — nothing more.
 3. Once you have enough information, show a friendly human-readable summary:
 
    Here's what I'm logging:
@@ -74,6 +74,12 @@ func ParseEntries(raw string) ([]Entry, bool) {
 	return result.Entries, true
 }
 
+// ImageData carries an inline image to include alongside a chat message.
+type ImageData struct {
+	MIMEType string
+	Data     []byte
+}
+
 // Service manages per-user Gemini conversation history in memory.
 type Service struct {
 	apiKey string
@@ -85,10 +91,10 @@ func NewService(apiKey string) *Service {
 	return &Service{apiKey: apiKey, convs: make(map[string][]*genai.Content)}
 }
 
-// Chat sends a user message and returns (responseText, entries, error).
+// Chat sends a user message (and optional image) and returns (responseText, entries, error).
 // If Gemini returns structured entries, history is cleared and entries are non-nil.
 // If Gemini asks a clarifying question, history is preserved for the next turn.
-func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string) (string, []Entry, error) {
+func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, img *ImageData) (string, []Entry, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini client: %w", err)
@@ -112,7 +118,15 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	chatSession := model.StartChat()
 	chatSession.History = history
 
-	resp, err := chatSession.SendMessage(ctx, genai.Text(message))
+	var parts []genai.Part
+	if img != nil {
+		parts = append(parts, genai.Blob{MIMEType: img.MIMEType, Data: img.Data})
+	}
+	if message != "" {
+		parts = append(parts, genai.Text(message))
+	}
+
+	resp, err := chatSession.SendMessage(ctx, parts...)
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini send: %w", err)
 	}

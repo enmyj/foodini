@@ -11,8 +11,8 @@
 
   function totals(entries) {
     return (entries ?? []).reduce(
-      (a, e) => ({ calories: a.calories + e.calories, protein: a.protein + e.protein, carbs: a.carbs + e.carbs, fat: a.fat + e.fat }),
-      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      (a, e) => ({ calories: a.calories + e.calories, protein: a.protein + e.protein, carbs: a.carbs + e.carbs, fat: a.fat + e.fat, fiber: a.fiber + (e.fiber ?? 0) }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }
     )
   }
 
@@ -67,8 +67,10 @@
           <h4>{meal}</h4>
           {#each group as entry}
             <div class="entry-row">
-              <span class="entry-desc">{entry.description}</span>
-              <span class="entry-macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F · {entry.fiber ?? 0}g Fb</span>
+              <div class="entry-main">
+                <span class="entry-desc">{entry.description}</span>
+                <span class="entry-macros">{entry.calories} cal · {entry.protein}g P · {entry.carbs}g C · {entry.fat}g F · {entry.fiber ?? 0}g Fb</span>
+              </div>
               {#if onDelete}
                 <button class="entry-del" onclick={() => onDelete(entry.id)} aria-label="Delete">×</button>
               {/if}
@@ -78,7 +80,7 @@
       {/if}
     {/each}
     {#each [totals(day.entries)] as t}
-      <div class="day-totals">{t.calories} cal · {t.protein}g P · {t.carbs}g C · {t.fat}g F</div>
+      <div class="day-totals">{t.calories} cal · {t.protein}g P · {t.carbs}g C · {t.fat}g F · {t.fiber}g Fb</div>
     {/each}
     {#if onAddFood}
       <button class="add-food-btn" onclick={() => onAddFood(day.date)}>
@@ -181,19 +183,26 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.3rem 0;
-    font-size: 0.88rem;
+    padding: 0.35rem 0;
     border-bottom: 1px solid #f3f3f2;
+    gap: 0.5rem;
+  }
+
+  .entry-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
   }
 
   .entry-desc {
+    font-size: 0.88rem;
     color: #1c1c1c;
   }
 
   .entry-macros {
-    color: #888;
-    flex-shrink: 0;
-    margin-left: 1rem;
+    font-size: 0.78rem;
+    color: #aaa;
   }
 
   .day-totals {

@@ -14,9 +14,11 @@
   let data = $state(null)
   let loading = $state(true)
   let drawerOpen = $state(false)
+  let drawerTab = $state('food')
+  let activityRefreshKey = $state(0)
   let selectedDay = $state(null)
   let drawerDate = $state(null)
-  let drawerPrefill = $state('')
+  let drawerMeal = $state(null)
   let yesterdayByMeal = $state({})
   let repeating = $state(null)
   let repeatedMeals = $state(new Set())
@@ -84,8 +86,8 @@
 
   function totals(entries) {
     return (entries ?? []).reduce(
-      (a, e) => ({ calories: a.calories + e.calories, protein: a.protein + e.protein, carbs: a.carbs + e.carbs, fat: a.fat + e.fat }),
-      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+      (a, e) => ({ calories: a.calories + e.calories, protein: a.protein + e.protein, carbs: a.carbs + e.carbs, fat: a.fat + e.fat, fiber: a.fiber + (e.fiber ?? 0) }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }
     )
   }
 
@@ -100,6 +102,15 @@
   function openDrawerForDate(date) {
     selectedDay = null
     drawerDate = date
+    drawerMeal = null
+    drawerTab = 'food'
+    drawerOpen = true
+  }
+
+  function openActivityDrawer() {
+    drawerTab = 'activity'
+    drawerDate = null
+    drawerMeal = null
     drawerOpen = true
   }
 
@@ -142,6 +153,7 @@
         <span>{t.protein}g P</span>
         <span>{t.carbs}g C</span>
         <span>{t.fat}g F</span>
+        <span>{t.fiber}g Fb</span>
       </div>
     {/if}
   </header>
@@ -153,7 +165,7 @@
       {@const group = (groupedByMeal(data?.entries)[meal] ?? [])}
       <section>
         <div class="meal-header">
-          <button class="meal-name" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>{meal}</button>
+          <button class="meal-name" onclick={() => { drawerMeal = meal; drawerTab = 'food'; drawerOpen = true }}>{meal}<span class="meal-add">+</span></button>
           {#if yesterdayByMeal[meal]?.length}
             <button
               class="repeat-btn"
@@ -167,11 +179,11 @@
         {#each group as entry}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
-          <button class="empty" onclick={() => { drawerPrefill = `for ${meal}, I had `; drawerOpen = true }}>Nothing logged</button>
+          <button class="empty" onclick={() => { drawerMeal = meal; drawerOpen = true }}>Nothing logged</button>
         {/each}
       </section>
     {/each}
-    <ActivityNote date={data?.date} />
+    <ActivityNote date={data?.date} onOpen={openActivityDrawer} refreshKey={activityRefreshKey} />
   {:else}
     {#each Object.entries(groupedByDate(data?.entries ?? [])).sort() as [date, entries]}
       {@const dayLog = (data?.daily_logs ?? []).find(d => d.date === date) ?? null}
@@ -195,13 +207,16 @@
   {/if}
 </div>
 
-<button class="fab" onclick={() => { drawerPrefill = ''; drawerOpen = true }} aria-label="Add food">+</button>
+<button class="fab" onclick={() => { drawerMeal = null; drawerTab = 'food'; drawerOpen = true }} aria-label="Add food">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+</button>
 <ChatDrawer
   open={drawerOpen}
-  onClose={() => { drawerOpen = false; drawerDate = null; drawerPrefill = '' }}
+  onClose={() => { if (drawerTab === 'activity') activityRefreshKey++; drawerOpen = false; drawerDate = null; drawerMeal = null; drawerTab = 'food' }}
   {onEntriesAdded}
   date={drawerDate}
-  prefill={drawerPrefill}
+  meal={drawerMeal}
+  initialTab={drawerTab}
 />
 {#if profileOpen}
   <ProfilePanel onClose={() => profileOpen = false} />
@@ -281,6 +296,17 @@
 
   .meal-name:hover {
     color: #2d2d2d;
+  }
+
+  .meal-add {
+    margin-left: 0.35rem;
+    font-size: 0.82rem;
+    opacity: 0.55;
+    font-weight: 600;
+  }
+
+  .meal-name:hover .meal-add {
+    opacity: 1;
   }
 
   .meal-header {
@@ -401,14 +427,12 @@
     border-radius: 50%;
     background: #2d2d2d;
     color: #fafaf9;
-    font-size: 1.75rem;
     border: none;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,0.18);
     display: flex;
     align-items: center;
     justify-content: center;
-    line-height: 1;
     touch-action: manipulation;
   }
 
