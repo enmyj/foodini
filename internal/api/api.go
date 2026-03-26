@@ -297,14 +297,21 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		targetDate = sheets.DateString(LocalNow(r))
 	}
 
-	// Fetch user profile for Gemini context (ignore errors — use empty profile)
-	svc, err := h.sheetsSvc(r, session)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	// Fetch user profile for Gemini context (cached; invalidated on profile save)
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		svc, err := h.sheetsSvc(r, session)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		profile, _ := svc.GetProfile(r.Context())
+		profileCtx = formatProfileContext(profile)
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
-	profile, _ := svc.GetProfile(r.Context())
-	profileCtx := formatProfileContext(profile)
 
 	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, req.Message, profileCtx)
 	if err != nil {
@@ -434,6 +441,7 @@ func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.cacheInvalidate(session.SpreadsheetID)
 	WriteJSON(w, http.StatusOK, req)
 }
 

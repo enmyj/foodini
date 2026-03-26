@@ -255,20 +255,20 @@
   .confirm-btn {
     width: 100%;
     margin-top: 0.5rem;
-    padding: 0.6rem 1rem;
-    background: #fafaf9;
-    color: #2d2d2d;
-    border: 1px solid #2d2d2d;
+    padding: 0.75rem 1rem;
+    background: #16a34a;
+    color: #fff;
+    border: none;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 0.95rem;
     font-family: inherit;
-    font-weight: 500;
+    font-weight: 600;
+    touch-action: manipulation;
   }
 
   .confirm-btn:not(:disabled):hover {
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: #15803d;
   }
 
   .confirm-btn:disabled {
