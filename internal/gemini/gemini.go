@@ -101,7 +101,7 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-2.5-flash")
+	model := client.GenerativeModel("gemini-3-flash-preview")
 	systemInstr := systemPrompt
 	if profileCtx != "" {
 		systemInstr = profileCtx + "\n\n" + systemPrompt

@@ -360,7 +360,9 @@
       {:else}
         <div class="input-row">
           <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="2" disabled={sending}></textarea>
-          <button onclick={send} disabled={sending || !input.trim()}>Send</button>
+          {#if !pendingEntries || input.trim()}
+            <button onclick={send} disabled={sending || !input.trim()}>Send</button>
+          {/if}
         </div>
       {/if}
 
@@ -737,7 +739,7 @@
   .caption-row textarea:focus { outline: none; border-color: #2d2d2d; }
 
   /* --- Describe / chat --- */
-  .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
+  .input-row { display: flex; gap: 0.5rem; align-items: center; }
 
   textarea {
     flex: 1;

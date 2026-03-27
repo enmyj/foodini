@@ -78,7 +78,7 @@
                 <p>This app aims to be unique from other food trackers in two ways:</p>
                 <ol>
                     <li>All data is stored in the user's own Google Drive for better data ownership.</li>
-                    <li>An LLM (currently Gemini 2.5 Flash) is used to facilitate food log entries.</li>
+                    <li>An LLM (currently Gemini 3 Flash) is used to facilitate food log entries.</li>
                 </ol>
                 <p><a href="/auth/login" class="link">Sign in with Google</a> to get started.</p>
                 <p>
