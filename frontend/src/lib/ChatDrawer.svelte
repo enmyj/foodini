@@ -326,7 +326,9 @@
           {/if}
         {/each}
         {#if sending}
-          <div class="msg assistant typing">…</div>
+          <div class="msg assistant typing">
+            <span></span><span></span><span></span>
+          </div>
         {/if}
       </div>
 
@@ -597,7 +599,29 @@
     align-self: flex-start;
   }
 
-  .typing { color: #bbb; }
+  .typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .typing span {
+    display: block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ccc;
+    animation: bounce 1.1s ease-in-out infinite;
+  }
+
+  .typing span:nth-child(2) { animation-delay: 0.18s; }
+  .typing span:nth-child(3) { animation-delay: 0.36s; }
+
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
 
   .entry-line {
     line-height: 1.55;
