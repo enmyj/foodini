@@ -23,6 +23,8 @@
   let yesterdayByMeal = $state({})
   let repeating = $state(null)
   let repeatedMeals = $state(new Set())
+  let repeatPicker = $state(null)
+  let longPressTimer = null
 
   async function load() {
     loading = true
@@ -62,18 +64,42 @@
     } catch {}
   }
 
-  async function repeatMeal(meal) {
+  async function repeatMeal(targetMeal, sourceMeal = targetMeal) {
     if (repeating !== null) return
-    repeating = meal
+    repeating = targetMeal
+    repeatPicker = null
     try {
-      const res = await confirmChat(yesterdayByMeal[meal], data?.date ?? yesterdayString())
+      const entries = yesterdayByMeal[sourceMeal].map(e => ({ ...e, meal_type: targetMeal }))
+      const res = await confirmChat(entries, data?.date ?? yesterdayString())
       data = { ...data, entries: [...(data.entries ?? []), ...res.entries] }
-      yesterdayByMeal = { ...yesterdayByMeal, [meal]: [] }
-      repeatedMeals = new Set([...repeatedMeals, meal])
+      yesterdayByMeal = { ...yesterdayByMeal, [targetMeal]: [] }
+      repeatedMeals = new Set([...repeatedMeals, targetMeal])
     } catch {
       // silent fail — user can tap again
     } finally {
       repeating = null
+    }
+  }
+
+  function startLongPress(meal) {
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null
+      repeatPicker = meal
+    }, 500)
+  }
+
+  function endLongPress(meal) {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
+      repeatMeal(meal)
+    }
+  }
+
+  function cancelPress() {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer)
+      longPressTimer = null
     }
   }
 
@@ -172,13 +198,26 @@
         <div class="meal-header">
           <button class="meal-name" onclick={() => { drawerMeal = meal; drawerTab = 'food'; drawerOpen = true }}>{meal}<span class="meal-add">+</span></button>
           {#if yesterdayByMeal[meal]?.length}
-            <button
-              class="repeat-btn"
-              class:spinning={repeating === meal}
-              onclick={() => repeatMeal(meal)}
-              disabled={repeating !== null}
-              aria-label="Repeat yesterday's {meal}"
-            >↻</button>
+            {#if repeatPicker === meal}
+              <div class="repeat-picker">
+                {#each MEAL_ORDER.filter(m => yesterdayByMeal[m]?.length) as src}
+                  <button class="pick-btn" onclick={() => repeatMeal(meal, src)}>{src}</button>
+                {/each}
+                <button class="pick-cancel" onclick={() => repeatPicker = null}>✕</button>
+              </div>
+            {:else}
+              <button
+                class="repeat-btn"
+                class:spinning={repeating === meal}
+                onpointerdown={() => startLongPress(meal)}
+                onpointerup={() => endLongPress(meal)}
+                onpointercancel={cancelPress}
+                oncontextmenu={e => e.preventDefault()}
+                disabled={repeating !== null}
+                aria-label="Repeat yesterday's {meal}"
+                title="Repeat yesterday's {meal} — hold for options"
+              >↻</button>
+            {/if}
           {/if}
         </div>
         {#each group as entry}
@@ -348,6 +387,48 @@
 
   .repeat-btn:disabled {
     cursor: default;
+  }
+
+  .repeat-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .pick-btn {
+    background: none;
+    border: 1px solid #d0d0ce;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.7rem;
+    color: #555;
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+
+  @media (hover: hover) {
+    .pick-btn:hover { border-color: #2d2d2d; color: #2d2d2d; }
+  }
+
+  .pick-cancel {
+    background: none;
+    border: none;
+    color: #ccc;
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0.15rem 0.2rem;
+    line-height: 1;
+    font-family: inherit;
+    touch-action: manipulation;
+  }
+
+  @media (hover: hover) {
+    .pick-cancel:hover { color: #888; }
   }
 
   .repeat-btn.spinning {

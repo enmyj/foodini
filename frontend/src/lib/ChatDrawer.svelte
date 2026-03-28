@@ -11,23 +11,28 @@
   }
 
   // Shared
-  let tab = $state('food') // 'food' | 'activity'
+  let tab = $state('food')
   let selectedDate = $state('')
   let drawerEl = $state(null)
 
   // Food
-  let messages = $state([])
   let input = $state('')
   let caption = $state('')
   let sending = $state(false)
-  let pendingEntries = $state(null)
+  let currentEntries = $state(null)
+  let clarifyingQuestion = $state(null)
+  let refineInput = $state('')
+  let refineNote = $state(null)
   let pendingImage = $state(null)
   let mode = $state('tiles') // 'tiles' | 'describe'
   let selectedMeal = $state(null)
   let inputEl = $state(null)
   let captionEl = $state(null)
-  let messagesEl = $state(null)
+  let refineEl = $state(null)
   let fileInputEl = $state(null)
+  let mealError = $state(false)
+
+  let started = $derived(sending || currentEntries !== null || clarifyingQuestion !== null)
 
   // Activity
   let activityTextareaEl = $state(null)
@@ -42,8 +47,7 @@
   let hydration = $state('')
   let activitySaving = $state(false)
   let activityError = $state('')
-  let activityLoadedFor = $state(null) // date string for which data is loaded
-  let mealError = $state(false)
+  let activityLoadedFor = $state(null)
 
   // Drag-to-dismiss
   let dragStartY = null
@@ -86,10 +90,12 @@
       selectedDate = date || todayStr()
       selectedMeal = meal
       mode = 'tiles'
-      messages = []
       input = ''
       caption = ''
-      pendingEntries = null
+      currentEntries = null
+      clarifyingQuestion = null
+      refineInput = ''
+      refineNote = null
       pendingImage = null
       activityError = ''
       if (initialTab === 'activity' && initialField) {
@@ -105,10 +111,12 @@
       selectedDate = ''
       selectedMeal = null
       mode = 'tiles'
-      messages = []
       input = ''
       caption = ''
-      pendingEntries = null
+      currentEntries = null
+      clarifyingQuestion = null
+      refineInput = ''
+      refineNote = null
       pendingImage = null
       activityText = ''
       feelingNotes = ''
@@ -121,7 +129,6 @@
     }
   })
 
-  // Load activity data when tab is activity and date changes
   $effect(() => {
     if (open && tab === 'activity' && selectedDate && selectedDate !== activityLoadedFor) {
       loadActivity(selectedDate)
@@ -159,12 +166,6 @@
       activitySaving = false
     }
   }
-
-  $effect(() => {
-    messages
-    sending
-    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight
-  })
 
   function activateDescribe() {
     mode = 'describe'
@@ -218,40 +219,57 @@
     const img = pendingImage
     const text = img ? caption.trim() : input.trim()
     if (!img && !text) return
-    messages = [...messages, { role: 'user', text, previewUrl: img?.previewUrl }]
     input = ''
     caption = ''
-    pendingEntries = null
+    clarifyingQuestion = null
     pendingImage = null
     sending = true
     try {
       const imagePayload = img ? { data: img.data, mime_type: img.mimeType } : null
       const res = await chat(text, selectedDate, imagePayload, selectedMeal)
       if (res.pending) {
-        pendingEntries = res.entries
-        messages = [...messages, { role: 'assistant', entries: res.entries }]
+        currentEntries = res.entries
+        setTimeout(() => refineEl?.focus(), 30)
       } else {
-        messages = [...messages, { role: 'assistant', text: res.message }]
+        clarifyingQuestion = res.message
       }
     } catch {
-      messages = [...messages, { role: 'assistant', text: 'Something went wrong. Please try again.' }]
+      clarifyingQuestion = 'Something went wrong. Please try again.'
+    } finally {
+      sending = false
+    }
+  }
+
+  async function refine() {
+    if (sending || !refineInput.trim()) return
+    const text = refineInput.trim()
+    refineInput = ''
+    refineNote = null
+    sending = true
+    try {
+      const res = await chat(text, selectedDate, null, selectedMeal)
+      if (res.pending) {
+        currentEntries = res.entries
+      } else {
+        refineNote = res.message
+      }
+    } catch {
+      refineNote = 'Something went wrong.'
     } finally {
       sending = false
     }
   }
 
   async function confirm() {
-    if (!pendingEntries || sending) return
+    if (!currentEntries || sending) return
     sending = true
     try {
-      const res = await confirmChat(pendingEntries, selectedDate)
-      messages = [...messages, { role: 'assistant', text: 'Saved!' }]
+      const res = await confirmChat(currentEntries, selectedDate)
       onEntriesAdded(res.entries)
+      onClose()
     } catch {
-      messages = [...messages, { role: 'assistant', text: 'Failed to save. Please try again.' }]
-    } finally {
+      refineNote = 'Failed to save. Please try again.'
       sending = false
-      pendingEntries = null
     }
   }
 
@@ -259,6 +277,13 @@
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
+    }
+  }
+
+  function onRefineKeyDown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      refine()
     }
   }
 </script>
@@ -285,7 +310,7 @@
 
     {#if tab === 'food'}
       <!-- Meal pills -->
-      {#if messages.length === 0}
+      {#if !started}
         <div class="meal-pills-wrap" class:shake={mealError}>
           <div class="meal-pills">
             {#each MEALS as m}
@@ -303,73 +328,114 @@
         </div>
       {/if}
 
-      <!-- Messages -->
-      <div class="messages" bind:this={messagesEl}>
-        {#if messages.length === 0 && mode === 'describe'}
-          <p class="messages-hint">Describe what you ate and I'll estimate the macros.</p>
-        {/if}
-        {#each messages as msg}
-          {#if msg.entries}
-            <div class="msg assistant">
-              {#each msg.entries as e}
-                <div class="entry-line">
-                  <span class="entry-desc">{e.description}</span>
-                  <span class="entry-meta">({e.meal_type}) — {e.calories} cal, {e.protein}g P, {e.carbs}g C, {e.fat}g F{e.fiber ? `, ${e.fiber}g Fb` : ''}</span>
-                </div>
-              {/each}
+      <!-- Content area -->
+      <div class="content-area">
+        {#if sending && !currentEntries}
+          <!-- Skeleton loading -->
+          <div class="skeleton-card">
+            <div class="skeleton-entry">
+              <div class="sk-line" style="width: 62%"></div>
+              <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
             </div>
-          {:else}
-            <div class="msg {msg.role}">
-              {#if msg.previewUrl}<img src={msg.previewUrl} alt="" class="msg-img" />{/if}
-              {#if msg.text}{msg.text}{/if}
+            <div class="skeleton-entry">
+              <div class="sk-line" style="width: 45%"></div>
+              <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
             </div>
-          {/if}
-        {/each}
-        {#if sending}
-          <div class="msg assistant typing">
-            <span></span><span></span><span></span>
           </div>
+        {:else if currentEntries}
+          <!-- Result card -->
+          <div class="result-card" class:dimmed={sending}>
+            {#each currentEntries as entry, i}
+              <div class="card-entry">
+                <div class="card-desc">{entry.description}</div>
+                <div class="card-macros">
+                  <span class="macro-field">
+                    <input type="number" value={entry.calories} oninput={(e) => currentEntries[i] = {...currentEntries[i], calories: +e.target.value}} disabled={sending} />
+                    <span class="macro-label">cal</span>
+                  </span>
+                  <span class="macro-sep">·</span>
+                  <span class="macro-field">
+                    <input type="number" value={entry.protein} oninput={(e) => currentEntries[i] = {...currentEntries[i], protein: +e.target.value}} disabled={sending} />
+                    <span class="macro-label">P</span>
+                  </span>
+                  <span class="macro-sep">·</span>
+                  <span class="macro-field">
+                    <input type="number" value={entry.carbs} oninput={(e) => currentEntries[i] = {...currentEntries[i], carbs: +e.target.value}} disabled={sending} />
+                    <span class="macro-label">C</span>
+                  </span>
+                  <span class="macro-sep">·</span>
+                  <span class="macro-field">
+                    <input type="number" value={entry.fat} oninput={(e) => currentEntries[i] = {...currentEntries[i], fat: +e.target.value}} disabled={sending} />
+                    <span class="macro-label">F</span>
+                  </span>
+                  {#if entry.fiber}
+                    <span class="macro-sep">·</span>
+                    <span class="macro-field">
+                      <input type="number" value={entry.fiber} oninput={(e) => currentEntries[i] = {...currentEntries[i], fiber: +e.target.value}} disabled={sending} />
+                      <span class="macro-label">Fb</span>
+                    </span>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <!-- Input mode -->
+          {#if clarifyingQuestion}
+            <p class="clarifying">{clarifyingQuestion}</p>
+          {/if}
         {/if}
       </div>
 
       <input bind:this={fileInputEl} type="file" accept="image/*" class="file-input" onchange={onFileSelected} />
 
-      {#if mode === 'tiles' && messages.length === 0 && !pendingImage}
-        <div class="input-tiles">
-          <button class="tile" onclick={activatePhoto} disabled={sending}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Photo
-          </button>
-          <button class="tile" onclick={activateDescribe} disabled={sending}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            Describe
-          </button>
+      <!-- Bottom controls -->
+      {#if currentEntries}
+        {#if refineNote}
+          <p class="refine-note">{refineNote}</p>
+        {/if}
+        <div class="refine-row">
+          <input
+            bind:this={refineEl}
+            bind:value={refineInput}
+            placeholder="Adjust… e.g. 'double the rice'"
+            onkeydown={onRefineKeyDown}
+            disabled={sending}
+          />
+          <button class="save-btn" onclick={confirm} disabled={sending}>Save</button>
         </div>
-      {:else if pendingImage}
-        <div class="photo-card">
-          <div class="photo-preview">
-            <img src={pendingImage.previewUrl} alt="Selected meal" />
-            <button class="photo-remove" onclick={() => pendingImage = null} aria-label="Remove photo">✕</button>
-            <button class="photo-replace" onclick={() => fileInputEl.click()} disabled={sending} aria-label="Replace photo" title="Replace photo">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      {:else if !sending}
+        {#if mode === 'tiles' && !pendingImage}
+          <div class="input-tiles">
+            <button class="tile" onclick={activatePhoto} disabled={sending}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Photo
+            </button>
+            <button class="tile" onclick={activateDescribe} disabled={sending}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Describe
             </button>
           </div>
-          <div class="caption-row">
-            <textarea bind:this={captionEl} bind:value={caption} onkeydown={onKeyDown} placeholder="Add a note… (optional)" rows="1" disabled={sending}></textarea>
-            <button onclick={send} disabled={sending}>Send</button>
+        {:else if pendingImage}
+          <div class="photo-card">
+            <div class="photo-preview">
+              <img src={pendingImage.previewUrl} alt="Selected meal" />
+              <button class="photo-remove" onclick={() => pendingImage = null} aria-label="Remove photo">✕</button>
+              <button class="photo-replace" onclick={() => fileInputEl.click()} disabled={sending} aria-label="Replace photo" title="Replace photo">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </button>
+            </div>
+            <div class="caption-row">
+              <textarea bind:this={captionEl} bind:value={caption} onkeydown={onKeyDown} placeholder="Add a note… (optional)" rows="1" disabled={sending}></textarea>
+              <button onclick={send} disabled={sending}>Send</button>
+            </div>
           </div>
-        </div>
-      {:else}
-        <div class="input-row">
-          <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="2" disabled={sending}></textarea>
-          {#if !pendingEntries || input.trim()}
+        {:else}
+          <div class="input-row">
+            <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="2" disabled={sending}></textarea>
             <button onclick={send} disabled={sending || !input.trim()}>Send</button>
-          {/if}
-        </div>
-      {/if}
-
-      {#if pendingEntries}
-        <button class="confirm-btn" onclick={confirm} disabled={sending}>Looks good, save it</button>
+          </div>
+        {/if}
       {/if}
 
     {:else}
@@ -568,89 +634,186 @@
     font-weight: 600;
   }
 
-  /* --- Food: messages --- */
-  .messages {
+  /* --- Content area --- */
+  .content-area {
     flex: 1;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
     margin-bottom: 0.75rem;
     padding: 0.25rem 0;
   }
 
-  .msg {
-    padding: 0.5rem 0.75rem;
+  /* --- Skeleton --- */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton-card {
+    border: 1px solid #e8e8e6;
     border-radius: 12px;
-    max-width: 85%;
+    overflow: hidden;
+  }
+
+  .skeleton-entry {
+    padding: 0.75rem;
+    border-bottom: 1px solid #e8e8e6;
+  }
+
+  .skeleton-entry:last-child {
+    border-bottom: none;
+  }
+
+  .sk-line {
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #ebebea 25%, #f5f5f4 50%, #ebebea 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  /* --- Result card --- */
+  .result-card {
+    border: 1px solid #e8e8e6;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: opacity 0.15s;
+  }
+
+  .result-card.dimmed {
+    opacity: 0.5;
+  }
+
+  .card-entry {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid #f0f0ee;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .card-entry:last-child {
+    border-bottom: none;
+  }
+
+  .card-desc {
     font-size: 0.9rem;
-    line-height: 1.45;
-  }
-
-  .msg.user {
-    background: #2d2d2d;
-    color: #fafaf9;
-    align-self: flex-end;
-  }
-
-  .msg.assistant {
-    background: #f3f3f2;
+    font-weight: 500;
     color: #1c1c1c;
-    align-self: flex-start;
+    line-height: 1.3;
   }
 
-  .typing {
+  .card-macros {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 0.6rem 0.75rem;
-  }
-
-  .typing span {
-    display: block;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #ccc;
-    animation: bounce 1.1s ease-in-out infinite;
-  }
-
-  .typing span:nth-child(2) { animation-delay: 0.18s; }
-  .typing span:nth-child(3) { animation-delay: 0.36s; }
-
-  @keyframes bounce {
-    0%, 60%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-6px); }
-  }
-
-  .entry-line {
-    line-height: 1.55;
-    display: flex;
+    gap: 0.2rem;
     flex-wrap: wrap;
-    gap: 0.2rem 0.4rem;
+  }
+
+  .macro-field {
+    display: inline-flex;
     align-items: baseline;
+    gap: 2px;
   }
 
-  .entry-line + .entry-line { margin-top: 0.25rem; }
-  .entry-desc { font-weight: 500; }
-  .entry-meta { color: #888; font-size: 0.82rem; }
-
-  .msg-img {
-    display: block;
-    max-width: 100%;
-    max-height: 180px;
-    border-radius: 6px;
-    margin-bottom: 0.3rem;
+  .macro-field input {
+    width: 40px;
+    border: none;
+    border-bottom: 1px solid #e0e0de;
+    background: transparent;
+    text-align: right;
+    font-family: inherit;
+    font-size: 0.82rem;
+    color: #1c1c1c;
+    padding: 0 1px 1px;
+    -moz-appearance: textfield;
   }
 
-  .messages-hint {
-    color: #bbb;
-    font-size: 0.85rem;
-    text-align: center;
-    margin: auto;
-    padding: 1rem 0;
-    pointer-events: none;
+  .macro-field input::-webkit-outer-spin-button,
+  .macro-field input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
   }
+
+  .macro-field input:focus {
+    outline: none;
+    border-bottom-color: #2d2d2d;
+  }
+
+  .macro-field input:disabled {
+    color: #aaa;
+    border-bottom-color: transparent;
+  }
+
+  .macro-label {
+    font-size: 0.75rem;
+    color: #aaa;
+    font-weight: 500;
+  }
+
+  .macro-sep {
+    color: #ddd;
+    font-size: 0.75rem;
+    margin: 0 0.1rem;
+  }
+
+  /* --- Clarifying question --- */
+  .clarifying {
+    font-size: 0.88rem;
+    color: #555;
+    margin: 0 0 0.75rem;
+    line-height: 1.45;
+    padding: 0.6rem 0.75rem;
+    background: #f3f3f2;
+    border-radius: 10px;
+  }
+
+  /* --- Refine row --- */
+  .refine-note {
+    font-size: 0.8rem;
+    color: #888;
+    margin: 0 0 0.4rem;
+  }
+
+  .refine-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .refine-row input {
+    flex: 1;
+    border: 1px solid #e8e8e6;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.88rem;
+    font-family: inherit;
+    background: #fafaf9;
+    color: #1c1c1c;
+  }
+
+  .refine-row input:focus {
+    outline: none;
+    border-color: #2d2d2d;
+  }
+
+  .save-btn {
+    padding: 0.5rem 1rem;
+    background: #16a34a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+
+  @media (hover: hover) {
+    .save-btn:not(:disabled):hover { background: #15803d; }
+  }
+
+  .save-btn:disabled { opacity: 0.35; cursor: default; }
 
   .file-input { display: none; }
 
@@ -793,23 +956,6 @@
 
   button:disabled { opacity: 0.35; cursor: default; }
 
-  .confirm-btn {
-    width: 100%;
-    margin-top: 0.5rem;
-    padding: 0.75rem 1rem;
-    background: #16a34a;
-    color: #fff;
-    border-radius: 8px;
-    font-size: 0.95rem;
-    font-weight: 600;
-    touch-action: manipulation;
-  }
-
-  @media (hover: hover) {
-    .confirm-btn:not(:disabled):hover { background: #15803d; }
-  }
-  .confirm-btn:disabled { opacity: 0.35; cursor: default; }
-
   /* --- Activity form --- */
   .activity-form {
     display: flex;
@@ -871,7 +1017,6 @@
     border-color: #2d2d2d;
     color: #fafaf9;
   }
-
 
   .hydration-input {
     width: 80px;
