@@ -1,54 +1,59 @@
 package gemini_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"foodtracker/internal/gemini"
 )
 
-func TestParseEntries_BareJSON(t *testing.T) {
-	raw := `{"entries":[{"meal_type":"breakfast","description":"oatmeal","calories":300,"protein":8,"carbs":54,"fat":6}]}`
-	entries, ok := gemini.ParseEntries(raw)
-	if !ok {
-		t.Fatal("expected ok=true")
+func TestResponseUnmarshal(t *testing.T) {
+	raw := `{"message":"Got it!","entries":[{"meal_type":"breakfast","description":"oatmeal","calories":300,"protein":8,"carbs":54,"fat":6,"fiber":4}]}`
+
+	var resp gemini.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("want 1 entry, got %d", len(entries))
+
+	if resp.Message != "Got it!" {
+		t.Errorf("Message: got %q, want %q", resp.Message, "Got it!")
 	}
-	if entries[0].MealType != "breakfast" {
-		t.Errorf("MealType: got %q", entries[0].MealType)
+	if len(resp.Entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(resp.Entries))
 	}
-	if entries[0].Calories != 300 {
-		t.Errorf("Calories: got %d", entries[0].Calories)
+	if resp.Entries[0].MealType != "breakfast" {
+		t.Errorf("MealType: got %q", resp.Entries[0].MealType)
+	}
+	if resp.Entries[0].Calories != 300 {
+		t.Errorf("Calories: got %d", resp.Entries[0].Calories)
 	}
 }
 
-func TestParseEntries_JSONInCodeFence(t *testing.T) {
-	raw := "Here are your entries:\n```json\n{\"entries\":[{\"meal_type\":\"lunch\",\"description\":\"sandwich\",\"calories\":450,\"protein\":20,\"carbs\":50,\"fat\":15}]}\n```"
-	entries, ok := gemini.ParseEntries(raw)
-	if !ok {
-		t.Fatal("expected ok=true for JSON in code fence")
+func TestResponseUnmarshal_Question(t *testing.T) {
+	raw := `{"message":"How much oatmeal did you have — about a cup?","entries":[]}`
+
+	var resp gemini.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
 	}
-	if len(entries) != 1 || entries[0].MealType != "lunch" {
-		t.Errorf("unexpected entries: %+v", entries)
+
+	if resp.Message == "" {
+		t.Error("expected non-empty message")
+	}
+	if len(resp.Entries) != 0 {
+		t.Errorf("expected empty entries, got %d", len(resp.Entries))
 	}
 }
 
-func TestParseEntries_Question(t *testing.T) {
-	raw := `How much oatmeal did you have — about a cup?`
-	_, ok := gemini.ParseEntries(raw)
-	if ok {
-		t.Error("expected ok=false for a plain question")
-	}
-}
+func TestResponseUnmarshal_MultipleEntries(t *testing.T) {
+	raw := `{"message":"Logged!","entries":[{"meal_type":"breakfast","description":"oatmeal","calories":300,"protein":8,"carbs":54,"fat":6,"fiber":4},{"meal_type":"breakfast","description":"coffee","calories":5,"protein":0,"carbs":1,"fat":0,"fiber":0}]}`
 
-func TestParseEntries_MultipleEntries(t *testing.T) {
-	raw := `{"entries":[{"meal_type":"breakfast","description":"oatmeal","calories":300,"protein":8,"carbs":54,"fat":6},{"meal_type":"breakfast","description":"coffee","calories":5,"protein":0,"carbs":1,"fat":0}]}`
-	entries, ok := gemini.ParseEntries(raw)
-	if !ok {
-		t.Fatal("expected ok=true")
+	var resp gemini.Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("want 2 entries, got %d", len(entries))
+
+	if len(resp.Entries) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(resp.Entries))
 	}
 }

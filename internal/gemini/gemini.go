@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/google/generative-ai-go/genai"
@@ -14,30 +13,51 @@ import (
 const systemPrompt = `You are a food tracking assistant. The user describes what they ate.
 
 Your job:
-1. Extract food items and estimate macros (calories, protein, carbs, fat in grams).
+1. Extract food items and estimate macros (calories, protein, carbs, fat, fiber in grams).
 2. If a photo is provided, estimate quantities from the image — do not ask about anything visible in the photo. If quantities are genuinely impossible to determine even from a photo, ask ONE short clarifying question — nothing more.
-3. Once you have enough information, show a friendly human-readable summary:
-
-   Here's what I'm logging:
-   • [description] ([meal_type]) — [calories] cal, [protein]g P, [carbs]g C, [fat]g F
-
-   Does this look right?
-
-   Then include the JSON in a code block:
-` + "```json" + `
-   {"entries":[{"meal_type":"breakfast","description":"oatmeal with milk","calories":300,"protein":8,"carbs":54,"fat":6,"fiber":4}]}
-` + "```" + `
-
-4. If the user says yes / ok / looks good / save it / confirm, repeat the JSON code block exactly so it can be processed.
+3. Once you have enough information, return the entries.
 
 Rules:
 - meal_type must be one of: breakfast, snack, lunch, dinner
 - All numeric values are integers (round estimates are fine)
 - Multiple foods in one meal → multiple entries, same meal_type
 - Use reasonable common serving sizes for estimates
-- Include fiber (grams) as an estimated integer (0 if unknown/negligible)`
+- Include fiber (grams) as an estimated integer (0 if unknown/negligible)
 
-// Entry is a structured food log entry extracted from a Gemini response.
+Response format:
+- If you need clarification: set "message" to your question, leave "entries" as empty array
+- If ready to log: set "message" to a brief confirmation like "Got it!", populate "entries" with the food items`
+
+// responseSchema defines the JSON structure for Gemini responses.
+var responseSchema = &genai.Schema{
+	Type: genai.TypeObject,
+	Properties: map[string]*genai.Schema{
+		"message": {
+			Type:        genai.TypeString,
+			Description: "A brief message to the user - either a clarifying question or confirmation",
+		},
+		"entries": {
+			Type:        genai.TypeArray,
+			Description: "Food entries to log (empty if asking a clarifying question)",
+			Items: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"meal_type":   {Type: genai.TypeString, Description: "One of: breakfast, snack, lunch, dinner"},
+					"description": {Type: genai.TypeString, Description: "Brief description of the food"},
+					"calories":    {Type: genai.TypeInteger},
+					"protein":     {Type: genai.TypeInteger, Description: "Grams of protein"},
+					"carbs":       {Type: genai.TypeInteger, Description: "Grams of carbohydrates"},
+					"fat":         {Type: genai.TypeInteger, Description: "Grams of fat"},
+					"fiber":       {Type: genai.TypeInteger, Description: "Grams of fiber"},
+				},
+				Required: []string{"meal_type", "description", "calories", "protein", "carbs", "fat", "fiber"},
+			},
+		},
+	},
+	Required: []string{"message", "entries"},
+}
+
+// Entry is a structured food log entry.
 type Entry struct {
 	MealType    string `json:"meal_type"`
 	Description string `json:"description"`
@@ -48,30 +68,10 @@ type Entry struct {
 	Fiber       int    `json:"fiber"`
 }
 
-// ParseEntries attempts to extract a []Entry from a Gemini response string.
-// Returns (entries, true) if a valid JSON entry list is found.
-// Returns (nil, false) if the response is a question or clarification.
-func ParseEntries(raw string) ([]Entry, bool) {
-	start := strings.Index(raw, `{"entries"`)
-	if start < 0 {
-		return nil, false
-	}
-	end := strings.LastIndex(raw, "}")
-	if end < start {
-		return nil, false
-	}
-	candidate := raw[start : end+1]
-
-	var result struct {
-		Entries []Entry `json:"entries"`
-	}
-	if err := json.Unmarshal([]byte(candidate), &result); err != nil {
-		return nil, false
-	}
-	if len(result.Entries) == 0 {
-		return nil, false
-	}
-	return result.Entries, true
+// Response is the structured response from Gemini.
+type Response struct {
+	Message string  `json:"message"`
+	Entries []Entry `json:"entries"`
 }
 
 // ImageData carries an inline image to include alongside a chat message.
@@ -91,9 +91,9 @@ func NewService(apiKey string) *Service {
 	return &Service{apiKey: apiKey, convs: make(map[string][]*genai.Content)}
 }
 
-// Chat sends a user message (and optional image) and returns (responseText, entries, error).
-// If Gemini returns structured entries, history is cleared and entries are non-nil.
-// If Gemini asks a clarifying question, history is preserved for the next turn.
+// Chat sends a user message (and optional image) and returns (message, entries, error).
+// If entries is non-empty, the response is ready for confirmation.
+// If entries is empty, message contains a clarifying question.
 func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, img *ImageData) (string, []Entry, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
@@ -102,6 +102,11 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	defer client.Close()
 
 	model := client.GenerativeModel("gemini-3-flash-preview")
+
+	// Configure structured JSON output
+	model.ResponseMIMEType = "application/json"
+	model.ResponseSchema = responseSchema
+
 	systemInstr := systemPrompt
 	if profileCtx != "" {
 		systemInstr = profileCtx + "\n\n" + systemPrompt
@@ -131,22 +136,24 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 		return "", nil, fmt.Errorf("gemini send: %w", err)
 	}
 
-	var sb strings.Builder
+	// Extract JSON response
+	var jsonStr string
 	for _, part := range resp.Candidates[0].Content.Parts {
-		sb.WriteString(fmt.Sprintf("%v", part))
+		if txt, ok := part.(genai.Text); ok {
+			jsonStr += string(txt)
+		}
 	}
-	responseText := sb.String()
 
-	entries, ok := ParseEntries(responseText)
+	var result Response
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return "", nil, fmt.Errorf("parse response: %w", err)
+	}
 
 	s.mu.Lock()
 	s.convs[key] = chatSession.History
 	s.mu.Unlock()
 
-	if ok {
-		return responseText, entries, nil
-	}
-	return responseText, nil, nil
+	return result.Message, result.Entries, nil
 }
 
 // ClearConversation discards in-progress conversation for a user on a given date.
