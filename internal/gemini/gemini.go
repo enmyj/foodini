@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )
+
+const geminiModel = "gemini-3-flash-preview"
 
 const systemPrompt = `You are a food tracking assistant. The user describes what they ate.
 
@@ -101,7 +104,7 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-3-flash-preview")
+	model := client.GenerativeModel(geminiModel)
 
 	// Configure structured JSON output
 	model.ResponseMIMEType = "application/json"
@@ -161,4 +164,39 @@ func (s *Service) ClearConversation(userEmail, date string) {
 	s.mu.Lock()
 	delete(s.convs, userEmail+"|"+date)
 	s.mu.Unlock()
+}
+
+const insightsSystemPrompt = `You are a nutrition analyst reviewing a week of logged food and activity data.
+Output 3-4 bullet points (use • character). Each bullet is one sentence max. Be direct and clinical — no motivational language, no praise, no filler.
+Focus on: what's off (protein, calories, consistency), any notable patterns, one concrete thing to change next week.
+Use **bold** only for the key term at the start of each bullet (e.g. **Protein:** ...).`
+
+// Insights generates a free-form weekly analysis given a text summary of the week's data.
+func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) (string, error) {
+	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
+	if err != nil {
+		return "", fmt.Errorf("gemini client: %w", err)
+	}
+	defer client.Close()
+
+	model := client.GenerativeModel(geminiModel)
+	systemInstr := insightsSystemPrompt
+	if profileCtx != "" {
+		systemInstr = profileCtx + "\n\n" + insightsSystemPrompt
+	}
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text(systemInstr)},
+	}
+
+	resp, err := model.GenerateContent(ctx, genai.Text(weekSummary))
+	if err != nil {
+		return "", fmt.Errorf("gemini generate: %w", err)
+	}
+	var result string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if txt, ok := part.(genai.Text); ok {
+			result += string(txt)
+		}
+	}
+	return strings.TrimSpace(result), nil
 }

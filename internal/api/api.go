@@ -527,6 +527,130 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, dayLog)
 }
 
+// POST /api/insights — body: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+// Returns {"insight": "..."} — a free-form Gemini analysis of the week.
+func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+
+	var req struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Start == "" || req.End == "" {
+		writeErr(w, http.StatusBadRequest, "start and end dates required")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.Start); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid start date")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.End); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid end date")
+		return
+	}
+	startT, _ := time.Parse("2006-01-02", req.Start)
+	endT, _ := time.Parse("2006-01-02", req.End)
+	if endT.Sub(startT) > 31*24*time.Hour {
+		writeErr(w, http.StatusBadRequest, "date range too large")
+		return
+	}
+
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	entries, err := svc.GetFoodByDateRange(r.Context(), req.Start, req.End)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Start, req.End)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	summary := buildWeekSummary(req.Start, req.End, entries, dailyLogs)
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		profile, _ := svc.GetProfile(r.Context())
+		profileCtx = formatProfileContext(profile)
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	insight, err := h.gemini.Insights(r.Context(), summary, profileCtx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"insight": insight})
+}
+
+func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
+	byDate := map[string][]sheets.FoodEntry{}
+	for _, e := range entries {
+		byDate[e.Date] = append(byDate[e.Date], e)
+	}
+	logByDate := map[string]sheets.DayLog{}
+	for _, l := range dailyLogs {
+		logByDate[l.Date] = l
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Week %s to %s:\n\n", start, end)
+	cur, _ := time.Parse("2006-01-02", start)
+	endT, _ := time.Parse("2006-01-02", end)
+	for !cur.After(endT) {
+		date := cur.Format("2006-01-02")
+		dayEntries := byDate[date]
+		log := logByDate[date]
+		fmt.Fprintf(&b, "%s (%s):\n", date, cur.Weekday())
+		if len(dayEntries) == 0 {
+			fmt.Fprintf(&b, "  No food logged\n")
+		} else {
+			totalCal, totalProt, totalCarb, totalFat, totalFiber := 0, 0, 0, 0, 0
+			for _, e := range dayEntries {
+				totalCal += e.Calories
+				totalProt += e.Protein
+				totalCarb += e.Carbs
+				totalFat += e.Fat
+				totalFiber += e.Fiber
+			}
+			fmt.Fprintf(&b, "  Totals: %d cal, %dg protein, %dg carbs, %dg fat, %dg fiber\n", totalCal, totalProt, totalCarb, totalFat, totalFiber)
+			for _, e := range dayEntries {
+				fmt.Fprintf(&b, "  - [%s] %s: %d cal\n", e.MealType, e.Description, e.Calories)
+			}
+		}
+		if log.Activity != "" {
+			fmt.Fprintf(&b, "  Activity: %s\n", log.Activity)
+		}
+		if log.Poop {
+			fmt.Fprintf(&b, "  Bowel movement: yes\n")
+			if log.PoopNotes != "" {
+				fmt.Fprintf(&b, "  Notes: %s\n", log.PoopNotes)
+			}
+		}
+		if log.Hydration > 0 {
+			fmt.Fprintf(&b, "  Water: %.1fL\n", log.Hydration)
+		}
+		if log.FeelingScore > 0 {
+			fmt.Fprintf(&b, "  Feeling: %d/10\n", log.FeelingScore)
+		}
+		fmt.Fprintln(&b)
+		cur = cur.AddDate(0, 0, 1)
+	}
+	return b.String()
+}
+
 // PUT /api/activity — body: {"date": "YYYY-MM-DD", "activity": "...", "feeling_score": 0, "feeling_notes": "..."}
 func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())

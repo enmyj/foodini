@@ -64,6 +64,16 @@ export async function putActivity(date, { activity, feeling_score, feeling_notes
   return res.json()
 }
 
+export async function getInsights(start, end) {
+  const res = await fetch('/api/insights', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    body: JSON.stringify({ start, end }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function getProfile() {
   const res = await fetch('/api/profile', { headers: { 'X-Timezone': TZ } })
   if (!res.ok) throw new Error(await res.text())

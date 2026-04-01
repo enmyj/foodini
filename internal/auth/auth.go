@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/securecookie"
 	"golang.org/x/oauth2"
@@ -41,6 +42,8 @@ type Handler struct {
 	oauthCfg *oauth2.Config
 	sc       *securecookie.SecureCookie
 	secure   bool
+	tsMu     sync.Mutex
+	tsCache  map[string]oauth2.TokenSource
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -58,8 +61,9 @@ func NewHandler(cfg Config) *Handler {
 			Scopes:       scopes,
 			Endpoint:     google.Endpoint,
 		},
-		sc:     securecookie.New(hashKey, encKey),
-		secure: cfg.Secure,
+		sc:      securecookie.New(hashKey, encKey),
+		secure:  cfg.Secure,
+		tsCache: make(map[string]oauth2.TokenSource),
 	}
 }
 
@@ -193,10 +197,19 @@ func (h *Handler) GetSession(r *http.Request) (*Session, error) {
 	return &session, nil
 }
 
-// TokenSource returns an oauth2.TokenSource for the given session's refresh token.
-func (h *Handler) TokenSource(ctx context.Context, session *Session) oauth2.TokenSource {
-	token := &oauth2.Token{RefreshToken: session.RefreshToken}
-	return h.oauthCfg.TokenSource(ctx, token)
+// TokenSource returns a cached oauth2.TokenSource for the given session's refresh token.
+// Caching ensures concurrent requests share one source and reuse the cached access token
+// rather than racing to exchange the same refresh token multiple times.
+func (h *Handler) TokenSource(_ context.Context, session *Session) oauth2.TokenSource {
+	h.tsMu.Lock()
+	defer h.tsMu.Unlock()
+	if ts, ok := h.tsCache[session.RefreshToken]; ok {
+		return ts
+	}
+	base := &oauth2.Token{RefreshToken: session.RefreshToken}
+	ts := oauth2.ReuseTokenSource(nil, h.oauthCfg.TokenSource(context.Background(), base))
+	h.tsCache[session.RefreshToken] = ts
+	return ts
 }
 
 // Authenticated wraps a handler requiring a valid session.

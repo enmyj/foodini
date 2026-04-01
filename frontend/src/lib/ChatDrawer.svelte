@@ -92,6 +92,7 @@
       mode = 'tiles'
       input = ''
       caption = ''
+      sending = false
       currentEntries = null
       clarifyingQuestion = null
       refineInput = ''
@@ -227,7 +228,7 @@
     try {
       const imagePayload = img ? { data: img.data, mime_type: img.mimeType } : null
       const res = await chat(text, selectedDate, imagePayload, selectedMeal)
-      if (res.pending) {
+      if (res.pending && res.entries?.length) {
         currentEntries = res.entries
         setTimeout(() => refineEl?.focus(), 30)
       } else {
@@ -265,6 +266,7 @@
     sending = true
     try {
       const res = await confirmChat(currentEntries, selectedDate)
+      sending = false
       onEntriesAdded(res.entries)
       onClose()
     } catch {
