@@ -326,7 +326,7 @@
             {/if}
           {/if}
         </div>
-        {#each group as entry}
+        {#each group as entry (entry.id)}
           <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
         {:else}
           <button class="empty" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerOpen = true }}>Nothing logged</button>

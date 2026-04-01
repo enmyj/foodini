@@ -123,12 +123,15 @@ func formatProfileContext(p sheets.UserProfile) string {
 	if p.Weight != "" {
 		parts = append(parts, p.Weight)
 	}
-	if len(parts) == 0 && p.Notes == "" {
+	if len(parts) == 0 && p.Notes == "" && p.Goals == "" {
 		return ""
 	}
 	ctx := "User profile: " + strings.Join(parts, ", ")
 	if p.Notes != "" {
 		ctx += ". " + p.Notes
+	}
+	if p.Goals != "" {
+		ctx += ". Goals: " + p.Goals
 	}
 	return ctx
 }
@@ -177,6 +180,14 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		if version == 2 {
 			// Migrate v2 → v3: add hydration column to Activity sheet header
 			if err := sheets.MigrateV2toV3(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+			version = 3
+		}
+		if version == 3 {
+			// Migrate v3 → v4: add goals column to Profile sheet header
+			if err := sheets.MigrateV3toV4(r.Context(), ts, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}

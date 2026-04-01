@@ -19,7 +19,7 @@ const (
 	metaSheet     = "Meta"
 	profileSheet  = "Profile"
 
-	CurrentSchemaVersion = 3
+	CurrentSchemaVersion = 4
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -124,16 +124,17 @@ func DayLogFromRow(row []interface{}) DayLog {
 }
 
 // UserProfile stores user context for improving Gemini macro estimates.
-// Stored in the Profile sheet as a single data row: gender | height | weight | notes
+// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals
 type UserProfile struct {
 	Gender string `json:"gender"`
 	Height string `json:"height"`
 	Weight string `json:"weight"`
 	Notes  string `json:"notes"`
+	Goals  string `json:"goals"`
 }
 
 func (p UserProfile) ToRow() []interface{} {
-	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes}
+	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals}
 }
 
 func UserProfileFromRow(row []interface{}) UserProfile {
@@ -143,13 +144,13 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 		}
 		return ""
 	}
-	return UserProfile{Gender: str(0), Height: str(1), Weight: str(2), Notes: str(3)}
+	return UserProfile{Gender: str(0), Height: str(1), Weight: str(2), Notes: str(3), Goals: str(4)}
 }
 
 // GetProfile reads the user profile from the Profile sheet.
 // Returns an empty UserProfile if no data has been saved yet.
 func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:D2").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:E2").Context(ctx).Do()
 	if err != nil {
 		return UserProfile{}, fmt.Errorf("get profile: %w", err)
 	}
@@ -163,7 +164,7 @@ func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
 func (s *Service) SetProfile(ctx context.Context, p UserProfile) error {
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{p.ToRow()}}
 	_, err := s.svc.Spreadsheets.Values.Update(
-		s.spreadsheetID, profileSheet+"!A2:D2", vr,
+		s.spreadsheetID, profileSheet+"!A2:E2", vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err
 }
@@ -246,10 +247,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 
 	// Profile sheet: headers row
 	profHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"gender", "height", "weight", "notes"}},
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, profileSheet+"!A1:D1", profHeaders,
+		created.SpreadsheetId, profileSheet+"!A1:E1", profHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("profile headers: %w", err)
@@ -302,6 +303,31 @@ func MigrateV2toV3(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{strconv.Itoa(CurrentSchemaVersion)}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV3toV4 upgrades an existing spreadsheet from schema v3 to v4.
+// It adds the goals column to the Profile sheet header.
+func MigrateV3toV4(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	profHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, profileSheet+"!A1:E1", profHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v3→v4 profile header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"4"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()

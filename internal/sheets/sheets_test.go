@@ -170,16 +170,16 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 3 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 3", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 4 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 4", sheets.CurrentSchemaVersion)
 	}
 }
 
 func TestUserProfileRoundTrip(t *testing.T) {
-	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian"}
+	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian", Goals: "lose weight"}
 	row := p.ToRow()
-	if len(row) != 4 {
-		t.Fatalf("want 4 cols, got %d", len(row))
+	if len(row) != 5 {
+		t.Fatalf("want 5 cols, got %d", len(row))
 	}
 	if row[0] != "male" {
 		t.Errorf("gender: got %v", row[0])
@@ -187,9 +187,15 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	if row[3] != "vegetarian" {
 		t.Errorf("notes: got %v", row[3])
 	}
+	if row[4] != "lose weight" {
+		t.Errorf("goals: got %v", row[4])
+	}
 	got := sheets.UserProfileFromRow(row)
 	if got.Height != "5'10\"" {
 		t.Errorf("height round-trip: got %q", got.Height)
+	}
+	if got.Goals != "lose weight" {
+		t.Errorf("goals round-trip: got %q", got.Goals)
 	}
 }
 
