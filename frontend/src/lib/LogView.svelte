@@ -1,5 +1,5 @@
 <script>
-  import { getLog, confirmChat, getInsights } from './api.js'
+  import { getLog, confirmChat, getInsights, getDayInsights } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
@@ -28,6 +28,7 @@
   let longPressTimer = null
   let dateInputEl = $state(null)
   let insightsByWeek = $state({})
+  let dayInsight = $state(null) // { loading, text, error, open }
   let historyWeeks = $state(8)
   let weekGroupsData = $derived(weekGroups(historyData, historyWeeks))
 
@@ -225,12 +226,31 @@
     }
   }
 
+  async function fetchDayInsights(date) {
+    dayInsight = { loading: true, text: null, error: null, open: true }
+    try {
+      const res = await getDayInsights(date)
+      dayInsight = { loading: false, text: res.insight, error: null, open: true }
+    } catch (e) {
+      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true }
+    }
+  }
+
+  function toggleDayInsights() {
+    if (!dayInsight) {
+      fetchDayInsights(currentDate)
+    } else {
+      dayInsight = { ...dayInsight, open: !dayInsight.open }
+    }
+  }
+
   $effect(() => {
     const v = view
     const d = currentDate
     const hw = historyWeeks
     if (v === 'day') {
       repeatedMeals = new Set()
+      dayInsight = null
       loadDay(d)
       if (d === todayStr()) loadYesterday()
       else yesterdayByMeal = {}
@@ -290,6 +310,13 @@
           <span>{t.carbs}g C</span>
           <span>{t.fat}g F</span>
           <span>{t.fiber}g Fb</span>
+          <button
+            class="insights-btn"
+            class:active={dayInsight?.open}
+            onclick={toggleDayInsights}
+            aria-label="AI insights for today"
+            title="AI insights"
+          >✦ insights</button>
         </div>
       {/if}
     {/if}
@@ -298,6 +325,22 @@
   {#if loading}
     <p class="state">Loading…</p>
   {:else if view === 'day'}
+    {#if dayInsight?.open}
+      <div class="insights-panel day-insights-panel">
+        {#if dayInsight.loading}
+          <div class="insight-skeleton">
+            <div class="isk-line" style="width: 88%"></div>
+            <div class="isk-line" style="width: 72%"></div>
+            <div class="isk-line" style="width: 80%"></div>
+          </div>
+        {:else if dayInsight.error}
+          <span class="insights-err">{dayInsight.error}</span>
+        {:else if dayInsight.text}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <p class="insights-text">{@html renderInsight(dayInsight.text)}</p>
+        {/if}
+      </div>
+    {/if}
     {#each MEAL_ORDER as meal}
       {@const group = (groupedByMeal(dayData?.entries)[meal] ?? [])}
       <section>
@@ -546,10 +589,15 @@
   .totals {
     display: flex;
     gap: 1rem;
+    align-items: center;
     font-size: 0.78rem;
     color: #888;
     padding-bottom: 0.1rem;
     padding-top: 0.3rem;
+  }
+
+  .totals .insights-btn {
+    margin-left: auto;
   }
 
   section {
@@ -826,10 +874,35 @@
     background: #f7f7f5;
   }
 
+  .day-insights-panel {
+    border: 1px solid #e8e8e6;
+    border-radius: 10px;
+    margin-bottom: 1.25rem;
+  }
+
   .insights-loading {
     font-size: 0.85rem;
     color: #888;
     font-style: italic;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .insight-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .isk-line {
+    height: 0.78rem;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #e8e8e6 25%, #f2f2f0 50%, #e8e8e6 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
   }
 
   .insights-err {

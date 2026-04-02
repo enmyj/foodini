@@ -606,6 +606,68 @@ func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"insight": insight})
 }
 
+// POST /api/insights/day — body: {"date": "YYYY-MM-DD"}
+// Returns {"insight": "..."} — a single-day Gemini analysis.
+func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+
+	var req struct {
+		Date string `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Date == "" {
+		writeErr(w, http.StatusBadRequest, "date required")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid date")
+		return
+	}
+
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	entries, err := svc.GetFoodByDateRange(r.Context(), req.Date, req.Date)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Date, req.Date)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if len(entries) == 0 && len(dailyLogs) == 0 {
+		writeErr(w, http.StatusBadRequest, "no data for this day")
+		return
+	}
+
+	summary := buildDaySummary(req.Date, entries, dailyLogs)
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		profile, _ := svc.GetProfile(r.Context())
+		profileCtx = formatProfileContext(profile)
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	insight, err := h.gemini.DayInsights(r.Context(), summary, profileCtx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"insight": insight})
+}
+
 func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
 	byDate := map[string][]sheets.FoodEntry{}
 	for _, e := range entries {
@@ -658,6 +720,54 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 		}
 		fmt.Fprintln(&b)
 		cur = cur.AddDate(0, 0, 1)
+	}
+	return b.String()
+}
+
+func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
+	// Reuse buildWeekSummary's per-day logic but with a single-day header.
+	logByDate := map[string]sheets.DayLog{}
+	for _, l := range dailyLogs {
+		logByDate[l.Date] = l
+	}
+	t, _ := time.Parse("2006-01-02", date)
+	log := logByDate[date]
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Day: %s (%s)\n\n", date, t.Weekday())
+	if len(entries) == 0 {
+		fmt.Fprintf(&b, "  No food logged\n")
+	} else {
+		totalCal, totalProt, totalCarb, totalFat, totalFiber := 0, 0, 0, 0, 0
+		for _, e := range entries {
+			totalCal += e.Calories
+			totalProt += e.Protein
+			totalCarb += e.Carbs
+			totalFat += e.Fat
+			totalFiber += e.Fiber
+		}
+		fmt.Fprintf(&b, "Totals: %d cal, %dg protein, %dg carbs, %dg fat, %dg fiber\n", totalCal, totalProt, totalCarb, totalFat, totalFiber)
+		for _, e := range entries {
+			fmt.Fprintf(&b, "  - [%s] %s: %d cal\n", e.MealType, e.Description, e.Calories)
+		}
+	}
+	if log.Activity != "" {
+		fmt.Fprintf(&b, "Activity: %s\n", log.Activity)
+	}
+	if log.Poop {
+		fmt.Fprintf(&b, "Bowel movement: yes\n")
+		if log.PoopNotes != "" {
+			fmt.Fprintf(&b, "Notes: %s\n", log.PoopNotes)
+		}
+	}
+	if log.Hydration > 0 {
+		fmt.Fprintf(&b, "Water: %.1fL\n", log.Hydration)
+	}
+	if log.FeelingScore > 0 {
+		fmt.Fprintf(&b, "Feeling: %d/10\n", log.FeelingScore)
+		if log.FeelingNotes != "" {
+			fmt.Fprintf(&b, "Feeling notes: %s\n", log.FeelingNotes)
+		}
 	}
 	return b.String()
 }

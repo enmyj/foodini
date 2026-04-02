@@ -171,8 +171,12 @@ Output 3-4 bullet points (use • character). Each bullet is one sentence max. B
 Focus on: what's off (protein, calories, consistency), any notable patterns, one concrete thing to change next week.
 Use **bold** only for the key term at the start of each bullet (e.g. **Protein:** ...).`
 
-// Insights generates a free-form weekly analysis given a text summary of the week's data.
-func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) (string, error) {
+const dayInsightsSystemPrompt = `You are a nutrition analyst reviewing one day of logged food and activity data.
+Output 2-3 bullet points (use • character). Each bullet is one sentence max. Be direct and clinical — no motivational language, no praise, no filler.
+Focus on: how macros landed relative to any stated goals, anything notably missing or excessive, one concrete suggestion for tomorrow.
+Use **bold** only for the key term at the start of each bullet (e.g. **Protein:** ...).`
+
+func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
 		return "", fmt.Errorf("gemini client: %w", err)
@@ -180,15 +184,15 @@ func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) 
 	defer client.Close()
 
 	model := client.GenerativeModel(geminiModel)
-	systemInstr := insightsSystemPrompt
+	systemInstr := systemPrompt
 	if profileCtx != "" {
-		systemInstr = profileCtx + "\n\n" + insightsSystemPrompt
+		systemInstr = profileCtx + "\n\n" + systemPrompt
 	}
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(systemInstr)},
 	}
 
-	resp, err := model.GenerateContent(ctx, genai.Text(weekSummary))
+	resp, err := model.GenerateContent(ctx, genai.Text(summary))
 	if err != nil {
 		return "", fmt.Errorf("gemini generate: %w", err)
 	}
@@ -199,4 +203,14 @@ func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) 
 		}
 	}
 	return strings.TrimSpace(result), nil
+}
+
+// Insights generates a free-form weekly analysis given a text summary of the week's data.
+func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) (string, error) {
+	return s.insights(ctx, weekSummary, profileCtx, insightsSystemPrompt)
+}
+
+// DayInsights generates a single-day analysis given a text summary of the day's data.
+func (s *Service) DayInsights(ctx context.Context, daySummary, profileCtx string) (string, error) {
+	return s.insights(ctx, daySummary, profileCtx, dayInsightsSystemPrompt)
 }
