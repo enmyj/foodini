@@ -1,5 +1,5 @@
 <script>
-  import { getLog, confirmChat, getInsights, getDayInsights } from './api.js'
+  import { getLog, confirmChat, generateInsights, generateDayInsights, fetchStoredInsight, fetchStoredDayInsight } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
@@ -28,7 +28,8 @@
   let longPressTimer = null
   let dateInputEl = $state(null)
   let insightsByWeek = $state({})
-  let dayInsight = $state(null) // { loading, text, error, open }
+  let dayInsight = $state(null) // { loading, text, error, open, generatedAt }
+  let collapsedMeals = $state(new Set(MEAL_ORDER))
   let historyWeeks = $state(8)
   let weekGroupsData = $derived(weekGroups(historyData, historyWeeks))
 
@@ -70,6 +71,7 @@
 
   async function loadDay(date) {
     loading = true
+    collapsedMeals = new Set(MEAL_ORDER)
     try {
       dayData = await getLog({ date })
       if (dayData?.spreadsheet_url && !spreadsheetUrl) spreadsheetUrl = dayData.spreadsheet_url
@@ -126,8 +128,8 @@
     return weeks.reverse()
   }
 
-  async function loadYesterday() {
-    const yStr = addDays(todayStr(), -1)
+  async function loadYesterday(date) {
+    const yStr = addDays(date, -1)
     try {
       const res = await getLog({ date: yStr })
       const g = {}
@@ -147,6 +149,7 @@
       dayData = { ...dayData, entries: [...(dayData.entries ?? []), ...res.entries] }
       yesterdayByMeal = { ...yesterdayByMeal, [targetMeal]: [] }
       repeatedMeals = new Set([...repeatedMeals, targetMeal])
+      collapsedMeals = new Set([...collapsedMeals].filter(m => m !== targetMeal))
     } catch {} finally {
       repeating = null
     }
@@ -183,6 +186,10 @@
   function onEntriesAdded(newEntries) {
     dayData = { ...dayData, entries: [...(dayData.entries ?? []), ...newEntries] }
     drawerOpen = false
+    if (newEntries.length > 0) {
+      const addedMeal = newEntries[0].meal_type
+      collapsedMeals = new Set([...collapsedMeals].filter(m => m !== addedMeal))
+    }
   }
 
   function openDatePicker() {
@@ -194,13 +201,20 @@
     }
   }
 
-  async function fetchInsights(weekStart, weekEnd) {
-    insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: true, text: null, error: null } }
+  async function fetchInsights(weekStart, weekEnd, regenerate = false) {
+    insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: true, text: null, error: null, generatedAt: null, loaded: false } }
     try {
-      const res = await getInsights(weekStart, weekEnd)
-      insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: false, text: res.insight, error: null } }
+      if (!regenerate) {
+        const stored = await fetchStoredInsight(weekStart, weekEnd)
+        if (stored.insight) {
+          insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: false, text: stored.insight, error: null, generatedAt: stored.generated_at, loaded: true } }
+          return
+        }
+      }
+      const res = await generateInsights(weekStart, weekEnd)
+      insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: false, text: res.insight, error: null, generatedAt: res.generated_at, loaded: true } }
     } catch {
-      insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: false, text: null, error: 'Could not load insights' } }
+      insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: false, text: null, error: 'Could not load insights', generatedAt: null, loaded: true } }
     }
   }
 
@@ -217,32 +231,41 @@
       .join('\n')
   }
 
+  function formatGeneratedAt(isoStr) {
+    if (!isoStr) return ''
+    const d = new Date(isoStr)
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  }
+
   function toggleInsights(weekStart, weekEnd) {
     const cur = insightsByWeek[weekStart]
-    if (!cur) {
-      fetchInsights(weekStart, weekEnd)
+    if (!cur || !cur.loaded) {
+      fetchInsights(weekStart, weekEnd, false)
     } else {
       insightsByWeek = { ...insightsByWeek, [weekStart]: { ...cur, open: !cur.open } }
     }
   }
 
-  const INSIGHT_TTL = 5 * 60 * 1000 // 5 minutes
-
-  async function fetchDayInsights(date) {
-    dayInsight = { loading: true, text: null, error: null, open: true, fetchedAt: null }
+  async function fetchDayInsights(date, regenerate = false) {
+    dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null }
     try {
-      const res = await getDayInsights(date)
-      dayInsight = { loading: false, text: res.insight, error: null, open: true, fetchedAt: Date.now() }
+      if (!regenerate) {
+        const stored = await fetchStoredDayInsight(date)
+        if (stored.insight) {
+          dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at }
+          return
+        }
+      }
+      const res = await generateDayInsights(date)
+      dayInsight = { loading: false, text: res.insight, error: null, open: true, generatedAt: res.generated_at }
     } catch (e) {
-      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true, fetchedAt: null }
+      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true, generatedAt: null }
     }
   }
 
   function toggleDayInsights() {
     if (!dayInsight || (!dayInsight.loading && !dayInsight.text && !dayInsight.error)) {
-      fetchDayInsights(currentDate)
-    } else if (dayInsight.fetchedAt && Date.now() - dayInsight.fetchedAt > INSIGHT_TTL) {
-      fetchDayInsights(currentDate)
+      fetchDayInsights(currentDate, false)
     } else {
       dayInsight = { ...dayInsight, open: !dayInsight.open }
     }
@@ -256,8 +279,7 @@
       repeatedMeals = new Set()
       dayInsight = null
       loadDay(d)
-      if (d === todayStr()) loadYesterday()
-      else yesterdayByMeal = {}
+      loadYesterday(d)
     } else {
       loadHistory(hw)
     }
@@ -277,9 +299,6 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
           </a>
         {/if}
-        <button class="refresh-btn" onclick={() => location.reload()} aria-label="Refresh" title="Refresh">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        </button>
         <button class="settings-btn" onclick={() => profileOpen = true} aria-label="Profile settings" title="Profile settings">⚙</button>
         <a class="signout-btn" href="/auth/logout" aria-label="Sign out" title="Sign out">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -343,15 +362,32 @@
         {:else if dayInsight.text}
           <!-- eslint-disable-next-line svelte/no-at-html-tags -->
           <p class="insights-text">{@html renderInsight(dayInsight.text)}</p>
+          <div class="insight-footer">
+            {#if dayInsight.generatedAt}<span class="insight-ts">{formatGeneratedAt(dayInsight.generatedAt)}</span>{/if}
+            <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>↺ regenerate</button>
+          </div>
         {/if}
       </div>
     {/if}
     {#each MEAL_ORDER as meal}
       {@const group = (groupedByMeal(dayData?.entries)[meal] ?? [])}
+      {@const collapsed = collapsedMeals.has(meal)}
       <section>
         <div class="meal-header">
-          <button class="meal-name" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerTab = 'food'; drawerOpen = true }}>{meal}<span class="meal-add">+</span></button>
-          {#if currentDate === todayStr() && yesterdayByMeal[meal]?.length && !group.length}
+          <button
+            class="meal-name"
+            onclick={() => {
+              if (collapsed) {
+                collapsedMeals = new Set([...collapsedMeals].filter(m => m !== meal))
+              } else {
+                collapsedMeals = new Set([...collapsedMeals, meal])
+              }
+            }}
+          >
+            {meal}
+            {#if group.length > 0}<span class="meal-summary">· {group.reduce((s, e) => s + e.calories, 0)} cal</span>{/if}
+          </button>
+          {#if yesterdayByMeal[meal]?.length && !group.length}
             {#if repeatPicker === meal}
               <div class="repeat-picker">
                 {#each MEAL_ORDER.filter(m => yesterdayByMeal[m]?.length) as src}
@@ -374,11 +410,12 @@
             {/if}
           {/if}
         </div>
-        {#each group as entry (entry.id)}
-          <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
-        {:else}
-          <button class="empty" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerOpen = true }}>Nothing logged</button>
-        {/each}
+        {#if !collapsed}
+          {#each group as entry (entry.id)}
+            <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
+          {/each}
+          <button class="add-row" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerTab = 'food'; drawerOpen = true }}>+ add item</button>
+        {/if}
       </section>
     {/each}
     <ActivityNote date={currentDate} onOpen={openActivityDrawer} refreshKey={activityRefreshKey} />
@@ -422,14 +459,19 @@
           {/each}
         </div>
         {#if insightsByWeek[week.weekStart]?.open}
+          {@const wi = insightsByWeek[week.weekStart]}
           <div class="insights-panel">
-            {#if insightsByWeek[week.weekStart].loading}
+            {#if wi.loading}
               <span class="insights-loading">Thinking…</span>
-            {:else if insightsByWeek[week.weekStart].error}
-              <span class="insights-err">{insightsByWeek[week.weekStart].error}</span>
-            {:else if insightsByWeek[week.weekStart].text}
+            {:else if wi.error}
+              <span class="insights-err">{wi.error}</span>
+            {:else if wi.text}
               <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-              <p class="insights-text">{@html renderInsight(insightsByWeek[week.weekStart].text)}</p>
+              <p class="insights-text">{@html renderInsight(wi.text)}</p>
+              <div class="insight-footer">
+                {#if wi.generatedAt}<span class="insight-ts">{formatGeneratedAt(wi.generatedAt)}</span>{/if}
+                <button class="insight-regen" onclick={() => fetchInsights(week.weekStart, week.weekEnd, true)}>↺ regenerate</button>
+              </div>
             {/if}
           </div>
         {/if}
@@ -619,7 +661,9 @@
     letter-spacing: 0.08em;
     font-weight: 600;
     cursor: pointer;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     padding: 0.3rem 0;
     touch-action: manipulation;
   }
@@ -628,21 +672,18 @@
     .meal-name:hover { color: #2d2d2d; }
   }
 
-  .meal-add {
-    margin-left: 0.35rem;
-    font-size: 0.82rem;
-    opacity: 0.55;
-    font-weight: 600;
-  }
-
-  @media (hover: hover) {
-    .meal-name:hover .meal-add { opacity: 1; }
+  .meal-summary {
+    font-weight: 400;
+    color: #bbb;
+    letter-spacing: 0;
+    text-transform: none;
+    font-size: 0.72rem;
   }
 
   .meal-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.25rem;
     margin-bottom: 0.5rem;
   }
 
@@ -717,21 +758,21 @@
     to { transform: rotate(360deg); }
   }
 
-  .empty {
+  .add-row {
     background: none;
     border: none;
     font-family: inherit;
     text-align: left;
-    color: #bbb;
-    font-size: 0.85rem;
-    padding: 0.75rem 0;
+    color: #ccc;
+    font-size: 0.82rem;
+    padding: 0.6rem 0;
     cursor: pointer;
     touch-action: manipulation;
     width: 100%;
   }
 
   @media (hover: hover) {
-    .empty:hover { color: #888; }
+    .add-row:hover { color: #888; }
   }
 
   .state {
@@ -946,6 +987,36 @@
     color: #1c1c1c;
   }
 
+  .insight-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #ebebea;
+  }
+
+  .insight-ts {
+    font-size: 0.72rem;
+    color: #bbb;
+  }
+
+  .insight-regen {
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: #aaa;
+    cursor: pointer;
+    padding: 0;
+    touch-action: manipulation;
+    margin-left: auto;
+  }
+
+  @media (hover: hover) {
+    .insight-regen:hover { color: #555; }
+  }
+
   /* FAB + shared actions */
   .fab {
     position: fixed;
@@ -987,23 +1058,6 @@
 
   @media (hover: hover) {
     .sheet-link:hover { color: #2d2d2d; }
-  }
-
-  .refresh-btn {
-    background: none;
-    border: none;
-    display: flex;
-    align-items: center;
-    color: #888;
-    cursor: pointer;
-    padding: 0.5rem 0.4rem;
-    line-height: 1;
-    touch-action: manipulation;
-    min-height: 2.75rem;
-  }
-
-  @media (hover: hover) {
-    .refresh-btn:hover { color: #2d2d2d; }
   }
 
   .settings-btn {

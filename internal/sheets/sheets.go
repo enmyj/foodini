@@ -2,6 +2,7 @@ package sheets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 	googlesheets "google.golang.org/api/sheets/v4"
 )
@@ -18,8 +20,9 @@ const (
 	activitySheet = "Activity"
 	metaSheet     = "Meta"
 	profileSheet  = "Profile"
+	insightsSheet = "Insights"
 
-	CurrentSchemaVersion = 5
+	CurrentSchemaVersion = 6
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -148,6 +151,57 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 	return UserProfile{Gender: str(0), Height: str(1), Weight: str(2), Notes: str(3), Goals: str(4), DietaryRestrictions: str(5)}
 }
 
+// InsightRecord stores a generated AI insight in the Insights sheet.
+// Schema: type | start_date | end_date | generated_at | insight
+type InsightRecord struct {
+	Type        string `json:"type"`         // "day" or "week"
+	StartDate   string `json:"start_date"`
+	EndDate     string `json:"end_date"`
+	GeneratedAt string `json:"generated_at"` // UTC RFC3339
+	Insight     string `json:"insight"`
+}
+
+// SaveInsight appends an insight record to the Insights sheet.
+func (s *Service) SaveInsight(ctx context.Context, rec InsightRecord) error {
+	vr := &googlesheets.ValueRange{
+		Values: [][]interface{}{{rec.Type, rec.StartDate, rec.EndDate, rec.GeneratedAt, rec.Insight}},
+	}
+	_, err := s.svc.Spreadsheets.Values.Append(
+		s.spreadsheetID, insightsSheet+"!A:E", vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// GetInsight returns the most recently generated insight matching type+start+end,
+// or nil if none exists. Returns nil (no error) when the Insights sheet does not exist yet.
+func (s *Service) GetInsight(ctx context.Context, insightType, startDate, endDate string) (*InsightRecord, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, insightsSheet+"!A:E").Context(ctx).Do()
+	if err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == 400 {
+			return nil, nil // sheet not yet created
+		}
+		return nil, err
+	}
+	var latest *InsightRecord
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 5 {
+			continue
+		}
+		str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+		if str(row[0]) == insightType && str(row[1]) == startDate && str(row[2]) == endDate {
+			latest = &InsightRecord{
+				Type:        str(row[0]),
+				StartDate:   str(row[1]),
+				EndDate:     str(row[2]),
+				GeneratedAt: str(row[3]),
+				Insight:     str(row[4]),
+			}
+		}
+	}
+	return latest, nil
+}
+
 // GetProfile reads the user profile from the Profile sheet.
 // Returns an empty UserProfile if no data has been saved yet.
 func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
@@ -207,6 +261,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 			{Properties: &googlesheets.SheetProperties{Title: activitySheet}},
 			{Properties: &googlesheets.SheetProperties{Title: metaSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
+			{Properties: &googlesheets.SheetProperties{Title: insightsSheet}},
 		},
 	}
 	created, err := sheetsSvc.Spreadsheets.Create(ss).Context(ctx).Do()
@@ -255,6 +310,17 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("profile headers: %w", err)
+	}
+
+	// Insights sheet: headers row
+	insightHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"type", "start_date", "end_date", "generated_at", "insight"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, insightsSheet+"!A1:E1", insightHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("insights headers: %w", err)
 	}
 
 	return created.SpreadsheetId, nil
@@ -354,6 +420,40 @@ func MigrateV4toV5(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"5"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV5toV6 upgrades an existing spreadsheet from schema v5 to v6.
+// It adds the Insights sheet for persisting generated AI insights.
+func MigrateV5toV6(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	// Add Insights sheet; ignore error if it already exists.
+	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			AddSheet: &googlesheets.AddSheetRequest{
+				Properties: &googlesheets.SheetProperties{Title: insightsSheet},
+			},
+		}},
+	}).Context(ctx).Do()
+
+	insightHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"type", "start_date", "end_date", "generated_at", "insight"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, insightsSheet+"!A1:E1", insightHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v5→v6 insights header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"6"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()

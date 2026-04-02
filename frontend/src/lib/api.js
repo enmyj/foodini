@@ -64,7 +64,13 @@ export async function putActivity(date, { activity, feeling_score, feeling_notes
   return res.json()
 }
 
-export async function getDayInsights(date) {
+export async function fetchStoredDayInsight(date) {
+  const res = await fetch(`/api/insights/day?date=${date}`, { headers: { 'X-Timezone': TZ } })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function generateDayInsights(date) {
   const res = await fetch('/api/insights/day', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
@@ -74,7 +80,13 @@ export async function getDayInsights(date) {
   return res.json()
 }
 
-export async function getInsights(start, end) {
+export async function fetchStoredInsight(start, end) {
+  const res = await fetch(`/api/insights?start=${start}&end=${end}`, { headers: { 'X-Timezone': TZ } })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function generateInsights(start, end) {
   const res = await fetch('/api/insights', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },

@@ -202,6 +202,14 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}
+			version = 5
+		}
+		if version == 5 {
+			// Migrate v5 → v6: add Insights sheet for persisting AI insights
+			if err := sheets.MigrateV5toV6(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
 		}
 		if version < 1 {
 			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
@@ -614,7 +622,15 @@ func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"insight": insight})
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+		Type:        "week",
+		StartDate:   req.Start,
+		EndDate:     req.End,
+		GeneratedAt: generatedAt,
+		Insight:     insight,
+	})
+	WriteJSON(w, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
 }
 
 // POST /api/insights/day — body: {"date": "YYYY-MM-DD"}
@@ -676,7 +692,15 @@ func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"insight": insight})
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+		Type:        "day",
+		StartDate:   req.Date,
+		EndDate:     req.Date,
+		GeneratedAt: generatedAt,
+		Insight:     insight,
+	})
+	WriteJSON(w, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
 }
 
 func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
@@ -781,6 +805,63 @@ func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets
 		}
 	}
 	return b.String()
+}
+
+// GET /api/insights?start=YYYY-MM-DD&end=YYYY-MM-DD — returns most recent stored week insight or null
+func (h *Handler) GetStoredInsights(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if start == "" || end == "" {
+		writeErr(w, http.StatusBadRequest, "start and end required")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rec, err := svc.GetInsight(r.Context(), "week", start, end)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rec == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
+}
+
+// GET /api/insights/day?date=YYYY-MM-DD — returns most recent stored day insight or null
+func (h *Handler) GetStoredDayInsights(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		writeErr(w, http.StatusBadRequest, "date required")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rec, err := svc.GetInsight(r.Context(), "day", date, date)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rec == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
 }
 
 // PUT /api/activity — body: {"date": "YYYY-MM-DD", "activity": "...", "feeling_score": 0, "feeling_notes": "..."}
