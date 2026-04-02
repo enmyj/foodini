@@ -42,7 +42,7 @@
     color: #888;
     letter-spacing: 0.08em;
     font-weight: 600;
-    padding: 0 0.5rem 0.4rem;
+    padding: 0 0 0.4rem;
     border-top: 1px solid #e8e8e6;
     padding-top: 1.25rem;
     margin-bottom: 0.1rem;
@@ -52,7 +52,7 @@
     display: flex;
     align-items: baseline;
     gap: 0.6rem;
-    padding: 0.35rem 0.5rem;
+    padding: 0.35rem 0;
     border-radius: 8px;
     cursor: pointer;
     min-width: 0;
