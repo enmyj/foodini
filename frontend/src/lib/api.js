@@ -1,10 +1,45 @@
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
+const SAFE_ERROR_MESSAGES = {
+  session_expired: 'Your session expired. Sign in again.',
+  insufficient_scopes: 'Google permissions are missing. Re-authorize to continue.',
+}
+
+async function throwResponseError(res) {
+  const contentType = res.headers.get('content-type') ?? ''
+  let body = null
+  let text = ''
+
+  if (contentType.includes('application/json')) {
+    body = await res.json().catch(() => null)
+  } else {
+    text = await res.text()
+  }
+
+  const code = typeof body?.error === 'string' && body.error.trim() ? body.error.trim() : ''
+  const err = new Error(SAFE_ERROR_MESSAGES[code] || `Request failed (${res.status})`)
+  err.status = res.status
+  err.code = code || null
+  err.body = body
+  err.detail = code ? text || null : body?.error || text || null
+  err.userMessage = SAFE_ERROR_MESSAGES[code] || ''
+  throw err
+}
+
+async function apiFetch(url, init = {}) {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'X-Timezone': TZ,
+      ...(init.headers ?? {}),
+    },
+  })
+  if (!res.ok) await throwResponseError(res)
+  return res
+}
 
 export async function getLog({ date = null, days = null } = {}) {
   const params = days ? `?days=${days}` : date ? `?date=${date}` : ''
-  const res = await fetch(`/api/log${params}`, { headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return (await apiFetch(`/api/log${params}`)).json()
 }
 
 export async function chat(message, date = null, image = null, meal = null) {
@@ -12,102 +47,79 @@ export async function chat(message, date = null, image = null, meal = null) {
   if (date) body.date = date
   if (image) body.image = image
   if (meal) body.meal = meal
-  const res = await fetch('/api/chat', {
+  return (await apiFetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function confirmChat(entries, date = null) {
   const body = { entries }
   if (date) body.date = date
-  const res = await fetch('/api/chat/confirm', {
+  return (await apiFetch('/api/chat/confirm', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function patchEntry(id, entry) {
-  const res = await fetch(`/api/entries/${id}`, {
+  return (await apiFetch(`/api/entries/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function deleteEntry(id) {
-  const res = await fetch(`/api/entries/${id}`, { method: 'DELETE', headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
+  await apiFetch(`/api/entries/${id}`, { method: 'DELETE' })
 }
 
 export async function getActivity(date) {
-  const res = await fetch(`/api/activity?date=${date}`, { headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return (await apiFetch(`/api/activity?date=${date}`)).json()
 }
 
 export async function putActivity(date, { activity, feeling_score, feeling_notes, poop, poop_notes, hydration }) {
-  const res = await fetch('/api/activity', {
+  return (await apiFetch('/api/activity', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date, activity, feeling_score, feeling_notes, poop, poop_notes, hydration }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function fetchStoredDayInsight(date) {
-  const res = await fetch(`/api/insights/day?date=${date}`, { headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return (await apiFetch(`/api/insights/day?date=${date}`)).json()
 }
 
 export async function generateDayInsights(date) {
-  const res = await fetch('/api/insights/day', {
+  return (await apiFetch('/api/insights/day', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ date }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function fetchStoredInsight(start, end) {
-  const res = await fetch(`/api/insights?start=${start}&end=${end}`, { headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return (await apiFetch(`/api/insights?start=${start}&end=${end}`)).json()
 }
 
 export async function generateInsights(start, end) {
-  const res = await fetch('/api/insights', {
+  return (await apiFetch('/api/insights', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ start, end }),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }
 
 export async function getProfile() {
-  const res = await fetch('/api/profile', { headers: { 'X-Timezone': TZ } })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  return (await apiFetch('/api/profile')).json()
 }
 
 export async function putProfile(profile) {
-  const res = await fetch('/api/profile', {
+  return (await apiFetch('/api/profile', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  })).json()
 }

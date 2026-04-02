@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { getProfile, putProfile } from './api.js'
+  import { showError } from './toast.js'
 
   let { onClose } = $props()
 
@@ -11,7 +12,6 @@
   let goals = $state('')
   let dietaryRestrictions = $state('')
   let saving = $state(false)
-  let saveError = $state('')
   let loaded = $state(false)
 
   onMount(async () => {
@@ -23,18 +23,19 @@
       notes = p.notes ?? ''
       goals = p.goals ?? ''
       dietaryRestrictions = p.dietary_restrictions ?? ''
-    } catch {}
+    } catch (err) {
+      showError(err, 'Failed to load profile.')
+    }
     loaded = true
   })
 
   async function save() {
     saving = true
-    saveError = ''
     try {
       await putProfile({ gender, height, weight, notes, goals, dietary_restrictions: dietaryRestrictions })
       onClose()
-    } catch {
-      saveError = 'Failed to save. Try again.'
+    } catch (err) {
+      showError(err, 'Failed to save profile.')
     } finally {
       saving = false
     }
@@ -99,7 +100,6 @@
         ></textarea>
       </label>
     </div>
-    {#if saveError}<p class="status error">{saveError}</p>{/if}
     <div class="actions">
       <button class="save-btn" onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
       <button class="cancel-btn" onclick={onClose} disabled={saving}>Cancel</button>
@@ -198,10 +198,6 @@
     font-size: 0.78rem;
     color: #aaa;
     margin-top: 0.75rem;
-  }
-
-  .status.error {
-    color: #b91c1c;
   }
 
   .actions {

@@ -16,6 +16,7 @@ import (
 	"foodtracker/internal/sheets"
 
 	"github.com/google/uuid"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
 )
 
@@ -86,11 +87,92 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	WriteJSON(w, status, map[string]string{"error": msg})
 }
 
-// writeGoogleErr checks if err is a Google API 403 (insufficient scopes) and
-// writes the appropriate response. Falls back to a 500 for other errors.
-func writeGoogleErr(w http.ResponseWriter, err error) {
+func isSessionExpiredErr(err error) bool {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) {
+		if re.ErrorCode == "invalid_grant" || re.ErrorCode == "invalid_token" {
+			return true
+		}
+		if re.Response != nil && (re.Response.StatusCode == http.StatusBadRequest || re.Response.StatusCode == http.StatusUnauthorized) {
+			return true
+		}
+	}
 	var ge *googleapi.Error
-	if errors.As(err, &ge) && ge.Code == 403 {
+	return errors.As(err, &ge) && ge.Code == http.StatusUnauthorized
+}
+
+func isInsufficientScopesErr(err error) bool {
+	var ge *googleapi.Error
+	if !errors.As(err, &ge) || ge.Code != http.StatusForbidden {
+		return false
+	}
+	if hasInsufficientScopesText(ge.Message) || hasInsufficientScopesDetails(ge.Details) {
+		return true
+	}
+	for _, item := range ge.Errors {
+		if isInsufficientScopesReason(item.Reason) || hasInsufficientScopesText(item.Message) {
+			return true
+		}
+	}
+	return false
+}
+
+func isInsufficientScopesReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "insufficientpermissions", "access_token_scope_insufficient":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasInsufficientScopesText(msg string) bool {
+	msg = strings.ToLower(strings.TrimSpace(msg))
+	return strings.Contains(msg, "insufficient authentication scopes")
+}
+
+func hasInsufficientScopesDetails(details []interface{}) bool {
+	for _, detail := range details {
+		if detailHasInsufficientScopes(detail) {
+			return true
+		}
+	}
+	return false
+}
+
+func detailHasInsufficientScopes(detail any) bool {
+	switch v := detail.(type) {
+	case map[string]any:
+		for key, value := range v {
+			if strings.EqualFold(key, "reason") {
+				if reason, ok := value.(string); ok && isInsufficientScopesReason(reason) {
+					return true
+				}
+			}
+			if detailHasInsufficientScopes(value) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if detailHasInsufficientScopes(item) {
+				return true
+			}
+		}
+	case string:
+		return isInsufficientScopesReason(v) || hasInsufficientScopesText(v)
+	}
+	return false
+}
+
+// writeAPIErr maps auth and Google API failures to stable frontend-facing errors.
+func (h *Handler) writeAPIErr(w http.ResponseWriter, err error) {
+	if isSessionExpiredErr(err) {
+		h.auth.ClearSession(w)
+		writeErr(w, http.StatusUnauthorized, "session_expired")
+		return
+	}
+	if isInsufficientScopesErr(err) {
 		writeErr(w, http.StatusForbidden, "insufficient_scopes")
 		return
 	}
@@ -156,7 +238,7 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 	// Search Drive for an existing spreadsheet from a previous session
 	id, err := sheets.FindExistingSpreadsheet(r.Context(), ts, session.UserEmail)
 	if err != nil {
-		writeGoogleErr(w, err)
+		h.writeAPIErr(w, err)
 		return false
 	}
 
@@ -164,12 +246,12 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		// Found an existing spreadsheet — check its schema version
 		svc, err := sheets.NewService(r.Context(), ts, id)
 		if err != nil {
-			writeGoogleErr(w, err)
+			h.writeAPIErr(w, err)
 			return false
 		}
 		version, err := svc.GetSchemaVersion(r.Context())
 		if err != nil {
-			writeGoogleErr(w, err)
+			h.writeAPIErr(w, err)
 			return false
 		}
 		if version == 1 {
@@ -220,7 +302,7 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		// No existing spreadsheet — create a new one
 		id, err = sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
 		if err != nil {
-			writeGoogleErr(w, err)
+			h.writeAPIErr(w, err)
 			return false
 		}
 		session.SpreadsheetID = id
@@ -242,7 +324,7 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
@@ -262,12 +344,12 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		start := sheets.DateString(LocalNow(r).AddDate(0, 0, -(days - 1)))
 		entries, err := svc.GetFoodByDateRange(r.Context(), start, today)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			h.writeAPIErr(w, err)
 			return
 		}
 		dailyLogs, err := svc.GetActivityByDateRange(r.Context(), start, today)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			h.writeAPIErr(w, err)
 			return
 		}
 		data, _ := json.Marshal(map[string]any{
@@ -295,12 +377,12 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := svc.GetFoodByDate(r.Context(), date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	dayLog, err := svc.GetActivity(r.Context(), date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	data, _ := json.Marshal(map[string]any{
@@ -325,8 +407,8 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Message string `json:"message"`
-		Date    string `json:"date"`   // optional; defaults to today
-		Meal    string `json:"meal"`   // optional; hints the meal type to Gemini
+		Date    string `json:"date"` // optional; defaults to today
+		Meal    string `json:"meal"` // optional; hints the meal type to Gemini
 		Image   *struct {
 			MIMEType string `json:"mime_type"`
 			Data     string `json:"data"` // base64-encoded
@@ -364,7 +446,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	} else {
 		svc, err := h.sheetsSvc(r, session)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			h.writeAPIErr(w, err)
 			return
 		}
 		profile, _ := svc.GetProfile(r.Context())
@@ -420,7 +502,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
@@ -440,7 +522,7 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 			Fiber:       e.Fiber,
 		}
 		if err := svc.AppendFood(r.Context(), fe); err != nil {
-			writeErr(w, http.StatusInternalServerError, fmt.Sprintf("sheet write: %v", err))
+			h.writeAPIErr(w, fmt.Errorf("sheet write: %w", err))
 			return
 		}
 		saved = append(saved, fe)
@@ -461,11 +543,11 @@ func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if err := svc.DeleteFood(r.Context(), id); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
@@ -477,12 +559,12 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	p, err := svc.GetProfile(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	WriteJSON(w, http.StatusOK, p)
@@ -498,11 +580,11 @@ func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if err := svc.SetProfile(r.Context(), req); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
@@ -526,11 +608,11 @@ func (h *Handler) PatchEntry(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if err := svc.UpdateFood(r.Context(), id, entry); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
@@ -542,7 +624,7 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	date := r.URL.Query().Get("date")
@@ -551,7 +633,7 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	dayLog, err := svc.GetActivity(r.Context(), date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	WriteJSON(w, http.StatusOK, dayLog)
@@ -590,18 +672,18 @@ func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
 	entries, err := svc.GetFoodByDateRange(r.Context(), req.Start, req.End)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Start, req.End)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
@@ -655,18 +737,18 @@ func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
 	entries, err := svc.GetFoodByDateRange(r.Context(), req.Date, req.Date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Date, req.Date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 
@@ -821,12 +903,12 @@ func (h *Handler) GetStoredInsights(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	rec, err := svc.GetInsight(r.Context(), "week", start, end)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if rec == nil {
@@ -849,12 +931,12 @@ func (h *Handler) GetStoredDayInsights(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	rec, err := svc.GetInsight(r.Context(), "day", date, date)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if rec == nil {
@@ -877,11 +959,11 @@ func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := h.sheetsSvc(r, session)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	if err := svc.SetActivity(r.Context(), req); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		h.writeAPIErr(w, err)
 		return
 	}
 	h.cacheInvalidate(session.SpreadsheetID)

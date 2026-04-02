@@ -4,8 +4,9 @@
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
   import ProfilePanel from './ProfilePanel.svelte'
+  import { showError } from './toast.js'
 
-  const MEAL_ORDER = ['breakfast', 'snack', 'lunch', 'dinner']
+  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner']
   const DAY_ABBREV = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
   let view = $state('day')
@@ -31,6 +32,8 @@
   let dayInsight = $state(null) // { loading, text, error, open, generatedAt }
   let collapsedMeals = $state(new Set(MEAL_ORDER))
   let historyWeeks = $state(8)
+  let loadError = $state('')
+  let loadErrorAction = $state(null)
   let weekGroupsData = $derived(weekGroups(historyData, historyWeeks))
 
   function todayStr() {
@@ -69,12 +72,32 @@
     return `${sm} ${s.getDate()} – ${em} ${e.getDate()}`
   }
 
+  function setLoadError(err, fallback) {
+    if (err?.status === 401 || err?.code === 'session_expired') {
+      loadError = 'Your session expired. Sign in again.'
+      loadErrorAction = { href: '/auth/login', label: 'Sign in' }
+      return
+    }
+    if (err?.code === 'insufficient_scopes') {
+      loadError = 'Google permissions are missing. Re-authorize to continue.'
+      loadErrorAction = { href: '/auth/login?consent=1', label: 'Re-authorize' }
+      return
+    }
+    loadError = fallback
+    loadErrorAction = null
+  }
+
   async function loadDay(date) {
     loading = true
+    loadError = ''
+    loadErrorAction = null
     collapsedMeals = new Set(MEAL_ORDER)
     try {
       dayData = await getLog({ date })
       if (dayData?.spreadsheet_url && !spreadsheetUrl) spreadsheetUrl = dayData.spreadsheet_url
+    } catch (err) {
+      dayData = null
+      setLoadError(err, 'Could not load this day. Try reloading, or sign in again.')
     } finally {
       loading = false
     }
@@ -82,9 +105,14 @@
 
   async function loadHistory(weeks = historyWeeks) {
     loading = true
+    loadError = ''
+    loadErrorAction = null
     try {
       historyData = await getLog({ days: weeks * 7 })
       if (historyData?.spreadsheet_url && !spreadsheetUrl) spreadsheetUrl = historyData.spreadsheet_url
+    } catch (err) {
+      historyData = null
+      setLoadError(err, 'Could not load history. Try reloading, or sign in again.')
     } finally {
       loading = false
     }
@@ -136,7 +164,10 @@
       for (const e of res.entries ?? []) { (g[e.meal_type] ??= []).push(e) }
       for (const meal of repeatedMeals) { g[meal] = [] }
       yesterdayByMeal = g
-    } catch {}
+    } catch (err) {
+      yesterdayByMeal = {}
+      showError(err, 'Failed to load yesterday\'s meals.')
+    }
   }
 
   async function repeatMeal(targetMeal, sourceMeal = targetMeal) {
@@ -150,7 +181,9 @@
       yesterdayByMeal = { ...yesterdayByMeal, [targetMeal]: [] }
       repeatedMeals = new Set([...repeatedMeals, targetMeal])
       collapsedMeals = new Set([...collapsedMeals].filter(m => m !== targetMeal))
-    } catch {} finally {
+    } catch (err) {
+      showError(err, 'Failed to repeat meal.')
+    } finally {
       repeating = null
     }
   }
@@ -347,6 +380,13 @@
 
   {#if loading}
     <p class="state">Loading…</p>
+  {:else if loadError}
+    <div class="state-block">
+      <p class="state error">{loadError}</p>
+      {#if loadErrorAction}
+        <a class="state-link" href={loadErrorAction.href}>{loadErrorAction.label}</a>
+      {/if}
+    </div>
   {:else if view === 'day'}
     {#if dayInsight?.open}
       <div class="insights-panel day-insights-panel">
@@ -780,6 +820,26 @@
     text-align: center;
     margin-top: 4rem;
     font-size: 0.9rem;
+  }
+
+  .state-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 4rem;
+  }
+
+  .state.error {
+    color: #888;
+    margin-top: 0;
+  }
+
+  .state-link {
+    color: #2d2d2d;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-size: 0.88rem;
   }
 
   /* Weekly history */

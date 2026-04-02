@@ -157,6 +157,11 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	h.ClearSession(w)
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) ClearSession(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
@@ -165,7 +170,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
 func (h *Handler) SetSession(w http.ResponseWriter, session *Session) error {
@@ -218,6 +222,7 @@ func (h *Handler) Authenticated(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, err := h.GetSession(r)
 		if err != nil {
+			h.ClearSession(w)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

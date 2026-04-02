@@ -1,7 +1,7 @@
 <script>
   let { day, onClose, onDelete = null, onAddFood = null } = $props()
 
-  const MEAL_ORDER = ['breakfast', 'snack', 'lunch', 'dinner']
+  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner']
 
   function groupedByMeal(entries) {
     const g = {}

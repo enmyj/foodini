@@ -1,9 +1,10 @@
 <script>
   import { patchEntry, deleteEntry } from './api.js'
+  import { showError } from './toast.js'
 
   let { entry, onUpdate, onDelete } = $props()
 
-  const MEALS = ['breakfast', 'snack', 'lunch', 'dinner']
+  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner']
 
   let modalOpen = $state(false)
   let editDesc = $state('')
@@ -47,7 +48,7 @@
       onUpdate(saved)
       modalOpen = false
     } catch (e) {
-      console.error('patch failed', e)
+      showError(e, 'Failed to save entry.')
     } finally {
       saving = false
     }
@@ -71,7 +72,7 @@
       await deleteEntry(entry.id)
       onDelete(entry.id)
     } catch (e) {
-      console.error('delete failed', e)
+      showError(e, 'Failed to delete entry.')
       deleting = false
     }
   }

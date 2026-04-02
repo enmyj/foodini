@@ -1,5 +1,6 @@
 <script>
   import { getActivity } from './api.js'
+  import { showError } from './toast.js'
 
   let { date, onOpen, refreshKey = 0 } = $props()
 
@@ -8,7 +9,10 @@
   $effect(() => {
     refreshKey // re-run when this changes
     if (!date) return
-    getActivity(date).then(res => { data = res }).catch(() => {})
+    getActivity(date).then(res => { data = res }).catch(err => {
+      data = null
+      showError(err, 'Failed to load activity.')
+    })
   })
 </script>
 

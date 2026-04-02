@@ -1,9 +1,10 @@
 <script>
   import { chat, confirmChat, getActivity, putActivity } from './api.js'
+  import { showError } from './toast.js'
 
   let { open, onClose, onEntriesAdded, date = null, meal = null, initialTab = 'food', initialField = null } = $props()
 
-  const MEALS = ['breakfast', 'snack', 'lunch', 'dinner']
+  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner']
 
   function todayStr() {
     const d = new Date()
@@ -46,7 +47,6 @@
   let poopNotes = $state('')
   let hydration = $state('')
   let activitySaving = $state(false)
-  let activityError = $state('')
   let activityLoadedFor = $state(null)
 
   // Drag-to-dismiss
@@ -98,7 +98,6 @@
       refineInput = ''
       refineNote = null
       pendingImage = null
-      activityError = ''
       if (initialTab === 'activity' && initialField) {
         setTimeout(() => {
           if (initialField === 'activity') activityTextareaEl?.focus()
@@ -125,7 +124,6 @@
       poopNotes = ''
       hydration = ''
       activitySaving = false
-      activityError = ''
       activityLoadedFor = null
     }
   })
@@ -145,12 +143,13 @@
       poop = res.poop ?? false
       poopNotes = res.poop_notes ?? ''
       hydration = res.hydration ? String(res.hydration) : ''
-    } catch {}
+    } catch (err) {
+      showError(err, 'Failed to load activity.')
+    }
   }
 
   async function saveActivity() {
     activitySaving = true
-    activityError = ''
     try {
       await putActivity(selectedDate, {
         activity: activityText,
@@ -161,8 +160,8 @@
         hydration: hydration ? parseFloat(hydration) : 0,
       })
       onClose()
-    } catch {
-      activityError = 'Failed to save. Try again.'
+    } catch (err) {
+      showError(err, 'Failed to save activity.')
     } finally {
       activitySaving = false
     }
@@ -234,7 +233,8 @@
       } else {
         clarifyingQuestion = res.message
       }
-    } catch {
+    } catch (err) {
+      showError(err, 'Something went wrong. Please try again.')
       clarifyingQuestion = 'Something went wrong. Please try again.'
     } finally {
       sending = false
@@ -254,7 +254,8 @@
       } else {
         refineNote = res.message
       }
-    } catch {
+    } catch (err) {
+      showError(err, 'Something went wrong.')
       refineNote = 'Something went wrong.'
     } finally {
       sending = false
@@ -269,7 +270,8 @@
       sending = false
       onEntriesAdded(res.entries)
       onClose()
-    } catch {
+    } catch (err) {
+      showError(err, 'Failed to save.')
       refineNote = 'Failed to save. Please try again.'
       sending = false
     }
@@ -470,9 +472,6 @@
             </div>
           </div>
         </div>
-        {#if activityError}
-          <p class="activity-error">{activityError}</p>
-        {/if}
         <button class="save-activity-btn" onclick={saveActivity} disabled={activitySaving}>
           {activitySaving ? 'Saving…' : 'Save'}
         </button>
@@ -1041,11 +1040,6 @@
   .hydration-unit {
     font-size: 0.82rem;
     color: #aaa;
-  }
-
-  .activity-error {
-    font-size: 0.82rem;
-    color: #b91c1c;
   }
 
   .save-activity-btn {

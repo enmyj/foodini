@@ -1,36 +1,59 @@
 <script>
     import { onMount } from "svelte";
     import LogView from "./lib/LogView.svelte";
+    import ToastHost from "./lib/ToastHost.svelte";
 
     let authed = $state(null); // null=loading, false=logged out, true=logged in
     let schemaError = $state(false); // true if spreadsheet schema is incompatible
     let scopeError = $state(false); // true if Google permissions are missing
+    let sessionExpired = $state(false);
+    let loadError = $state("");
+
+    async function readError(res) {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+            const body = await res.json();
+            return body?.error || `Could not load the app (${res.status})`;
+        }
+        const text = await res.text();
+        return text || `Could not load the app (${res.status})`;
+    }
 
     onMount(async () => {
+        scopeError = false;
+        schemaError = false;
+        sessionExpired = false;
+        loadError = "";
         try {
             const res = await fetch("/api/log");
-            if (res.status === 401) {
+            if (res.ok) {
+                authed = true;
+            } else if (res.status === 401) {
+                sessionExpired = (await readError(res)) === "session_expired";
                 authed = false;
             } else if (res.status === 403) {
-                const body = await res.json();
-                if (body.error === "insufficient_scopes") {
+                if ((await readError(res)) === "insufficient_scopes") {
                     scopeError = true;
                     authed = false;
                 } else {
+                    loadError = "Could not load the app. Try reloading, or sign out and back in.";
                     authed = false;
                 }
             } else if (res.status === 409) {
-                const body = await res.json();
-                if (body.error === "incompatible_spreadsheet") {
+                if ((await readError(res)) === "incompatible_spreadsheet") {
                     schemaError = true;
                     authed = false;
                 } else {
+                    loadError = "Could not load the app. Try reloading, or sign out and back in.";
                     authed = false;
                 }
             } else {
-                authed = true;
+                await readError(res);
+                loadError = "Could not load the app. Try reloading, or sign out and back in.";
+                authed = false;
             }
         } catch {
+            loadError = "Could not reach the server. Try reloading.";
             authed = false;
         }
     });
@@ -66,6 +89,29 @@
             </p>
         </main>
     </div>
+{:else if sessionExpired}
+    <div class="landing">
+        <header class="top-nav">
+            <span class="nav-title">Food Tracker</span>
+            <a href="/auth/login" class="btn">Sign in with Google</a>
+        </header>
+        <main class="content">
+            <p class="error-msg">
+                Your session expired or became invalid.<br />
+                Sign in again to reload your data.
+            </p>
+        </main>
+    </div>
+{:else if loadError}
+    <div class="landing">
+        <header class="top-nav">
+            <span class="nav-title">Food Tracker</span>
+            <a href="/auth/logout" class="btn">Sign out</a>
+        </header>
+        <main class="content">
+            <p class="error-msg">{loadError}</p>
+        </main>
+    </div>
 {:else if authed === false}
     <div class="landing">
         <header class="top-nav">
@@ -94,6 +140,8 @@
 {:else}
     <LogView />
 {/if}
+
+<ToastHost />
 
 <style>
     .center {
