@@ -9,6 +9,7 @@
   let weight = $state('')
   let notes = $state('')
   let goals = $state('')
+  let dietaryRestrictions = $state('')
   let saving = $state(false)
   let saveError = $state('')
   let loaded = $state(false)
@@ -21,6 +22,7 @@
       weight = p.weight ?? ''
       notes = p.notes ?? ''
       goals = p.goals ?? ''
+      dietaryRestrictions = p.dietary_restrictions ?? ''
     } catch {}
     loaded = true
   })
@@ -29,7 +31,7 @@
     saving = true
     saveError = ''
     try {
-      await putProfile({ gender, height, weight, notes, goals })
+      await putProfile({ gender, height, weight, notes, goals, dietary_restrictions: dietaryRestrictions })
       onClose()
     } catch {
       saveError = 'Failed to save. Try again.'
@@ -84,6 +86,15 @@
           bind:value={goals}
           placeholder="e.g. lose weight, build muscle, eat more protein…"
           rows="3"
+          disabled={saving}
+        ></textarea>
+      </label>
+      <label>
+        <span>Dietary Restrictions</span>
+        <textarea
+          bind:value={dietaryRestrictions}
+          placeholder="e.g. vegetarian, no gluten, lactose intolerant…"
+          rows="2"
           disabled={saving}
         ></textarea>
       </label>

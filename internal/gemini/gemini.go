@@ -167,14 +167,16 @@ func (s *Service) ClearConversation(userEmail, date string) {
 }
 
 const insightsSystemPrompt = `You are a nutrition analyst reviewing a week of logged food and activity data.
-Output 3-4 bullet points (use • character). Each bullet is one sentence max. Be direct and clinical — no motivational language, no praise, no filler.
-Focus on: what's off (protein, calories, consistency), any notable patterns, one concrete thing to change next week.
-Use **bold** only for the key term at the start of each bullet (e.g. **Protein:** ...).`
+Output 3-5 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
+Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
+One concrete change for next week.
+Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).`
 
 const dayInsightsSystemPrompt = `You are a nutrition analyst reviewing one day of logged food and activity data.
-Output 2-3 bullet points (use • character). Each bullet is one sentence max. Be direct and clinical — no motivational language, no praise, no filler.
-Focus on: how macros landed relative to any stated goals, anything notably missing or excessive, one concrete suggestion for tomorrow.
-Use **bold** only for the key term at the start of each bullet (e.g. **Protein:** ...).`
+Output 2-4 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
+Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
+One concrete suggestion for tomorrow.
+Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).`
 
 func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
@@ -196,13 +198,13 @@ func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPromp
 	if err != nil {
 		return "", fmt.Errorf("gemini generate: %w", err)
 	}
-	var result string
+	var sb strings.Builder
 	for _, part := range resp.Candidates[0].Content.Parts {
 		if txt, ok := part.(genai.Text); ok {
-			result += string(txt)
+			sb.WriteString(string(txt))
 		}
 	}
-	return strings.TrimSpace(result), nil
+	return strings.TrimSpace(sb.String()), nil
 }
 
 // Insights generates a free-form weekly analysis given a text summary of the week's data.

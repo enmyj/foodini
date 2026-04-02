@@ -226,18 +226,22 @@
     }
   }
 
+  const INSIGHT_TTL = 5 * 60 * 1000 // 5 minutes
+
   async function fetchDayInsights(date) {
-    dayInsight = { loading: true, text: null, error: null, open: true }
+    dayInsight = { loading: true, text: null, error: null, open: true, fetchedAt: null }
     try {
       const res = await getDayInsights(date)
-      dayInsight = { loading: false, text: res.insight, error: null, open: true }
+      dayInsight = { loading: false, text: res.insight, error: null, open: true, fetchedAt: Date.now() }
     } catch (e) {
-      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true }
+      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true, fetchedAt: null }
     }
   }
 
   function toggleDayInsights() {
-    if (!dayInsight) {
+    if (!dayInsight || (!dayInsight.loading && !dayInsight.text && !dayInsight.error)) {
+      fetchDayInsights(currentDate)
+    } else if (dayInsight.fetchedAt && Date.now() - dayInsight.fetchedAt > INSIGHT_TTL) {
       fetchDayInsights(currentDate)
     } else {
       dayInsight = { ...dayInsight, open: !dayInsight.open }
@@ -327,6 +331,7 @@
   {:else if view === 'day'}
     {#if dayInsight?.open}
       <div class="insights-panel day-insights-panel">
+        <button class="insight-close" onclick={() => dayInsight = { ...dayInsight, open: false }} aria-label="Close insights">✕</button>
         {#if dayInsight.loading}
           <div class="insight-skeleton">
             <div class="isk-line" style="width: 88%"></div>
@@ -346,7 +351,7 @@
       <section>
         <div class="meal-header">
           <button class="meal-name" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerTab = 'food'; drawerOpen = true }}>{meal}<span class="meal-add">+</span></button>
-          {#if currentDate === todayStr() && yesterdayByMeal[meal]?.length}
+          {#if currentDate === todayStr() && yesterdayByMeal[meal]?.length && !group.length}
             {#if repeatPicker === meal}
               <div class="repeat-picker">
                 {#each MEAL_ORDER.filter(m => yesterdayByMeal[m]?.length) as src}
@@ -875,9 +880,27 @@
   }
 
   .day-insights-panel {
+    position: relative;
     border: 1px solid #e8e8e6;
     border-radius: 10px;
     margin-bottom: 1.25rem;
+  }
+
+  .insight-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    font-size: 0.75rem;
+    color: #bbb;
+    cursor: pointer;
+    padding: 0.15rem 0.3rem;
+    line-height: 1;
+  }
+
+  @media (hover: hover) {
+    .insight-close:hover { color: #666; }
   }
 
   .insights-loading {

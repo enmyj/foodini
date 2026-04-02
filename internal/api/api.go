@@ -123,7 +123,7 @@ func formatProfileContext(p sheets.UserProfile) string {
 	if p.Weight != "" {
 		parts = append(parts, p.Weight)
 	}
-	if len(parts) == 0 && p.Notes == "" && p.Goals == "" {
+	if len(parts) == 0 && p.Notes == "" && p.Goals == "" && p.DietaryRestrictions == "" {
 		return ""
 	}
 	ctx := "User profile: " + strings.Join(parts, ", ")
@@ -132,6 +132,9 @@ func formatProfileContext(p sheets.UserProfile) string {
 	}
 	if p.Goals != "" {
 		ctx += ". Goals: " + p.Goals
+	}
+	if p.DietaryRestrictions != "" {
+		ctx += ". Dietary restrictions: " + p.DietaryRestrictions
 	}
 	return ctx
 }
@@ -188,6 +191,14 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		if version == 3 {
 			// Migrate v3 → v4: add goals column to Profile sheet header
 			if err := sheets.MigrateV3toV4(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+			version = 4
+		}
+		if version == 4 {
+			// Migrate v4 → v5: add dietary_restrictions column to Profile sheet header
+			if err := sheets.MigrateV4toV5(r.Context(), ts, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}
