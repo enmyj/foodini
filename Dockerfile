@@ -1,36 +1,28 @@
 # syntax=docker/dockerfile:1
 
-# ── Stage 1: Build Svelte frontend (always runs on host platform) ─────────────
-FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS frontend
+# ── Stage 1: Build Svelte frontend ─────────────────────────────────────────────
+FROM oven/bun:1-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/bun.lock* ./
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 COPY frontend/ ./
 RUN bun run build
 
 # ── Stage 2: Build Go binary (cross-compiles for target platform) ─────────────
-FROM --platform=$BUILDPLATFORM golang:1.26.0-alpine AS builder
-ARG TARGETOS
-ARG TARGETARCH
+FROM golang:1.26.0-alpine AS builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 ARG TARGETVARIANT
-# tzdata is needed so time.LoadLocation works in the distroless runtime image
-RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 COPY . .
 # Bring in the built frontend so Go's embed directive finds it
 COPY --from=frontend /app/frontend/dist ./frontend/dist
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} CGO_ENABLED=0 go build -o foodtracker .
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} CGO_ENABLED=0 go build -o foodtracker .
 
 # ── Stage 3: Minimal runtime ──────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12
-# Required for time.LoadLocation (user timezone support)
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /app/foodtracker /foodtracker
 EXPOSE 8080
 ENTRYPOINT ["/foodtracker"]
