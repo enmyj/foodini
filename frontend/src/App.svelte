@@ -124,15 +124,12 @@
                 <p>This app aims to be unique from other food trackers in two ways:</p>
                 <ol>
                     <li>All data is stored in the user's own Google Drive for better data ownership.</li>
-                    <li>An LLM (currently Gemini 3 Flash) is used to facilitate food log entries.</li>
+                    <li>Gemini Flash is used to parse natural-language meal descriptions into structured entries.</li>
                 </ol>
                 <p><a href="/auth/login" class="link">Sign in with Google</a> to get started.</p>
                 <p>
-                    The code for this project is <a
-                        href="https://github.com/enmyj/foodini">open source</a
-                    > so feel free to make Pull Requests, Forks, etc. This version
-                    is running on a Raspberry Pi at my house and uses my own LLM API
-                    key, so please go easy on me.
+                    The code is <a href="https://github.com/enmyj/foodini">open source</a
+                    > — feel free to fork or self-host with your own API key.
                 </p>
             </section>
         </main>

@@ -42,7 +42,6 @@ Go to **APIs & Services → OAuth consent screen**:
 3. Add the following OAuth scopes:
    - `.../auth/spreadsheets`
    - `.../auth/drive.file`
-   - `.../auth/generative-language`
 4. Under **Test users**, add your own Google account
 
 ### 4. Create OAuth credentials
@@ -217,6 +216,7 @@ docker run --env-file .env -p 8080:8080 foodtracker
 | `COOKIE_SECRET` | 64+ character secret used for session cookie encryption | `openssl rand -hex 32` |
 | `COOKIE_SECURE` | Set `true` in production to restrict cookies to HTTPS | `false` |
 | `PORT` | Port the server listens on | `8080` |
+| `GEMINI_API_KEY` | Gemini API key for parsing meal descriptions | — |
 
 ---
 

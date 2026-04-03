@@ -74,7 +74,9 @@ func logRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start))
+		if r.URL.Path != "/api/healthz" {
+			log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start))
+		}
 	})
 }
 
