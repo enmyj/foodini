@@ -2,6 +2,7 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
+      - --platform=linux/amd64
       - -t
       - us-west1-docker.pkg.dev/foodini-489420/foodtracker/app:latest
       - .
