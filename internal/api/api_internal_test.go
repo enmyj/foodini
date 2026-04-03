@@ -19,7 +19,6 @@ func newTestHandler(t *testing.T) *Handler {
 	return NewHandler(auth.NewHandler(auth.Config{
 		ClientID:     "test-id",
 		ClientSecret: "test-secret",
-		RedirectURL:  "http://localhost/callback",
 		CookieSecret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}), "")
 }

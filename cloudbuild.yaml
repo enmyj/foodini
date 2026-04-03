@@ -1,0 +1,25 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-west1-docker.pkg.dev/foodini-489420/foodtracker/app:latest
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-west1-docker.pkg.dev/foodini-489420/foodtracker/app:latest
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    args:
+      - gcloud
+      - run
+      - deploy
+      - foodtracker
+      - --image=us-west1-docker.pkg.dev/foodini-489420/foodtracker/app:latest
+      - --region=us-west1
+      - --platform=managed
+
+images:
+  - us-west1-docker.pkg.dev/foodini-489420/foodtracker/app:latest

@@ -68,7 +68,6 @@ Edit `.env`:
 ```env
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
-REDIRECT_URL=http://localhost:8080/auth/callback
 COOKIE_SECRET=$(openssl rand -hex 32)   # must be 64+ hex chars
 COOKIE_SECURE=false                      # set true in production (HTTPS)
 PORT=8080
@@ -120,6 +119,74 @@ The resulting `foodtracker` binary embeds the built frontend and serves everythi
 
 ---
 
+## Deploying to Google Cloud Run
+
+### First-time setup
+
+Enable APIs and create the Artifact Registry repo (once per project):
+
+```fish
+set PROJECT_ID foodini-489420
+gcloud config set project $PROJECT_ID
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+
+gcloud artifacts repositories create foodtracker \
+  --repository-format=docker \
+  --location=us-west1
+```
+
+Create secrets from your `.env` (once, or when values change):
+
+```fish
+set GOOGLE_CLIENT_ID (grep ^GOOGLE_CLIENT_ID .env | cut -d= -f2-)
+set GOOGLE_CLIENT_SECRET (grep ^GOOGLE_CLIENT_SECRET .env | cut -d= -f2-)
+set COOKIE_SECRET (grep ^COOKIE_SECRET .env | cut -d= -f2-)
+set GEMINI_API_KEY (grep ^GEMINI_API_KEY .env | cut -d= -f2-)
+
+echo -n $GOOGLE_CLIENT_ID | gcloud secrets create google-client-id --data-file=-
+echo -n $GOOGLE_CLIENT_SECRET | gcloud secrets create google-client-secret --data-file=-
+echo -n $COOKIE_SECRET | gcloud secrets create cookie-secret --data-file=-
+echo -n $GEMINI_API_KEY | gcloud secrets create gemini-api-key --data-file=-
+
+set PROJECT_NUMBER (gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+for SECRET in google-client-id google-client-secret cookie-secret gemini-api-key
+  gcloud secrets add-iam-policy-binding $SECRET \
+    --member="serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+end
+```
+
+### Deploying changes
+
+Build and push a new image, then redeploy:
+
+```fish
+set PROJECT_ID foodini-489420
+gcloud auth print-access-token | sudo docker login -u oauth2accesstoken --password-stdin us-west1-docker.pkg.dev
+sudo docker build -t us-west1-docker.pkg.dev/$PROJECT_ID/foodtracker/app:latest .
+sudo docker push us-west1-docker.pkg.dev/$PROJECT_ID/foodtracker/app:latest
+
+gcloud run deploy foodtracker \
+  --image us-west1-docker.pkg.dev/$PROJECT_ID/foodtracker/app:latest \
+  --region us-west1 \
+  --platform managed \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --max-instances 1 \
+  --memory 256Mi \
+  --set-env-vars "COOKIE_SECURE=true" \
+  --set-secrets "GOOGLE_CLIENT_ID=google-client-id:latest,GOOGLE_CLIENT_SECRET=google-client-secret:latest,COOKIE_SECRET=cookie-secret:latest,GEMINI_API_KEY=gemini-api-key:latest"
+```
+
+### Updating a secret
+
+```fish
+echo -n "new-value" | gcloud secrets versions add SECRET-NAME --data-file=-
+# then redeploy to pick up the new version
+```
+
+---
+
 ## Docker
 
 ### With mise
@@ -147,7 +214,6 @@ docker run --env-file .env -p 8080:8080 foodtracker
 |---|---|---|
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 Client ID from GCP | `123456789.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 Client Secret from GCP | `GOCSPX-...` |
-| `REDIRECT_URL` | OAuth callback URL — must match what is configured in GCP | `http://localhost:8080/auth/callback` |
 | `COOKIE_SECRET` | 64+ character secret used for session cookie encryption | `openssl rand -hex 32` |
 | `COOKIE_SECURE` | Set `true` in production to restrict cookies to HTTPS | `false` |
 | `PORT` | Port the server listens on | `8080` |

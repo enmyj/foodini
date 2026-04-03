@@ -11,7 +11,6 @@ func TestSessionRoundTrip(t *testing.T) {
 	cfg := auth.Config{
 		ClientID:     "test-id",
 		ClientSecret: "test-secret",
-		RedirectURL:  "http://localhost/callback",
 		CookieSecret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	}
 	h := auth.NewHandler(cfg)

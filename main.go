@@ -21,7 +21,6 @@ func main() {
 	cfg := auth.Config{
 		ClientID:     requireEnv("GOOGLE_CLIENT_ID"),
 		ClientSecret: requireEnv("GOOGLE_CLIENT_SECRET"),
-		RedirectURL:  requireEnv("REDIRECT_URL"),
 		CookieSecret: requireEnv("COOKIE_SECRET"),
 		Secure:       os.Getenv("COOKIE_SECURE") == "true",
 	}

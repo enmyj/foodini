@@ -27,7 +27,6 @@ var scopes = []string{
 type Config struct {
 	ClientID     string
 	ClientSecret string
-	RedirectURL  string
 	CookieSecret string
 	Secure       bool
 }
@@ -57,7 +56,6 @@ func NewHandler(cfg Config) *Handler {
 		oauthCfg: &oauth2.Config{
 			ClientID:     cfg.ClientID,
 			ClientSecret: cfg.ClientSecret,
-			RedirectURL:  cfg.RedirectURL,
 			Scopes:       scopes,
 			Endpoint:     google.Endpoint,
 		},
@@ -65,6 +63,21 @@ func NewHandler(cfg Config) *Handler {
 		secure:  cfg.Secure,
 		tsCache: make(map[string]oauth2.TokenSource),
 	}
+}
+
+// redirectURL derives the OAuth callback URL from the incoming request.
+// It honours X-Forwarded-Proto (set by Cloud Run and most reverse proxies) so
+// the correct scheme is used in both local dev (http) and production (https).
+func redirectURL(r *http.Request) string {
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return scheme + "://" + r.Host + "/auth/callback"
 }
 
 // generateState returns a cryptographically random hex string for OAuth CSRF protection.
@@ -95,6 +108,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		// doesn't issue a refresh token.
 		opts = append(opts, oauth2.SetAuthURLParam("prompt", "select_account"))
 	}
+	opts = append(opts, oauth2.SetAuthURLParam("redirect_uri", redirectURL(r)))
 	url := h.oauthCfg.AuthCodeURL(state, opts...)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
@@ -116,7 +130,7 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	token, err := h.oauthCfg.Exchange(ctx, code)
+	token, err := h.oauthCfg.Exchange(ctx, code, oauth2.SetAuthURLParam("redirect_uri", redirectURL(r)))
 	if err != nil {
 		http.Error(w, "token exchange failed", http.StatusInternalServerError)
 		return

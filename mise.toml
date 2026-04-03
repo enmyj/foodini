@@ -1,6 +1,7 @@
 [tools]
 go = "1.26.0"
 bun = "latest"
+gcloud = "latest"
 
 [tasks.install]
 description = "Install frontend dependencies"
