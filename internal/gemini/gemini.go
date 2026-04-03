@@ -170,13 +170,17 @@ const insightsSystemPrompt = `You are a nutrition analyst reviewing a week of lo
 Output 3-5 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
 Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
 One concrete change for next week.
-Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).`
+Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).
+
+Protein targets (ACSM/ISSN guidelines): use 1.2–1.6 g/kg for active adults maintaining fitness; 1.6–2.0 g/kg only if the user's goals explicitly include building muscle or strength training focus. Do not push toward the upper end of a range unless the profile justifies it.`
 
 const dayInsightsSystemPrompt = `You are a nutrition analyst reviewing one day of logged food and activity data.
 Output 2-4 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
 Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
 One concrete suggestion for tomorrow.
-Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).`
+Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).
+
+Protein targets (ACSM/ISSN guidelines): use 1.2–1.6 g/kg for active adults maintaining fitness; 1.6–2.0 g/kg only if the user's goals explicitly include building muscle or strength training focus. Do not push toward the upper end of a range unless the profile justifies it.`
 
 func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
