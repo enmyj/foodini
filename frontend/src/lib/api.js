@@ -42,10 +42,10 @@ export async function getLog({ date = null, days = null } = {}) {
   return (await apiFetch(`/api/log${params}`)).json()
 }
 
-export async function chat(message, date = null, image = null, meal = null) {
+export async function chat(message, date = null, images = null, meal = null) {
   const body = { message }
   if (date) body.date = date
-  if (image) body.image = image
+  if (images) body.images = images
   if (meal) body.meal = meal
   return (await apiFetch('/api/chat', {
     method: 'POST',

@@ -97,7 +97,7 @@ func NewService(apiKey string) *Service {
 // Chat sends a user message (and optional image) and returns (message, entries, error).
 // If entries is non-empty, the response is ready for confirmation.
 // If entries is empty, message contains a clarifying question.
-func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, img *ImageData) (string, []Entry, error) {
+func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, imgs []ImageData) (string, []Entry, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
 	if err != nil {
 		return "", nil, fmt.Errorf("gemini client: %w", err)
@@ -127,7 +127,7 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	chatSession.History = history
 
 	var parts []genai.Part
-	if img != nil {
+	for _, img := range imgs {
 		parts = append(parts, genai.Blob{MIMEType: img.MIMEType, Data: img.Data})
 	}
 	if message != "" {

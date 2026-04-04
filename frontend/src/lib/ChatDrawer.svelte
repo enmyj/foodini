@@ -18,17 +18,14 @@
 
   // Food
   let input = $state('')
-  let caption = $state('')
   let sending = $state(false)
   let currentEntries = $state(null)
   let clarifyingQuestion = $state(null)
   let refineInput = $state('')
   let refineNote = $state(null)
-  let pendingImage = $state(null)
-  let mode = $state('tiles') // 'tiles' | 'describe'
+  let pendingImages = $state([])
   let selectedMeal = $state(null)
   let inputEl = $state(null)
-  let captionEl = $state(null)
   let refineEl = $state(null)
   let fileInputEl = $state(null)
   let mealError = $state(false)
@@ -89,15 +86,14 @@
       tab = initialTab
       selectedDate = date || todayStr()
       selectedMeal = meal
-      mode = 'tiles'
+      pendingImages = []
       input = ''
-      caption = ''
       sending = false
       currentEntries = null
       clarifyingQuestion = null
       refineInput = ''
       refineNote = null
-      pendingImage = null
+      pendingImages = []
       if (initialTab === 'activity' && initialField) {
         setTimeout(() => {
           if (initialField === 'activity') activityTextareaEl?.focus()
@@ -110,14 +106,13 @@
       tab = 'food'
       selectedDate = ''
       selectedMeal = null
-      mode = 'tiles'
+      pendingImages = []
       input = ''
-      caption = ''
       currentEntries = null
       clarifyingQuestion = null
       refineInput = ''
       refineNote = null
-      pendingImage = null
+      pendingImages = []
       activityText = ''
       feelingNotes = ''
       poop = false
@@ -167,15 +162,6 @@
     }
   }
 
-  function activateDescribe() {
-    mode = 'describe'
-    setTimeout(() => inputEl?.focus(), 30)
-  }
-
-  function activatePhoto() {
-    fileInputEl.click()
-  }
-
   async function compressImage(file) {
     return new Promise((resolve) => {
       const img = new Image()
@@ -202,11 +188,16 @@
   }
 
   async function onFileSelected(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    pendingImage = await compressImage(file)
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
+    const compressed = await Promise.all(files.map(compressImage))
+    pendingImages = [...pendingImages, ...compressed]
     fileInputEl.value = ''
-    setTimeout(() => captionEl?.focus(), 30)
+    setTimeout(() => inputEl?.focus(), 30)
+  }
+
+  function removeImage(index) {
+    pendingImages = pendingImages.filter((_, i) => i !== index)
   }
 
   async function send() {
@@ -216,17 +207,16 @@
       setTimeout(() => { mealError = false }, 600)
       return
     }
-    const img = pendingImage
-    const text = img ? caption.trim() : input.trim()
-    if (!img && !text) return
+    const imgs = pendingImages.length ? [...pendingImages] : null
+    const text = input.trim()
+    if (!imgs && !text) return
     input = ''
-    caption = ''
     clarifyingQuestion = null
-    pendingImage = null
+    pendingImages = []
     sending = true
     try {
-      const imagePayload = img ? { data: img.data, mime_type: img.mimeType } : null
-      const res = await chat(text, selectedDate, imagePayload, selectedMeal)
+      const imagesPayload = imgs ? imgs.map(i => ({ data: i.data, mime_type: i.mimeType })) : null
+      const res = await chat(text, selectedDate, imagesPayload, selectedMeal)
       if (res.pending && res.entries?.length) {
         currentEntries = res.entries
         setTimeout(() => refineEl?.focus(), 30)
@@ -391,7 +381,7 @@
         {/if}
       </div>
 
-      <input bind:this={fileInputEl} type="file" accept="image/*" class="file-input" onchange={onFileSelected} />
+      <input bind:this={fileInputEl} type="file" accept="image/*" multiple class="file-input" onchange={onFileSelected} />
 
       <!-- Bottom controls -->
       {#if currentEntries}
@@ -413,37 +403,26 @@
           {/if}
         </div>
       {:else if !sending}
-        {#if mode === 'tiles' && !pendingImage}
-          <div class="input-tiles">
-            <button class="tile" onclick={activatePhoto} disabled={sending}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              Photo
+        {#if pendingImages.length}
+          <div class="thumb-strip">
+            {#each pendingImages as img, i}
+              <div class="thumb">
+                <img src={img.previewUrl} alt="Photo {i + 1}" />
+                <button class="thumb-remove" onclick={() => removeImage(i)} aria-label="Remove photo">✕</button>
+              </div>
+            {/each}
+            <button class="thumb-add" onclick={() => fileInputEl.click()} aria-label="Add another photo">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <button class="tile" onclick={activateDescribe} disabled={sending}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              Describe
-            </button>
-          </div>
-        {:else if pendingImage}
-          <div class="photo-card">
-            <div class="photo-preview">
-              <img src={pendingImage.previewUrl} alt="Selected meal" />
-              <button class="photo-remove" onclick={() => pendingImage = null} aria-label="Remove photo">✕</button>
-              <button class="photo-replace" onclick={() => fileInputEl.click()} disabled={sending} aria-label="Replace photo" title="Replace photo">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              </button>
-            </div>
-            <div class="caption-row">
-              <textarea bind:this={captionEl} bind:value={caption} onkeydown={onKeyDown} placeholder="Add a note… (optional)" rows="1" disabled={sending}></textarea>
-              <button onclick={send} disabled={sending}>Send</button>
-            </div>
-          </div>
-        {:else}
-          <div class="input-row">
-            <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="2" disabled={sending}></textarea>
-            <button onclick={send} disabled={sending || !input.trim()}>Send</button>
           </div>
         {/if}
+        <div class="input-row">
+          <button class="attach-btn" onclick={() => fileInputEl.click()} disabled={sending} aria-label="Attach photo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </button>
+          <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="1" disabled={sending}></textarea>
+          <button onclick={send} disabled={sending || (!input.trim() && !pendingImages.length)}>Send</button>
+        </div>
       {/if}
 
     {:else}
@@ -829,79 +808,57 @@
     outline-offset: 2px;
   }
 
-  /* --- Tiles --- */
-  .input-tiles {
+  /* --- Thumbnail strip --- */
+  .thumb-strip {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    overflow-x: auto;
+    padding: 2px 0;
   }
 
-  .tile {
-    flex: 1;
-    padding: 1.1rem 0.5rem;
-    border: 1px solid #e8e8e6;
-    border-radius: 10px;
-    background: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.45rem;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.85rem;
-    color: #888;
-    touch-action: manipulation;
-  }
-
-  @media (hover: hover) {
-    .tile:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
-  }
-  .tile:disabled { opacity: 0.35; cursor: default; }
-
-  /* --- Photo card --- */
-  .photo-card { display: flex; flex-direction: column; gap: 0.6rem; }
-
-  .photo-preview {
+  .thumb {
     position: relative;
-    align-self: center;
-    width: 100%;
-    max-width: 300px;
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e8e8e6;
   }
 
-  .photo-preview img {
+  .thumb img {
     display: block;
     width: 100%;
-    max-height: 200px;
+    height: 100%;
     object-fit: cover;
-    border-radius: 12px;
-    border: 1px solid #e8e8e6;
   }
 
-  .photo-remove {
+  .thumb-remove {
     position: absolute;
-    top: -10px; right: -10px;
-    width: 28px; height: 28px;
+    top: -1px; right: -1px;
+    width: 20px; height: 20px;
     border-radius: 50%;
     background: #2d2d2d;
     color: #fafaf9;
     border: none;
-    font-size: 0.72rem;
+    font-size: 0.6rem;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     line-height: 1;
-    z-index: 1;
   }
 
-  .photo-replace {
-    position: absolute;
-    bottom: 8px; right: 8px;
-    width: 30px; height: 30px;
-    border-radius: 50%;
-    background: rgba(0,0,0,0.45);
-    color: #fff;
-    border: none;
+  .thumb-add {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    border: 1px dashed #d0d0ce;
+    background: none;
+    color: #aaa;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -910,28 +867,31 @@
   }
 
   @media (hover: hover) {
-    .photo-replace:hover:not(:disabled) { background: rgba(0,0,0,0.65); }
+    .thumb-add:hover { border-color: #2d2d2d; color: #2d2d2d; }
   }
-  .photo-replace:disabled { opacity: 0.35; cursor: default; }
 
-  .caption-row { display: flex; gap: 0.5rem; align-items: flex-end; }
+  /* --- Input row --- */
+  .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
 
-  .caption-row textarea {
-    flex: 1;
+  .attach-btn {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: none;
     border: 1px solid #e8e8e6;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    font-size: 1rem;
-    resize: none;
-    font-family: inherit;
-    background: #fafaf9;
-    color: #1c1c1c;
+    color: #888;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
   }
 
-  .caption-row textarea:focus { outline: none; border-color: #2d2d2d; }
-
-  /* --- Describe / chat --- */
-  .input-row { display: flex; gap: 0.5rem; align-items: center; }
+  @media (hover: hover) {
+    .attach-btn:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
+  }
+  .attach-btn:disabled { opacity: 0.35; cursor: default; }
 
   textarea {
     flex: 1;

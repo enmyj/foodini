@@ -409,28 +409,28 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 		Date    string `json:"date"` // optional; defaults to today
 		Meal    string `json:"meal"` // optional; hints the meal type to Gemini
-		Image   *struct {
+		Images  []struct {
 			MIMEType string `json:"mime_type"`
 			Data     string `json:"data"` // base64-encoded
-		} `json:"image"`
+		} `json:"images"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if strings.TrimSpace(req.Message) == "" && req.Image == nil {
+	if strings.TrimSpace(req.Message) == "" && len(req.Images) == 0 {
 		writeErr(w, http.StatusBadRequest, "message or image required")
 		return
 	}
 
-	var imgData *gemini.ImageData
-	if req.Image != nil {
-		decoded, err := base64.StdEncoding.DecodeString(req.Image.Data)
+	var imgs []gemini.ImageData
+	for _, img := range req.Images {
+		decoded, err := base64.StdEncoding.DecodeString(img.Data)
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, "invalid image data")
 			return
 		}
-		imgData = &gemini.ImageData{MIMEType: req.Image.MIMEType, Data: decoded}
+		imgs = append(imgs, gemini.ImageData{MIMEType: img.MIMEType, Data: decoded})
 	}
 
 	targetDate := req.Date
@@ -459,7 +459,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		message = "(meal type: " + req.Meal + ") " + message
 	}
 
-	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, message, profileCtx, imgData)
+	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, message, profileCtx, imgs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
