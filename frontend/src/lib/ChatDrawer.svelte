@@ -406,7 +406,11 @@
             onkeydown={onRefineKeyDown}
             disabled={sending}
           />
-          <button class="save-btn" onclick={confirm} disabled={sending}>Save</button>
+          {#if refineInput.trim()}
+            <button onclick={refine} disabled={sending}>Adjust</button>
+          {:else}
+            <button class="save-btn" onclick={confirm} disabled={sending}>Save</button>
+          {/if}
         </div>
       {:else if !sending}
         {#if mode === 'tiles' && !pendingImage}

@@ -28,6 +28,7 @@
   let repeatPicker = $state(null)
   let longPressTimer = null
   let dateInputEl = $state(null)
+
   let insightsByWeek = $state({})
   let dayInsight = $state(null) // { loading, text, error, open, generatedAt }
   let collapsedMeals = $state(new Set(MEAL_ORDER))
@@ -39,6 +40,13 @@
   function todayStr() {
     const d = new Date()
     return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-')
+  }
+
+  function openDatePicker() {
+    if (!dateInputEl) return
+    if (typeof dateInputEl.showPicker === 'function') {
+      try { dateInputEl.showPicker() } catch {}
+    }
   }
 
   function addDays(dateStr, n) {
@@ -225,14 +233,6 @@
     }
   }
 
-  function openDatePicker() {
-    if (!dateInputEl) return
-    if (typeof dateInputEl.showPicker === 'function') {
-      dateInputEl.showPicker()
-    } else {
-      dateInputEl.click()
-    }
-  }
 
   async function fetchInsights(weekStart, weekEnd, regenerate = false) {
     insightsByWeek = { ...insightsByWeek, [weekStart]: { open: true, loading: true, text: null, error: null, generatedAt: null, loaded: false } }
@@ -348,14 +348,17 @@
     {#if view === 'day'}
       <div class="date-nav">
         <button class="nav-arrow" onclick={() => currentDate = addDays(currentDate, -1)} aria-label="Previous day">‹</button>
-        <button class="nav-date" onclick={openDatePicker}>{formatDateNav(currentDate)}</button>
-        <input
-          type="date"
-          class="date-input-hidden"
-          bind:value={currentDate}
-          bind:this={dateInputEl}
-          max={todayStr()}
-        />
+        <button class="nav-date" onclick={openDatePicker}>
+          {formatDateNav(currentDate)}
+          <input
+            type="date"
+            class="date-input-hidden"
+            value={currentDate}
+            onchange={(e) => { if (e.target.value) currentDate = e.target.value }}
+            bind:this={dateInputEl}
+            max={todayStr()}
+          />
+        </button>
         <button class="nav-arrow" class:dimmed={currentDate >= todayStr()} disabled={currentDate >= todayStr()} onclick={() => currentDate = addDays(currentDate, 1)} aria-label="Next day">›</button>
       </div>
       {#if dayData?.entries}
@@ -644,6 +647,7 @@
   }
 
   .nav-date {
+    position: relative;
     background: none;
     border: none;
     font-family: inherit;
@@ -665,12 +669,18 @@
 
   .date-input-hidden {
     position: absolute;
-    left: 50%;
-    top: 100%;
-    width: 1px;
-    height: 1px;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     opacity: 0;
     pointer-events: none;
+  }
+
+  @media (pointer: coarse) {
+    .date-input-hidden {
+      pointer-events: auto;
+      cursor: pointer;
+    }
   }
 
   .totals {
