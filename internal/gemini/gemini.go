@@ -175,12 +175,25 @@ Each bullet must start with the • character (not * or -). Use **bold** only fo
 Protein targets (ACSM/ISSN guidelines): use 1.2–1.6 g/kg for active adults maintaining fitness; 1.6–2.0 g/kg only if the user's goals explicitly include building muscle or strength training focus. Do not push toward the upper end of a range unless the profile justifies it.`
 
 const dayInsightsSystemPrompt = `You are a nutrition analyst reviewing one day of logged food and activity data.
-Output 2-4 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
-Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
-One concrete suggestion for tomorrow.
+First line: a single-sentence takeaway (the most important observation for this day). No bullet character on this line.
+Then 2-3 bullet points with supporting detail. Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
 Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).
 
 Protein targets (ACSM/ISSN guidelines): use 1.2–1.6 g/kg for active adults maintaining fitness; 1.6–2.0 g/kg only if the user's goals explicitly include building muscle or strength training focus. Do not push toward the upper end of a range unless the profile justifies it.`
+
+const mealSuggestionsSystemPrompt = `You are a nutrition assistant suggesting meals based on what has already been eaten and the user's profile.
+Output one suggestion per requested meal. Each suggestion: meal name on its own line as **Meal:** followed by a brief, concrete meal idea (specific foods, rough portions).
+Keep suggestions varied — avoid repeating foods from the previous day's meals (provided in context).
+Tailor suggestions to the user's dietary preferences, restrictions, and goals if known.
+Be practical: suggest real, easy-to-prepare meals. No motivational language or filler.
+Format each as: **Lunch:** Grilled salmon with quinoa and roasted broccoli (~550 cal, 40g protein)`
+
+const weekMealSuggestionsSystemPrompt = `You are a nutrition assistant providing meal planning suggestions based on a week of food and activity data.
+Suggest 3-5 specific meal ideas for the upcoming week. Each suggestion should address a gap or pattern you see in the data.
+Format each as a bullet starting with • and **bold** the meal type or theme.
+Be concrete — name specific foods and rough portions. Avoid repeating meals that appeared frequently in the data.
+Tailor to the user's dietary preferences, restrictions, and goals if known.
+No motivational language, no filler. Be practical and direct.`
 
 func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
@@ -219,4 +232,14 @@ func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) 
 // DayInsights generates a single-day analysis given a text summary of the day's data.
 func (s *Service) DayInsights(ctx context.Context, daySummary, profileCtx string) (string, error) {
 	return s.insights(ctx, daySummary, profileCtx, dayInsightsSystemPrompt)
+}
+
+// MealSuggestions generates meal suggestions given context about eaten/missing meals.
+func (s *Service) MealSuggestions(ctx context.Context, summary, profileCtx string) (string, error) {
+	return s.insights(ctx, summary, profileCtx, mealSuggestionsSystemPrompt)
+}
+
+// WeekMealSuggestions generates meal planning suggestions based on a week of data.
+func (s *Service) WeekMealSuggestions(ctx context.Context, weekSummary, profileCtx string) (string, error) {
+	return s.insights(ctx, weekSummary, profileCtx, weekMealSuggestionsSystemPrompt)
 }

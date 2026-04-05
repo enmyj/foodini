@@ -1,5 +1,5 @@
 <script>
-  import { getLog, confirmChat, generateInsights, generateDayInsights, fetchStoredInsight, fetchStoredDayInsight } from './api.js'
+  import { getLog, confirmChat, generateInsights, generateDayInsights, fetchStoredInsight, fetchStoredDayInsight, generateDaySuggestions, fetchStoredDaySuggestions, generateWeekSuggestions, fetchStoredWeekSuggestions } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
   import ActivityNote from './ActivityNote.svelte'
@@ -30,12 +30,25 @@
   let dateInputEl = $state(null)
 
   let insightsByWeek = $state({})
-  let dayInsight = $state(null) // { loading, text, error, open, generatedAt }
+  let suggestionsByWeek = $state({})
+  let dayInsight = $state(null) // { loading, text, error, open, generatedAt, detailOpen }
+  let daySuggestions = $state(null) // { loading, text, error, open, generatedAt, type }
   let collapsedMeals = $state(new Set(MEAL_ORDER))
-  let historyWeeks = $state(8)
+  let historyWeeks = $state(4)
   let loadError = $state('')
   let loadErrorAction = $state(null)
   let weekGroupsData = $derived(weekGroups(historyData, historyWeeks))
+
+  let isToday = $derived(currentDate === todayStr())
+  let isDayComplete = $derived.by(() => {
+    if (!dayData?.entries) return false
+    const meals = new Set(dayData.entries.map(e => e.meal_type))
+    return meals.has('breakfast') && meals.has('lunch') && meals.has('dinner')
+  })
+  // Day view: show insights if day is complete OR it's a past day
+  let showDayInsights = $derived(!isToday || isDayComplete)
+  // Day view: show suggestions only for today
+  let showDaySuggestions = $derived(isToday)
 
   function todayStr() {
     const d = new Date()
@@ -279,20 +292,28 @@
     }
   }
 
+  function parseDayInsight(text) {
+    // New format: first non-bullet line is summary, bullet lines are detail
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+    const summary = lines.find(l => !l.startsWith('•')) || lines[0] || ''
+    const detail = lines.filter(l => l.startsWith('•'))
+    return { summary, detail: detail.join('\n') }
+  }
+
   async function fetchDayInsights(date, regenerate = false) {
-    dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null }
+    dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null, detailOpen: false }
     try {
       if (!regenerate) {
         const stored = await fetchStoredDayInsight(date)
         if (stored.insight) {
-          dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at }
+          dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at, detailOpen: false }
           return
         }
       }
       const res = await generateDayInsights(date)
-      dayInsight = { loading: false, text: res.insight, error: null, open: true, generatedAt: res.generated_at }
+      dayInsight = { loading: false, text: res.insight, error: null, open: true, generatedAt: res.generated_at, detailOpen: false }
     } catch (e) {
-      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true, generatedAt: null }
+      dayInsight = { loading: false, text: null, error: e.message || 'Could not load insights', open: true, generatedAt: null, detailOpen: false }
     }
   }
 
@@ -304,6 +325,57 @@
     }
   }
 
+  async function fetchDaySuggestions(date, regenerate = false) {
+    daySuggestions = { loading: true, text: null, error: null, open: true, generatedAt: null, type: null }
+    try {
+      if (!regenerate) {
+        const stored = await fetchStoredDaySuggestions(date)
+        if (stored.suggestions) {
+          daySuggestions = { loading: false, text: stored.suggestions, error: null, open: true, generatedAt: stored.generated_at, type: stored.type }
+          return
+        }
+      }
+      const res = await generateDaySuggestions(date)
+      daySuggestions = { loading: false, text: res.suggestions, error: null, open: true, generatedAt: res.generated_at, type: res.type }
+    } catch (e) {
+      daySuggestions = { loading: false, text: null, error: e.message || 'Could not load suggestions', open: true, generatedAt: null, type: null }
+    }
+  }
+
+  function toggleDaySuggestions() {
+    if (!daySuggestions || (!daySuggestions.loading && !daySuggestions.text && !daySuggestions.error)) {
+      fetchDaySuggestions(currentDate, false)
+    } else {
+      daySuggestions = { ...daySuggestions, open: !daySuggestions.open }
+    }
+  }
+
+  async function fetchWeekSuggestions(weekStart, weekEnd, regenerate = false) {
+    suggestionsByWeek = { ...suggestionsByWeek, [weekStart]: { open: true, loading: true, text: null, error: null, generatedAt: null, loaded: false } }
+    try {
+      if (!regenerate) {
+        const stored = await fetchStoredWeekSuggestions(weekStart, weekEnd)
+        if (stored.suggestions) {
+          suggestionsByWeek = { ...suggestionsByWeek, [weekStart]: { open: true, loading: false, text: stored.suggestions, error: null, generatedAt: stored.generated_at, loaded: true } }
+          return
+        }
+      }
+      const res = await generateWeekSuggestions(weekStart, weekEnd)
+      suggestionsByWeek = { ...suggestionsByWeek, [weekStart]: { open: true, loading: false, text: res.suggestions, error: null, generatedAt: res.generated_at, loaded: true } }
+    } catch {
+      suggestionsByWeek = { ...suggestionsByWeek, [weekStart]: { open: true, loading: false, text: null, error: 'Could not load suggestions', generatedAt: null, loaded: true } }
+    }
+  }
+
+  function toggleWeekSuggestions(weekStart, weekEnd) {
+    const cur = suggestionsByWeek[weekStart]
+    if (!cur || !cur.loaded) {
+      fetchWeekSuggestions(weekStart, weekEnd, false)
+    } else {
+      suggestionsByWeek = { ...suggestionsByWeek, [weekStart]: { ...cur, open: !cur.open } }
+    }
+  }
+
   $effect(() => {
     const v = view
     const d = currentDate
@@ -311,6 +383,7 @@
     if (v === 'day') {
       repeatedMeals = new Set()
       dayInsight = null
+      daySuggestions = null
       loadDay(d)
       loadYesterday(d)
     } else {
@@ -369,13 +442,26 @@
           <span>{t.carbs}g C</span>
           <span>{t.fat}g F</span>
           <span>{t.fiber}g Fb</span>
-          <button
-            class="insights-btn"
-            class:active={dayInsight?.open}
-            onclick={toggleDayInsights}
-            aria-label="AI insights for today"
-            title="AI insights"
-          >✦ insights</button>
+          <div class="totals-btns">
+            {#if showDayInsights}
+              <button
+                class="insights-btn"
+                class:active={dayInsight?.open}
+                onclick={toggleDayInsights}
+                aria-label="AI insights"
+                title="AI insights"
+              >✦ insights</button>
+            {/if}
+            {#if showDaySuggestions}
+              <button
+                class="insights-btn suggestions-btn"
+                class:active={daySuggestions?.open}
+                onclick={toggleDaySuggestions}
+                aria-label="Meal suggestions"
+                title="Meal suggestions"
+              >🍽 suggestions</button>
+            {/if}
+          </div>
         </div>
       {/if}
     {/if}
@@ -392,6 +478,7 @@
     </div>
   {:else if view === 'day'}
     {#if dayInsight?.open}
+      {@const parsed = dayInsight.text ? parseDayInsight(dayInsight.text) : null}
       <div class="insights-panel day-insights-panel">
         <button class="insight-close" onclick={() => dayInsight = { ...dayInsight, open: false }} aria-label="Close insights">✕</button>
         {#if dayInsight.loading}
@@ -402,12 +489,43 @@
           </div>
         {:else if dayInsight.error}
           <span class="insights-err">{dayInsight.error}</span>
-        {:else if dayInsight.text}
+        {:else if parsed}
           <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-          <p class="insights-text">{@html renderInsight(dayInsight.text)}</p>
+          <p class="insights-text insight-summary">{@html renderInsight(parsed.summary)}</p>
+          {#if parsed.detail}
+            <button class="detail-toggle" onclick={() => dayInsight = { ...dayInsight, detailOpen: !dayInsight.detailOpen }}>
+              {dayInsight.detailOpen ? '▾ less' : '▸ more'}
+            </button>
+            {#if dayInsight.detailOpen}
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+              <p class="insights-text insight-detail">{@html renderInsight(parsed.detail)}</p>
+            {/if}
+          {/if}
           <div class="insight-footer">
             {#if dayInsight.generatedAt}<span class="insight-ts">{formatGeneratedAt(dayInsight.generatedAt)}</span>{/if}
             <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>↺ regenerate</button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+    {#if daySuggestions?.open}
+      <div class="insights-panel day-insights-panel suggestions-panel">
+        <button class="insight-close" onclick={() => daySuggestions = { ...daySuggestions, open: false }} aria-label="Close suggestions">✕</button>
+        {#if daySuggestions.loading}
+          <div class="insight-skeleton">
+            <div class="isk-line" style="width: 88%"></div>
+            <div class="isk-line" style="width: 72%"></div>
+            <div class="isk-line" style="width: 80%"></div>
+          </div>
+        {:else if daySuggestions.error}
+          <span class="insights-err">{daySuggestions.error}</span>
+        {:else if daySuggestions.text}
+          <span class="suggestions-label">{daySuggestions.type === 'next-day' ? 'Tomorrow' : 'Remaining meals'}</span>
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          <p class="insights-text">{@html renderInsight(daySuggestions.text)}</p>
+          <div class="insight-footer">
+            {#if daySuggestions.generatedAt}<span class="insight-ts">{formatGeneratedAt(daySuggestions.generatedAt)}</span>{/if}
+            <button class="insight-regen" onclick={() => fetchDaySuggestions(currentDate, true)}>↺ regenerate</button>
           </div>
         {/if}
       </div>
@@ -473,13 +591,22 @@
             {/if}
           </div>
           {#if week.weekTotal > 0 || week.days.some(d => d.dayLog)}
-            <button
-              class="insights-btn"
-              class:active={insightsByWeek[week.weekStart]?.open}
-              onclick={() => toggleInsights(week.weekStart, week.weekEnd)}
-              aria-label="AI insights for this week"
-              title="AI insights"
-            >✦ insights</button>
+            <div class="week-btns">
+              <button
+                class="insights-btn"
+                class:active={insightsByWeek[week.weekStart]?.open}
+                onclick={() => toggleInsights(week.weekStart, week.weekEnd)}
+                aria-label="AI insights for this week"
+                title="AI insights"
+              >✦ insights</button>
+              <button
+                class="insights-btn suggestions-btn"
+                class:active={suggestionsByWeek[week.weekStart]?.open}
+                onclick={() => toggleWeekSuggestions(week.weekStart, week.weekEnd)}
+                aria-label="Meal suggestions for this week"
+                title="Meal suggestions"
+              >🍽 suggestions</button>
+            </div>
           {/if}
         </div>
         <div class="week-grid">
@@ -505,7 +632,11 @@
           {@const wi = insightsByWeek[week.weekStart]}
           <div class="insights-panel">
             {#if wi.loading}
-              <span class="insights-loading">Thinking…</span>
+              <div class="insight-skeleton">
+                <div class="isk-line" style="width: 88%"></div>
+                <div class="isk-line" style="width: 72%"></div>
+                <div class="isk-line" style="width: 80%"></div>
+              </div>
             {:else if wi.error}
               <span class="insights-err">{wi.error}</span>
             {:else if wi.text}
@@ -514,6 +645,28 @@
               <div class="insight-footer">
                 {#if wi.generatedAt}<span class="insight-ts">{formatGeneratedAt(wi.generatedAt)}</span>{/if}
                 <button class="insight-regen" onclick={() => fetchInsights(week.weekStart, week.weekEnd, true)}>↺ regenerate</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if suggestionsByWeek[week.weekStart]?.open}
+          {@const ws = suggestionsByWeek[week.weekStart]}
+          <div class="insights-panel suggestions-panel">
+            {#if ws.loading}
+              <div class="insight-skeleton">
+                <div class="isk-line" style="width: 88%"></div>
+                <div class="isk-line" style="width: 72%"></div>
+                <div class="isk-line" style="width: 80%"></div>
+              </div>
+            {:else if ws.error}
+              <span class="insights-err">{ws.error}</span>
+            {:else if ws.text}
+              <span class="suggestions-label">Meal ideas for next week</span>
+              <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+              <p class="insights-text">{@html renderInsight(ws.text)}</p>
+              <div class="insight-footer">
+                {#if ws.generatedAt}<span class="insight-ts">{formatGeneratedAt(ws.generatedAt)}</span>{/if}
+                <button class="insight-regen" onclick={() => fetchWeekSuggestions(week.weekStart, week.weekEnd, true)}>↺ regenerate</button>
               </div>
             {/if}
           </div>
@@ -693,8 +846,15 @@
     padding-top: 0.3rem;
   }
 
-  .totals .insights-btn {
+  .totals-btns {
+    display: flex;
+    gap: 0.35rem;
     margin-left: auto;
+  }
+
+  .week-btns {
+    display: flex;
+    gap: 0.35rem;
   }
 
   section {
@@ -1014,12 +1174,6 @@
     .insight-close:hover { color: #666; }
   }
 
-  .insights-loading {
-    font-size: 0.85rem;
-    color: #888;
-    font-style: italic;
-  }
-
   @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
@@ -1085,6 +1239,65 @@
 
   @media (hover: hover) {
     .insight-regen:hover { color: #555; }
+  }
+
+  .detail-toggle {
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 0.72rem;
+    color: #aaa;
+    cursor: pointer;
+    padding: 0.25rem 0 0.15rem;
+    touch-action: manipulation;
+  }
+
+  @media (hover: hover) {
+    .detail-toggle:hover { color: #555; }
+  }
+
+  .insight-summary {
+    font-weight: 500;
+  }
+
+  .insight-detail {
+    margin-top: 0.25rem;
+    padding-top: 0.25rem;
+    border-top: 1px dashed #e8e8e6;
+  }
+
+  .suggestions-panel {
+    border-color: #e0e8de;
+    background: #f7f9f5;
+  }
+
+  .suggestions-panel .insight-footer {
+    border-top-color: #e0e8de;
+  }
+
+  .suggestions-label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7a9a6e;
+    margin-bottom: 0.4rem;
+  }
+
+  .suggestions-btn {
+    border-color: #d0dece;
+    color: #7a9a6e;
+  }
+
+  .suggestions-btn.active {
+    border-color: #7a9a6e;
+    color: #5a7a4e;
+    background: #f0f5ee;
+  }
+
+  @media (hover: hover) {
+    .suggestions-btn:hover { border-color: #7a9a6e; color: #5a7a4e; }
   }
 
   /* FAB + shared actions */

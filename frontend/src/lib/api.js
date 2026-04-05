@@ -112,6 +112,30 @@ export async function generateInsights(start, end) {
   })).json()
 }
 
+export async function fetchStoredDaySuggestions(date) {
+  return (await apiFetch(`/api/suggestions/day?date=${date}`)).json()
+}
+
+export async function generateDaySuggestions(date) {
+  return (await apiFetch('/api/suggestions/day', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date }),
+  })).json()
+}
+
+export async function fetchStoredWeekSuggestions(start, end) {
+  return (await apiFetch(`/api/suggestions/week?start=${start}&end=${end}`)).json()
+}
+
+export async function generateWeekSuggestions(start, end) {
+  return (await apiFetch('/api/suggestions/week', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start, end }),
+  })).json()
+}
+
 export async function getProfile() {
   return (await apiFetch('/api/profile')).json()
 }

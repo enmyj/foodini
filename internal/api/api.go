@@ -946,6 +946,282 @@ func (h *Handler) GetStoredDayInsights(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
 }
 
+// POST /api/suggestions/day — body: {"date": "YYYY-MM-DD"}
+// Generates meal suggestions. If B/L/D all present → next-day suggestions; otherwise → remaining meal suggestions.
+// Returns {"suggestions": "...", "type": "remaining"|"next-day", "generated_at": "..."}
+func (h *Handler) DaySuggestions(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+
+	var req struct {
+		Date string `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Date == "" {
+		writeErr(w, http.StatusBadRequest, "date required")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid date")
+		return
+	}
+
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+
+	entries, err := svc.GetFoodByDateRange(r.Context(), req.Date, req.Date)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+
+	// Determine which meals are present
+	hasMeal := map[string]bool{}
+	for _, e := range entries {
+		hasMeal[e.MealType] = true
+	}
+	complete := hasMeal["breakfast"] && hasMeal["lunch"] && hasMeal["dinner"]
+
+	// Get previous day's entries for variety
+	prevDate := addDaysStr(req.Date, -1)
+	prevEntries, _ := svc.GetFoodByDateRange(r.Context(), prevDate, prevDate)
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		profile, _ := svc.GetProfile(r.Context())
+		profileCtx = formatProfileContext(profile)
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	// Fetch existing day insights to inform suggestions
+	var insightText string
+	if rec, _ := svc.GetInsight(r.Context(), "day", req.Date, req.Date); rec != nil {
+		insightText = rec.Insight
+	}
+
+	summary := buildMealSuggestionSummary(req.Date, entries, prevEntries, complete, insightText)
+
+	suggestions, err := h.gemini.MealSuggestions(r.Context(), summary, profileCtx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
+		return
+	}
+
+	sugType := "remaining"
+	if complete {
+		sugType = "next-day"
+	}
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+		Type:        "day-suggestions",
+		StartDate:   req.Date,
+		EndDate:     req.Date,
+		GeneratedAt: generatedAt,
+		Insight:     sugType + "\n" + suggestions,
+	})
+	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "type": sugType, "generated_at": generatedAt})
+}
+
+// GET /api/suggestions/day?date=YYYY-MM-DD — returns most recent stored day suggestions or null
+func (h *Handler) GetStoredDaySuggestions(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		writeErr(w, http.StatusBadRequest, "date required")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	rec, err := svc.GetInsight(r.Context(), "day-suggestions", date, date)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	if rec == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{"suggestions": nil, "type": nil, "generated_at": nil})
+		return
+	}
+	// Parse type from stored format: "type\nsuggestions"
+	sugType := "remaining"
+	sugText := rec.Insight
+	if parts := strings.SplitN(rec.Insight, "\n", 2); len(parts) == 2 {
+		sugType = parts[0]
+		sugText = parts[1]
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": sugText, "type": sugType, "generated_at": rec.GeneratedAt})
+}
+
+// POST /api/suggestions/week — body: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
+func (h *Handler) WeekSuggestions(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+
+	var req struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Start == "" || req.End == "" {
+		writeErr(w, http.StatusBadRequest, "start and end dates required")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.Start); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid start date")
+		return
+	}
+	if _, err := time.Parse("2006-01-02", req.End); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid end date")
+		return
+	}
+
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+
+	entries, err := svc.GetFoodByDateRange(r.Context(), req.Start, req.End)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Start, req.End)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+
+	summary := buildWeekSummary(req.Start, req.End, entries, dailyLogs)
+
+	// Fetch existing week insights to inform suggestions
+	if rec, _ := svc.GetInsight(r.Context(), "week", req.Start, req.End); rec != nil {
+		summary += "\nInsights for this week:\n" + rec.Insight + "\n"
+	}
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		profile, _ := svc.GetProfile(r.Context())
+		profileCtx = formatProfileContext(profile)
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	suggestions, err := h.gemini.WeekMealSuggestions(r.Context(), summary, profileCtx)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
+		return
+	}
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+		Type:        "week-suggestions",
+		StartDate:   req.Start,
+		EndDate:     req.End,
+		GeneratedAt: generatedAt,
+		Insight:     suggestions,
+	})
+	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "generated_at": generatedAt})
+}
+
+// GET /api/suggestions/week?start=YYYY-MM-DD&end=YYYY-MM-DD
+func (h *Handler) GetStoredWeekSuggestions(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if start == "" || end == "" {
+		writeErr(w, http.StatusBadRequest, "start and end required")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	rec, err := svc.GetInsight(r.Context(), "week-suggestions", start, end)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	if rec == nil {
+		WriteJSON(w, http.StatusOK, map[string]any{"suggestions": nil, "generated_at": nil})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": rec.Insight, "generated_at": rec.GeneratedAt})
+}
+
+func addDaysStr(dateStr string, n int) string {
+	t, _ := time.Parse("2006-01-02", dateStr)
+	return t.AddDate(0, 0, n).Format("2006-01-02")
+}
+
+func buildMealSuggestionSummary(date string, entries, prevEntries []sheets.FoodEntry, complete bool, insightText string) string {
+	var b strings.Builder
+
+	if complete {
+		fmt.Fprintf(&b, "Today (%s) is complete. Suggest meals for tomorrow.\n\n", date)
+	} else {
+		// Figure out missing meals
+		hasMeal := map[string]bool{}
+		for _, e := range entries {
+			hasMeal[e.MealType] = true
+		}
+		var missing []string
+		for _, m := range []string{"breakfast", "lunch", "dinner"} {
+			if !hasMeal[m] {
+				missing = append(missing, m)
+			}
+		}
+		fmt.Fprintf(&b, "Suggest meals for: %s\n\n", strings.Join(missing, ", "))
+	}
+
+	// Include insights if available — suggestions should address these
+	if insightText != "" {
+		fmt.Fprintf(&b, "Nutrition insights for today (factor these into suggestions):\n%s\n\n", insightText)
+	}
+
+	// What was eaten today
+	if len(entries) > 0 {
+		fmt.Fprintf(&b, "Already eaten today:\n")
+		for _, e := range entries {
+			fmt.Fprintf(&b, "  - [%s] %s: %d cal, %dg protein\n", e.MealType, e.Description, e.Calories, e.Protein)
+		}
+		totalCal, totalProt := 0, 0
+		for _, e := range entries {
+			totalCal += e.Calories
+			totalProt += e.Protein
+		}
+		fmt.Fprintf(&b, "  Today's totals so far: %d cal, %dg protein\n\n", totalCal, totalProt)
+	}
+
+	// Yesterday's meals (for variety)
+	if len(prevEntries) > 0 {
+		fmt.Fprintf(&b, "Yesterday's meals (avoid repeating):\n")
+		for _, e := range prevEntries {
+			fmt.Fprintf(&b, "  - [%s] %s\n", e.MealType, e.Description)
+		}
+	}
+
+	return b.String()
+}
+
 // PUT /api/activity — body: {"date": "YYYY-MM-DD", "activity": "...", "feeling_score": 0, "feeling_notes": "..."}
 func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
