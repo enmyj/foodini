@@ -838,7 +838,8 @@
 
   .totals {
     display: flex;
-    gap: 1rem;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
     align-items: center;
     font-size: 0.78rem;
     color: #888;
@@ -1155,6 +1156,8 @@
     border: 1px solid #e8e8e6;
     border-radius: 10px;
     margin-bottom: 1.25rem;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .insight-close {
@@ -1203,6 +1206,8 @@
     color: #1c1c1c;
     line-height: 1.65;
     white-space: pre-line;
+    overflow-wrap: break-word;
+    word-break: break-word;
     margin: 0;
   }
 
