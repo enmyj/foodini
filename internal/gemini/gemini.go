@@ -7,8 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 const geminiModel = "gemini-3-flash-preview"
@@ -88,34 +87,64 @@ type Service struct {
 	apiKey string
 	mu     sync.Mutex
 	convs  map[string][]*genai.Content // keyed by userEmail|date
+
+	clientOnce sync.Once
+	client     *genai.Client
+	clientErr  error
 }
 
 func NewService(apiKey string) *Service {
 	return &Service{apiKey: apiKey, convs: make(map[string][]*genai.Content)}
 }
 
+func (s *Service) getClient(ctx context.Context) (*genai.Client, error) {
+	s.clientOnce.Do(func() {
+		s.client, s.clientErr = genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey:  s.apiKey,
+			Backend: genai.BackendGeminiAPI,
+		})
+	})
+	if s.clientErr != nil {
+		return nil, fmt.Errorf("gemini client: %w", s.clientErr)
+	}
+	return s.client, nil
+}
+
+func buildSystemInstruction(prompt string) *genai.Content {
+	return &genai.Content{
+		Role: string(genai.RoleUser),
+		Parts: []*genai.Part{
+			{Text: prompt},
+		},
+	}
+}
+
+func buildChatConfig(systemInstr string) *genai.GenerateContentConfig {
+	return &genai.GenerateContentConfig{
+		SystemInstruction: buildSystemInstruction(systemInstr),
+		ResponseMIMEType:  "application/json",
+		ResponseSchema:    responseSchema,
+	}
+}
+
+func buildTextConfig(systemInstr string) *genai.GenerateContentConfig {
+	return &genai.GenerateContentConfig{
+		SystemInstruction: buildSystemInstruction(systemInstr),
+	}
+}
+
 // Chat sends a user message (and optional image) and returns (message, entries, error).
 // If entries is non-empty, the response is ready for confirmation.
 // If entries is empty, message contains a clarifying question.
 func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, imgs []ImageData) (string, []Entry, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
+	client, err := s.getClient(ctx)
 	if err != nil {
-		return "", nil, fmt.Errorf("gemini client: %w", err)
+		return "", nil, err
 	}
-	defer client.Close()
-
-	model := client.GenerativeModel(geminiModel)
-
-	// Configure structured JSON output
-	model.ResponseMIMEType = "application/json"
-	model.ResponseSchema = responseSchema
 
 	systemInstr := systemPrompt
 	if profileCtx != "" {
 		systemInstr = profileCtx + "\n\n" + systemPrompt
-	}
-	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(systemInstr)},
 	}
 
 	key := userEmail + "|" + date
@@ -123,15 +152,22 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	history := s.convs[key]
 	s.mu.Unlock()
 
-	chatSession := model.StartChat()
-	chatSession.History = history
+	chatSession, err := client.Chats.Create(ctx, geminiModel, buildChatConfig(systemInstr), history)
+	if err != nil {
+		return "", nil, fmt.Errorf("gemini chat: %w", err)
+	}
 
 	var parts []genai.Part
 	for _, img := range imgs {
-		parts = append(parts, genai.Blob{MIMEType: img.MIMEType, Data: img.Data})
+		parts = append(parts, genai.Part{
+			InlineData: &genai.Blob{MIMEType: img.MIMEType, Data: img.Data},
+			MediaResolution: &genai.PartMediaResolution{
+				Level: genai.PartMediaResolutionLevelMediaResolutionLow,
+			},
+		})
 	}
 	if message != "" {
-		parts = append(parts, genai.Text(message))
+		parts = append(parts, genai.Part{Text: message})
 	}
 
 	resp, err := chatSession.SendMessage(ctx, parts...)
@@ -139,13 +175,7 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 		return "", nil, fmt.Errorf("gemini send: %w", err)
 	}
 
-	// Extract JSON response
-	var jsonStr string
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if txt, ok := part.(genai.Text); ok {
-			jsonStr += string(txt)
-		}
-	}
+	jsonStr := strings.TrimSpace(resp.Text())
 
 	var result Response
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
@@ -153,7 +183,7 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	}
 
 	s.mu.Lock()
-	s.convs[key] = chatSession.History
+	s.convs[key] = chatSession.History(true)
 	s.mu.Unlock()
 
 	return result.Message, result.Entries, nil
@@ -200,32 +230,22 @@ Keep them weeknight-realistic. Avoid repeating dishes or core ingredients that a
 Tailor to the user's dietary preferences, restrictions, and goals if known. No motivational language, no filler.`
 
 func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
+	client, err := s.getClient(ctx)
 	if err != nil {
-		return "", fmt.Errorf("gemini client: %w", err)
+		return "", err
 	}
-	defer client.Close()
-
-	model := client.GenerativeModel(geminiModel)
 	systemInstr := systemPrompt
 	if profileCtx != "" {
 		systemInstr = profileCtx + "\n\n" + systemPrompt
 	}
-	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(systemInstr)},
-	}
 
-	resp, err := model.GenerateContent(ctx, genai.Text(summary))
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, []*genai.Content{
+		genai.NewContentFromText(summary, genai.RoleUser),
+	}, buildTextConfig(systemInstr))
 	if err != nil {
 		return "", fmt.Errorf("gemini generate: %w", err)
 	}
-	var sb strings.Builder
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if txt, ok := part.(genai.Text); ok {
-			sb.WriteString(string(txt))
-		}
-	}
-	return strings.TrimSpace(sb.String()), nil
+	return strings.TrimSpace(resp.Text()), nil
 }
 
 // Insights generates a free-form weekly analysis given a text summary of the week's data.

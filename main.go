@@ -25,9 +25,14 @@ import (
 //go:embed frontend/dist
 var frontendDist embed.FS
 
-// Maximum request body size for API endpoints. 1 MiB is plenty for JSON
-// payloads; blocks someone from tying up a goroutine with a huge upload.
-const maxRequestBody = 1 << 20
+const (
+	// Most API routes only exchange small JSON payloads.
+	maxRequestBody = 1 << 20
+	// Chat accepts direct image uploads. Keep this generous enough for a
+	// normal phone photo while still bounding server memory and Gemini's
+	// inline upload path.
+	maxChatRequestBody = 20 << 20
+)
 
 func main() {
 	cfg := auth.Config{
@@ -122,7 +127,7 @@ func main() {
 		ContentTypeNosniff:    true,
 		FrameDeny:             true,
 		ReferrerPolicy:        "same-origin",
-		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'self'",
+		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:; connect-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'self'",
 		STSSeconds:            31536000, // 1 year
 		STSIncludeSubdomains:  true,
 		STSPreload:            false,
@@ -189,7 +194,11 @@ func recoverPanics(next http.Handler) http.Handler {
 // error and close the connection.
 func maxBytes(n int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, n)
+		limit := n
+		if r.Method == http.MethodPost && r.URL.Path == "/api/chat" {
+			limit = maxChatRequestBody
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		next.ServeHTTP(w, r)
 	})
 }

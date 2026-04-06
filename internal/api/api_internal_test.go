@@ -1,10 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -121,5 +125,104 @@ func TestWriteAPIErrOtherGoogle403StaysInternal(t *testing.T) {
 	}
 	if body["error"] == "insufficient_scopes" {
 		t.Fatalf("error body: unexpectedly rewrote non-scope 403 to insufficient_scopes")
+	}
+}
+
+func TestParseChatRequestJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{
+		"message":"banana and yogurt",
+		"date":"2026-04-06",
+		"meal":"breakfast",
+		"images":[{"mime_type":"image/jpeg","data":"`+base64.StdEncoding.EncodeToString([]byte("jpeg-bytes"))+`"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	got, err := parseChatRequest(req)
+	if err != nil {
+		t.Fatalf("parseChatRequest: %v", err)
+	}
+	if got.Message != "banana and yogurt" || got.Date != "2026-04-06" || got.Meal != "breakfast" {
+		t.Fatalf("unexpected request: %+v", got)
+	}
+	if len(got.Images) != 1 {
+		t.Fatalf("images len: got %d, want 1", len(got.Images))
+	}
+	if got.Images[0].MIMEType != "image/jpeg" {
+		t.Fatalf("mime: got %q, want image/jpeg", got.Images[0].MIMEType)
+	}
+	if string(got.Images[0].Data) != "jpeg-bytes" {
+		t.Fatalf("image data: got %q", string(got.Images[0].Data))
+	}
+}
+
+func TestParseChatRequestMultipart(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("message", "salad"); err != nil {
+		t.Fatalf("WriteField message: %v", err)
+	}
+	if err := writer.WriteField("date", "2026-04-06"); err != nil {
+		t.Fatalf("WriteField date: %v", err)
+	}
+	if err := writer.WriteField("meal", "lunch"); err != nil {
+		t.Fatalf("WriteField meal: %v", err)
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="images"; filename="meal.jpg"`)
+	header.Set("Content-Type", "image/jpeg")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("fake-jpeg")); err != nil {
+		t.Fatalf("part.Write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	got, err := parseChatRequest(req)
+	if err != nil {
+		t.Fatalf("parseChatRequest: %v", err)
+	}
+	if got.Message != "salad" || got.Date != "2026-04-06" || got.Meal != "lunch" {
+		t.Fatalf("unexpected request: %+v", got)
+	}
+	if len(got.Images) != 1 {
+		t.Fatalf("images len: got %d, want 1", len(got.Images))
+	}
+	if string(got.Images[0].Data) != "fake-jpeg" {
+		t.Fatalf("image data: got %q", string(got.Images[0].Data))
+	}
+	if got.Images[0].MIMEType == "" {
+		t.Fatal("expected MIME type to be populated")
+	}
+}
+
+func TestParseChatRequestMultipartRejectsNonImage(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="images"; filename="notes.txt"`)
+	header.Set("Content-Type", "text/plain")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("plain text")); err != nil {
+		t.Fatalf("part.Write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer.Close: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	if _, err := parseChatRequest(req); err == nil {
+		t.Fatal("expected non-image multipart upload to fail")
 	}
 }

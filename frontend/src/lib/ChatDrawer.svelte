@@ -81,19 +81,31 @@
     dragCurrentY = 0
   }
 
+  function revokePreview(url) {
+    if (typeof url === 'string' && url.startsWith('blob:')) {
+      URL.revokeObjectURL(url)
+    }
+  }
+
+  function clearPendingImages() {
+    for (const img of pendingImages) {
+      revokePreview(img.previewUrl)
+    }
+    pendingImages = []
+  }
+
   $effect(() => {
     if (open) {
       tab = initialTab
       selectedDate = date || todayStr()
       selectedMeal = meal
-      pendingImages = []
+      clearPendingImages()
       input = ''
       sending = false
       currentEntries = null
       clarifyingQuestion = null
       refineInput = ''
       refineNote = null
-      pendingImages = []
       if (initialTab === 'activity' && initialField) {
         setTimeout(() => {
           if (initialField === 'activity') activityTextareaEl?.focus()
@@ -106,13 +118,12 @@
       tab = 'food'
       selectedDate = ''
       selectedMeal = null
-      pendingImages = []
+      clearPendingImages()
       input = ''
       currentEntries = null
       clarifyingQuestion = null
       refineInput = ''
       refineNote = null
-      pendingImages = []
       activityText = ''
       feelingNotes = ''
       poop = false
@@ -162,41 +173,19 @@
     }
   }
 
-  async function compressImage(file) {
-    return new Promise((resolve) => {
-      const img = new Image()
-      const url = URL.createObjectURL(file)
-      img.onload = () => {
-        URL.revokeObjectURL(url)
-        const MAX = 1024
-        const scale = Math.min(1, MAX / Math.max(img.width, img.height))
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.round(img.width * scale)
-        canvas.height = Math.round(img.height * scale)
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob(blob => {
-          const reader = new FileReader()
-          reader.onload = () => {
-            const dataUrl = reader.result
-            resolve({ data: dataUrl.split(',')[1], mimeType: 'image/jpeg', previewUrl: dataUrl })
-          }
-          reader.readAsDataURL(blob)
-        }, 'image/jpeg', 0.82)
-      }
-      img.src = url
-    })
-  }
-
   async function onFileSelected(e) {
     const files = Array.from(e.target.files ?? [])
     if (!files.length) return
-    const compressed = await Promise.all(files.map(compressImage))
-    pendingImages = [...pendingImages, ...compressed]
-    fileInputEl.value = ''
+    pendingImages = [
+      ...pendingImages,
+      ...files.map(file => ({ file, previewUrl: URL.createObjectURL(file) })),
+    ]
     setTimeout(() => inputEl?.focus(), 30)
+    if (fileInputEl) fileInputEl.value = ''
   }
 
   function removeImage(index) {
+    revokePreview(pendingImages[index]?.previewUrl)
     pendingImages = pendingImages.filter((_, i) => i !== index)
   }
 
@@ -207,16 +196,15 @@
       setTimeout(() => { mealError = false }, 600)
       return
     }
-    const imgs = pendingImages.length ? [...pendingImages] : null
+    const imgs = pendingImages.length ? pendingImages.map(img => img.file) : null
     const text = input.trim()
     if (!imgs && !text) return
     input = ''
     clarifyingQuestion = null
-    pendingImages = []
+    clearPendingImages()
     sending = true
     try {
-      const imagesPayload = imgs ? imgs.map(i => ({ data: i.data, mime_type: i.mimeType })) : null
-      const res = await chat(text, selectedDate, imagesPayload, selectedMeal)
+      const res = await chat(text, selectedDate, imgs, selectedMeal)
       if (res.pending && res.entries?.length) {
         currentEntries = res.entries
         setTimeout(() => refineEl?.focus(), 30)

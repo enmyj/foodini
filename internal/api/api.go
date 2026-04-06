@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,6 +33,13 @@ type Handler struct {
 type cacheItem struct {
 	data    []byte
 	expires time.Time
+}
+
+type chatRequest struct {
+	Message string
+	Date    string
+	Meal    string
+	Images  []gemini.ImageData
 }
 
 const cacheTTL = 60 * time.Second
@@ -396,7 +404,7 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// POST /api/chat — body: {"message": "...", "date": "YYYY-MM-DD"}
+// POST /api/chat — accepts JSON or multipart/form-data with optional images.
 // Returns {"done": false, "message": "..."} for clarifying questions.
 // Returns {"done": false, "pending": true, "entries": [...]} when entries are ready for confirmation.
 func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
@@ -405,32 +413,19 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Message string `json:"message"`
-		Date    string `json:"date"` // optional; defaults to today
-		Meal    string `json:"meal"` // optional; hints the meal type to Gemini
-		Images  []struct {
-			MIMEType string `json:"mime_type"`
-			Data     string `json:"data"` // base64-encoded
-		} `json:"images"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := parseChatRequest(r)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "upload_too_large")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Message) == "" && len(req.Images) == 0 {
 		writeErr(w, http.StatusBadRequest, "message or image required")
 		return
-	}
-
-	var imgs []gemini.ImageData
-	for _, img := range req.Images {
-		decoded, err := base64.StdEncoding.DecodeString(img.Data)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid image data")
-			return
-		}
-		imgs = append(imgs, gemini.ImageData{MIMEType: img.MIMEType, Data: decoded})
 	}
 
 	targetDate := req.Date
@@ -459,7 +454,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		message = "(meal type: " + req.Meal + ") " + message
 	}
 
-	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, message, profileCtx, imgs)
+	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, message, profileCtx, req.Images)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
 		return
@@ -476,6 +471,85 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		"entries": entries,
 		"message": responseText,
 	})
+}
+
+func parseChatRequest(r *http.Request) (chatRequest, error) {
+	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		return parseMultipartChatRequest(r)
+	}
+	return parseJSONChatRequest(r)
+}
+
+func parseJSONChatRequest(r *http.Request) (chatRequest, error) {
+	var req struct {
+		Message string `json:"message"`
+		Date    string `json:"date"`
+		Meal    string `json:"meal"`
+		Images  []struct {
+			MIMEType string `json:"mime_type"`
+			Data     string `json:"data"`
+		} `json:"images"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return chatRequest{}, err
+	}
+
+	parsed := chatRequest{
+		Message: req.Message,
+		Date:    req.Date,
+		Meal:    req.Meal,
+	}
+	for _, img := range req.Images {
+		decoded, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			return chatRequest{}, err
+		}
+		parsed.Images = append(parsed.Images, gemini.ImageData{MIMEType: img.MIMEType, Data: decoded})
+	}
+	return parsed, nil
+}
+
+func parseMultipartChatRequest(r *http.Request) (chatRequest, error) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		return chatRequest{}, err
+	}
+
+	req := chatRequest{
+		Message: r.FormValue("message"),
+		Date:    r.FormValue("date"),
+		Meal:    r.FormValue("meal"),
+	}
+	for _, field := range []string{"images", "image"} {
+		files := r.MultipartForm.File[field]
+		for _, fh := range files {
+			file, err := fh.Open()
+			if err != nil {
+				return chatRequest{}, err
+			}
+			data, readErr := io.ReadAll(file)
+			closeErr := file.Close()
+			if readErr != nil {
+				return chatRequest{}, readErr
+			}
+			if closeErr != nil {
+				return chatRequest{}, closeErr
+			}
+			if len(data) == 0 {
+				continue
+			}
+
+			mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
+			if mimeType == "" {
+				mimeType = http.DetectContentType(data)
+			}
+			if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+				return chatRequest{}, errors.New("invalid image upload")
+			}
+			req.Images = append(req.Images, gemini.ImageData{MIMEType: mimeType, Data: data})
+		}
+	}
+	return req, nil
 }
 
 // POST /api/chat/confirm — body: {"entries": [...], "date": "YYYY-MM-DD"}

@@ -2,6 +2,7 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 const SAFE_ERROR_MESSAGES = {
   session_expired: 'Your session expired. Sign in again.',
   insufficient_scopes: 'Google permissions are missing. Re-authorize to continue.',
+  upload_too_large: 'Photos are too large for one request. Try fewer photos and send again.',
 }
 
 async function throwResponseError(res) {
@@ -43,9 +44,22 @@ export async function getLog({ date = null, days = null } = {}) {
 }
 
 export async function chat(message, date = null, images = null, meal = null) {
+  if (images?.length) {
+    const body = new FormData()
+    body.append('message', message ?? '')
+    if (date) body.append('date', date)
+    if (meal) body.append('meal', meal)
+    for (const image of images) {
+      body.append('images', image)
+    }
+    return (await apiFetch('/api/chat', {
+      method: 'POST',
+      body,
+    })).json()
+  }
+
   const body = { message }
   if (date) body.date = date
-  if (images) body.images = images
   if (meal) body.meal = meal
   return (await apiFetch('/api/chat', {
     method: 'POST',

@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import { getLog, confirmChat, generateInsights, generateDayInsights, fetchStoredInsight, fetchStoredDayInsight, generateDaySuggestions, fetchStoredDaySuggestions, generateWeekSuggestions, fetchStoredWeekSuggestions } from './api.js'
   import EntryRow from './EntryRow.svelte'
   import ChatDrawer from './ChatDrawer.svelte'
@@ -8,6 +9,7 @@
 
   const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner']
   const DAY_ABBREV = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+  const HISTORY_STATE_KEY = 'foodiniNav'
 
   let view = $state('day')
   let currentDate = $state(todayStr())
@@ -38,6 +40,8 @@
   let loadError = $state('')
   let loadErrorAction = $state(null)
   let weekGroupsData = $derived(weekGroups(historyData, historyWeeks))
+  let historyReady = false
+  let skipHistorySync = false
 
   let isToday = $derived(currentDate === todayStr())
   let isDayComplete = $derived.by(() => {
@@ -106,6 +110,90 @@
     }
     loadError = fallback
     loadErrorAction = null
+  }
+
+  function snapshotNavState() {
+    return {
+      view,
+      currentDate,
+      historyWeeks,
+      profileOpen,
+      drawerOpen,
+      drawerTab,
+      drawerDate,
+      drawerMeal,
+      drawerField,
+    }
+  }
+
+  function normalizeNavState(state) {
+    const today = todayStr()
+    const nextView = state?.view === 'history' ? 'history' : 'day'
+    const nextDate = typeof state?.currentDate === 'string' && state.currentDate ? state.currentDate : today
+    const nextHistoryWeeks = [4, 8, 12, 26].includes(state?.historyWeeks) ? state.historyWeeks : 4
+    const nextProfileOpen = state?.profileOpen === true
+    const nextDrawerOpen = state?.drawerOpen === true
+    const nextDrawerTab = state?.drawerTab === 'activity' ? 'activity' : 'food'
+
+    return {
+      view: nextView,
+      currentDate: nextDate > today ? today : nextDate,
+      historyWeeks: nextHistoryWeeks,
+      profileOpen: nextProfileOpen,
+      drawerOpen: nextDrawerOpen,
+      drawerTab: nextDrawerTab,
+      drawerDate: nextDrawerOpen ? (state?.drawerDate || nextDate) : null,
+      drawerMeal: nextDrawerOpen ? (state?.drawerMeal ?? null) : null,
+      drawerField: nextDrawerOpen ? (state?.drawerField ?? null) : null,
+    }
+  }
+
+  function navStateEqual(a, b) {
+    return a?.view === b?.view
+      && a?.currentDate === b?.currentDate
+      && a?.historyWeeks === b?.historyWeeks
+      && a?.profileOpen === b?.profileOpen
+      && a?.drawerOpen === b?.drawerOpen
+      && a?.drawerTab === b?.drawerTab
+      && a?.drawerDate === b?.drawerDate
+      && a?.drawerMeal === b?.drawerMeal
+      && a?.drawerField === b?.drawerField
+  }
+
+  function shouldPushHistory(prev, next) {
+    if (!prev) return false
+    if (!prev.profileOpen && next.profileOpen) return true
+    if (!prev.drawerOpen && next.drawerOpen) return true
+    if (prev.view !== next.view) return true
+    if (prev.currentDate !== next.currentDate && prev.view === 'day' && next.view === 'day') return true
+    return false
+  }
+
+  function currentHistoryNavState() {
+    return normalizeNavState(window.history.state?.[HISTORY_STATE_KEY])
+  }
+
+  function applyNavState(state) {
+    const next = normalizeNavState(state)
+    view = next.view
+    currentDate = next.currentDate
+    historyWeeks = next.historyWeeks
+    profileOpen = next.profileOpen
+    drawerOpen = next.drawerOpen
+    drawerTab = next.drawerTab
+    drawerDate = next.drawerDate
+    drawerMeal = next.drawerMeal
+    drawerField = next.drawerField
+  }
+
+  function pushOrReplaceHistory(state, mode = 'replace') {
+    const next = normalizeNavState(state)
+    const payload = { [HISTORY_STATE_KEY]: next }
+    if (mode === 'push') {
+      window.history.pushState(payload, '')
+    } else {
+      window.history.replaceState(payload, '')
+    }
   }
 
   async function loadDay(date) {
@@ -232,9 +320,32 @@
   function openActivityDrawer(field = null) {
     drawerField = field
     drawerTab = 'activity'
-    drawerDate = null
+    drawerDate = currentDate
     drawerMeal = null
     drawerOpen = true
+  }
+
+  function closeDrawer() {
+    if (drawerTab === 'activity') activityRefreshKey++
+    const state = currentHistoryNavState()
+    if (historyReady && state?.drawerOpen) {
+      window.history.back()
+      return
+    }
+    drawerOpen = false
+    drawerDate = null
+    drawerMeal = null
+    drawerTab = 'food'
+    drawerField = null
+  }
+
+  function closeProfile() {
+    const state = currentHistoryNavState()
+    if (historyReady && state?.profileOpen) {
+      window.history.back()
+      return
+    }
+    profileOpen = false
   }
 
   function onEntriesAdded(newEntries) {
@@ -389,6 +500,37 @@
     } else {
       loadHistory(hw)
     }
+  })
+
+  onMount(() => {
+    const initial = normalizeNavState(snapshotNavState())
+    pushOrReplaceHistory(initial)
+    historyReady = true
+
+    function handlePopState(event) {
+      const next = event.state?.[HISTORY_STATE_KEY]
+      if (!next) return
+      skipHistorySync = true
+      applyNavState(next)
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  })
+
+  $effect(() => {
+    if (!historyReady) return
+
+    const next = normalizeNavState(snapshotNavState())
+    const current = currentHistoryNavState()
+
+    if (skipHistorySync) {
+      skipHistorySync = false
+      return
+    }
+
+    if (navStateEqual(next, current)) return
+    pushOrReplaceHistory(next, shouldPushHistory(current, next) ? 'push' : 'replace')
   })
 </script>
 
@@ -576,7 +718,7 @@
           {#each group as entry (entry.id)}
             <EntryRow {entry} onUpdate={handleUpdate} onDelete={handleDelete} />
           {/each}
-          <button class="add-row" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerTab = 'food'; drawerOpen = true }}>+ add item</button>
+          <button class="add-row" onclick={() => { drawerMeal = meal; drawerDate = currentDate; drawerField = null; drawerTab = 'food'; drawerOpen = true }}>+ add item</button>
         {/if}
       </section>
     {/each}
@@ -677,12 +819,12 @@
   {/if}
 </div>
 
-<button class="fab" onclick={() => { drawerDate = currentDate; drawerMeal = null; drawerTab = 'food'; drawerOpen = true }} aria-label="Add food">
+<button class="fab" onclick={() => { drawerDate = currentDate; drawerMeal = null; drawerField = null; drawerTab = 'food'; drawerOpen = true }} aria-label="Add food">
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
 </button>
 <ChatDrawer
   open={drawerOpen}
-  onClose={() => { if (drawerTab === 'activity') activityRefreshKey++; drawerOpen = false; drawerDate = null; drawerMeal = null; drawerTab = 'food'; drawerField = null }}
+  onClose={closeDrawer}
   {onEntriesAdded}
   date={drawerDate}
   meal={drawerMeal}
@@ -690,7 +832,7 @@
   initialField={drawerField}
 />
 {#if profileOpen}
-  <ProfilePanel onClose={() => profileOpen = false} />
+  <ProfilePanel onClose={closeProfile} />
 {/if}
 
 <style>
