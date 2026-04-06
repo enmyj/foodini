@@ -760,6 +760,10 @@
     flex: 1;
   }
 
+  .refine-row button {
+    min-height: 2.75rem;
+  }
+
   .save-btn {
     padding: 0.5rem 1rem;
     background: #16a34a;
@@ -856,12 +860,13 @@
 
   .composer-input {
     flex: 1;
+    min-height: 2.75rem;
   }
 
   .attach-btn {
     flex-shrink: 0;
-    width: 40px;
-    height: 40px;
+    width: 2.75rem;
+    height: 2.75rem;
     border-radius: 50%;
     background: none;
     border: 1px solid #e8e8e6;
@@ -888,6 +893,7 @@
     font-size: 0.9rem;
     font-family: inherit;
     white-space: nowrap;
+    min-height: 2.75rem;
   }
 
   button:disabled { opacity: 0.35; cursor: default; }

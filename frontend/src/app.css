@@ -17,14 +17,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-:global(.text-entry) {
+.text-entry {
   width: 100%;
   border: 1px solid var(--text-entry-border);
   border-radius: 12px;
-  padding: 0.7rem 0.85rem;
-  font: inherit;
-  font-size: 0.98rem;
+  min-height: 2.85rem;
+  padding: 0.78rem 0.9rem;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 400;
   line-height: 1.45;
+  letter-spacing: 0;
   color: var(--text-entry-text);
   background: var(--text-entry-bg);
   box-shadow: var(--text-entry-shadow);
@@ -32,29 +35,32 @@ body {
   appearance: none;
 }
 
-:global(.text-entry::placeholder) {
+.text-entry::placeholder {
   color: var(--text-entry-placeholder);
 }
 
-:global(.text-entry:focus) {
+.text-entry:focus {
   outline: none;
   border-color: var(--text-entry-border-focus);
   box-shadow: 0 0 0 3px rgba(45, 45, 45, 0.08);
 }
 
-:global(.text-entry:disabled) {
+.text-entry:disabled {
   background: var(--text-entry-bg-disabled);
   color: #7f7f79;
   cursor: not-allowed;
 }
 
-:global(textarea.text-entry) {
+textarea.text-entry {
   resize: none;
-  min-height: calc(1.45em + 1.4rem);
+  min-height: 3.4rem;
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
 }
 
-:global(.text-entry.compact) {
+.text-entry.compact {
   border-radius: 10px;
-  padding: 0.55rem 0.75rem;
-  font-size: 0.9rem;
+  min-height: 2.7rem;
+  padding: 0.68rem 0.8rem;
+  font-size: 0.95rem;
 }
