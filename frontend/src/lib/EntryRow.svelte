@@ -1,5 +1,6 @@
 <script>
   import { patchEntry, deleteEntry } from './api.js'
+  import { autosize } from './autosize.js'
   import { showError } from './toast.js'
 
   let { entry, onUpdate, onDelete } = $props()
@@ -100,7 +101,7 @@
 
     <label class="field">
       <span class="label">Description</span>
-      <textarea bind:value={editDesc} rows="2" disabled={saving}></textarea>
+      <textarea class="text-entry" use:autosize bind:value={editDesc} rows="2" disabled={saving}></textarea>
     </label>
 
     <label class="field">
@@ -265,7 +266,7 @@
     color: #888;
   }
 
-  textarea, input, select {
+  input, select {
     border: 1px solid #e8e8e6;
     border-radius: 6px;
     padding: 0.5rem 0.6rem;
@@ -278,13 +279,8 @@
     box-sizing: border-box;
   }
 
-  textarea:focus, input:focus, select:focus {
+  input:focus, select:focus {
     border-color: #2d2d2d;
-  }
-
-  textarea {
-    resize: none;
-    line-height: 1.4;
   }
 
   select {

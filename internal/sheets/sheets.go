@@ -22,7 +22,7 @@ const (
 	profileSheet  = "Profile"
 	insightsSheet = "Insights"
 
-	CurrentSchemaVersion = 6
+	CurrentSchemaVersion = 7
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -75,12 +75,12 @@ func TimeString(t time.Time) string { return t.Format("15:04") }
 // Schema: date | activity | feeling_score | feeling_notes | poop | poop_notes | hydration
 // Backward compat: old 2-column rows (date | notes) map notes → activity.
 type DayLog struct {
-	Date         string `json:"date"`
-	Activity     string `json:"activity"`
-	FeelingScore int    `json:"feeling_score"` // 0 = not set, 1–10
-	FeelingNotes string `json:"feeling_notes"`
-	Poop         bool   `json:"poop"`
-	PoopNotes    string `json:"poop_notes"`
+	Date         string  `json:"date"`
+	Activity     string  `json:"activity"`
+	FeelingScore int     `json:"feeling_score"` // 0 = not set, 1–10
+	FeelingNotes string  `json:"feeling_notes"`
+	Poop         bool    `json:"poop"`
+	PoopNotes    string  `json:"poop_notes"`
 	Hydration    float64 `json:"hydration"` // litres, 0 = not set
 }
 
@@ -127,18 +127,19 @@ func DayLogFromRow(row []interface{}) DayLog {
 }
 
 // UserProfile stores user context for improving Gemini macro estimates.
-// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions
+// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | age
 type UserProfile struct {
-	Gender               string `json:"gender"`
-	Height               string `json:"height"`
-	Weight               string `json:"weight"`
-	Notes                string `json:"notes"`
-	Goals                string `json:"goals"`
-	DietaryRestrictions  string `json:"dietary_restrictions"`
+	Gender              string `json:"gender"`
+	Height              string `json:"height"`
+	Weight              string `json:"weight"`
+	Notes               string `json:"notes"`
+	Goals               string `json:"goals"`
+	DietaryRestrictions string `json:"dietary_restrictions"`
+	Age                 string `json:"age"`
 }
 
 func (p UserProfile) ToRow() []interface{} {
-	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions}
+	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions, p.Age}
 }
 
 func UserProfileFromRow(row []interface{}) UserProfile {
@@ -148,13 +149,21 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 		}
 		return ""
 	}
-	return UserProfile{Gender: str(0), Height: str(1), Weight: str(2), Notes: str(3), Goals: str(4), DietaryRestrictions: str(5)}
+	return UserProfile{
+		Gender:              str(0),
+		Height:              str(1),
+		Weight:              str(2),
+		Notes:               str(3),
+		Goals:               str(4),
+		DietaryRestrictions: str(5),
+		Age:                 str(6),
+	}
 }
 
 // InsightRecord stores a generated AI insight in the Insights sheet.
 // Schema: type | start_date | end_date | generated_at | insight
 type InsightRecord struct {
-	Type        string `json:"type"`         // "day" or "week"
+	Type        string `json:"type"` // "day" or "week"
 	StartDate   string `json:"start_date"`
 	EndDate     string `json:"end_date"`
 	GeneratedAt string `json:"generated_at"` // UTC RFC3339
@@ -205,7 +214,7 @@ func (s *Service) GetInsight(ctx context.Context, insightType, startDate, endDat
 // GetProfile reads the user profile from the Profile sheet.
 // Returns an empty UserProfile if no data has been saved yet.
 func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:F2").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:G2").Context(ctx).Do()
 	if err != nil {
 		return UserProfile{}, fmt.Errorf("get profile: %w", err)
 	}
@@ -219,7 +228,7 @@ func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
 func (s *Service) SetProfile(ctx context.Context, p UserProfile) error {
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{p.ToRow()}}
 	_, err := s.svc.Spreadsheets.Values.Update(
-		s.spreadsheetID, profileSheet+"!A2:F2", vr,
+		s.spreadsheetID, profileSheet+"!A2:G2", vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err
 }
@@ -303,10 +312,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 
 	// Profile sheet: headers row
 	profHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions"}},
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "age"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, profileSheet+"!A1:F1", profHeaders,
+		created.SpreadsheetId, profileSheet+"!A1:G1", profHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("profile headers: %w", err)
@@ -454,6 +463,31 @@ func MigrateV5toV6(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"6"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV6toV7 upgrades an existing spreadsheet from schema v6 to v7.
+// It adds the age column to the Profile sheet header.
+func MigrateV6toV7(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	profHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "age"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, profileSheet+"!A1:G1", profHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v6→v7 profile header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"7"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()

@@ -170,16 +170,16 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 6 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 6", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 7 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 7", sheets.CurrentSchemaVersion)
 	}
 }
 
 func TestUserProfileRoundTrip(t *testing.T) {
-	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian", Goals: "lose weight", DietaryRestrictions: "no gluten"}
+	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian", Goals: "lose weight", DietaryRestrictions: "no gluten", Age: "34"}
 	row := p.ToRow()
-	if len(row) != 6 {
-		t.Fatalf("want 6 cols, got %d", len(row))
+	if len(row) != 7 {
+		t.Fatalf("want 7 cols, got %d", len(row))
 	}
 	if row[0] != "male" {
 		t.Errorf("gender: got %v", row[0])
@@ -193,6 +193,9 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	if row[5] != "no gluten" {
 		t.Errorf("dietary_restrictions: got %v", row[5])
 	}
+	if row[6] != "34" {
+		t.Errorf("age: got %v", row[6])
+	}
 	got := sheets.UserProfileFromRow(row)
 	if got.Height != "5'10\"" {
 		t.Errorf("height round-trip: got %q", got.Height)
@@ -202,6 +205,20 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	}
 	if got.DietaryRestrictions != "no gluten" {
 		t.Errorf("dietary_restrictions round-trip: got %q", got.DietaryRestrictions)
+	}
+	if got.Age != "34" {
+		t.Errorf("age round-trip: got %q", got.Age)
+	}
+}
+
+func TestUserProfileFromRow_BackwardCompatNoAge(t *testing.T) {
+	row := []interface{}{"female", "165cm", "60kg", "notes", "maintain", "vegetarian"}
+	got := sheets.UserProfileFromRow(row)
+	if got.Age != "" {
+		t.Errorf("age: got %q, want empty", got.Age)
+	}
+	if got.DietaryRestrictions != "vegetarian" {
+		t.Errorf("dietary_restrictions: got %q", got.DietaryRestrictions)
 	}
 }
 

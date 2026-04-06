@@ -1,5 +1,7 @@
 <script>
+  import { untrack } from 'svelte'
   import { chat, confirmChat, getActivity, putActivity } from './api.js'
+  import { autosize } from './autosize.js'
   import { showError } from './toast.js'
 
   let { open, onClose, onEntriesAdded, date = null, meal = null, initialTab = 'food', initialField = null } = $props()
@@ -99,7 +101,7 @@
       tab = initialTab
       selectedDate = date || todayStr()
       selectedMeal = meal
-      clearPendingImages()
+      untrack(() => clearPendingImages())
       input = ''
       sending = false
       currentEntries = null
@@ -118,7 +120,7 @@
       tab = 'food'
       selectedDate = ''
       selectedMeal = null
-      clearPendingImages()
+      untrack(() => clearPendingImages())
       input = ''
       currentEntries = null
       clarifyingQuestion = null
@@ -377,13 +379,16 @@
           <p class="refine-note">{refineNote}</p>
         {/if}
         <div class="refine-row">
-          <input
+          <textarea
+            class="text-entry compact refine-input"
             bind:this={refineEl}
+            use:autosize
             bind:value={refineInput}
             placeholder="Adjust… e.g. 'double the rice'"
             onkeydown={onRefineKeyDown}
+            rows="1"
             disabled={sending}
-          />
+          ></textarea>
           {#if refineInput.trim()}
             <button onclick={refine} disabled={sending}>Adjust</button>
           {:else}
@@ -408,7 +413,7 @@
           <button class="attach-btn" onclick={() => fileInputEl.click()} disabled={sending} aria-label="Attach photo">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
           </button>
-          <textarea bind:this={inputEl} bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="1" disabled={sending}></textarea>
+          <textarea class="text-entry composer-input" bind:this={inputEl} use:autosize bind:value={input} onkeydown={onKeyDown} placeholder="What did you eat?" rows="1" disabled={sending}></textarea>
           <button onclick={send} disabled={sending || (!input.trim() && !pendingImages.length)}>Send</button>
         </div>
       {/if}
@@ -418,11 +423,11 @@
       <div class="activity-form">
         <div class="activity-field">
           <label class="field-label" for="act-activity">Activity</label>
-          <textarea id="act-activity" bind:this={activityTextareaEl} bind:value={activityText} placeholder="Exercise, stress, unusual events…" rows="2"></textarea>
+          <textarea class="text-entry" id="act-activity" bind:this={activityTextareaEl} use:autosize bind:value={activityText} placeholder="Exercise, stress, unusual events…" rows="2"></textarea>
         </div>
         <div class="activity-field">
           <label class="field-label" for="act-feeling">Feeling</label>
-          <textarea id="act-feeling" bind:this={feelingNotesEl} bind:value={feelingNotes} placeholder="Energy, digestion, mood, sleep…" rows="2"></textarea>
+          <textarea class="text-entry" id="act-feeling" bind:this={feelingNotesEl} use:autosize bind:value={feelingNotes} placeholder="Energy, digestion, mood, sleep…" rows="2"></textarea>
         </div>
         <div class="activity-field">
           <div class="field-header">
@@ -432,7 +437,7 @@
               <button class="toggle-btn" class:selected={poop === false} onclick={() => poop = false}>No</button>
             </div>
           </div>
-          <textarea bind:this={poopNotesEl} bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
+          <textarea class="text-entry" bind:this={poopNotesEl} use:autosize bind:value={poopNotes} placeholder="Any details…" rows="1"></textarea>
         </div>
         <div class="activity-field">
           <div class="field-header">
@@ -748,23 +753,11 @@
   .refine-row {
     display: flex;
     gap: 0.5rem;
-    align-items: center;
+    align-items: flex-end;
   }
 
-  .refine-row input {
+  .refine-input {
     flex: 1;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.88rem;
-    font-family: inherit;
-    background: #fafaf9;
-    color: #1c1c1c;
-  }
-
-  .refine-row input:focus {
-    outline: none;
-    border-color: #2d2d2d;
   }
 
   .save-btn {
@@ -861,6 +854,10 @@
   /* --- Input row --- */
   .input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
 
+  .composer-input {
+    flex: 1;
+  }
+
   .attach-btn {
     flex-shrink: 0;
     width: 40px;
@@ -880,20 +877,6 @@
     .attach-btn:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
   }
   .attach-btn:disabled { opacity: 0.35; cursor: default; }
-
-  textarea {
-    flex: 1;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
-    padding: 0.5rem 0.75rem;
-    font-size: 1rem;
-    resize: none;
-    font-family: inherit;
-    background: #fafaf9;
-    color: #1c1c1c;
-  }
-
-  textarea:focus { outline: none; border-color: #2d2d2d; }
 
   button {
     padding: 0.5rem 1rem;

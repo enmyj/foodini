@@ -204,6 +204,9 @@ func LocalNow(r *http.Request) time.Time {
 // Returns "" if all profile fields are empty.
 func formatProfileContext(p sheets.UserProfile) string {
 	var parts []string
+	if p.Age != "" {
+		parts = append(parts, "age "+p.Age)
+	}
 	if p.Gender != "" {
 		parts = append(parts, p.Gender)
 	}
@@ -297,6 +300,14 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 		if version == 5 {
 			// Migrate v5 → v6: add Insights sheet for persisting AI insights
 			if err := sheets.MigrateV5toV6(r.Context(), ts, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+			version = 6
+		}
+		if version == 6 {
+			// Migrate v6 → v7: add age column to Profile sheet header
+			if err := sheets.MigrateV6toV7(r.Context(), ts, id); err != nil {
 				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}
@@ -644,7 +655,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, p)
 }
 
-// PUT /api/profile — body: {gender, height, weight, notes}
+// PUT /api/profile — body: {gender, age, height, weight, notes, goals, dietary_restrictions}
 func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
 	session := auth.SessionFromContext(r.Context())
 	var req sheets.UserProfile

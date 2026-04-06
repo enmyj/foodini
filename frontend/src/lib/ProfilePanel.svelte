@@ -1,11 +1,13 @@
 <script>
   import { onMount } from 'svelte'
   import { getProfile, putProfile } from './api.js'
+  import { autosize } from './autosize.js'
   import { showError } from './toast.js'
 
   let { onClose } = $props()
 
   let gender = $state('')
+  let age = $state('')
   let height = $state('')
   let weight = $state('')
   let notes = $state('')
@@ -18,6 +20,7 @@
     try {
       const p = await getProfile()
       gender = p.gender ?? ''
+      age = p.age ?? ''
       height = p.height ?? ''
       weight = p.weight ?? ''
       notes = p.notes ?? ''
@@ -32,7 +35,7 @@
   async function save() {
     saving = true
     try {
-      await putProfile({ gender, height, weight, notes, goals, dietary_restrictions: dietaryRestrictions })
+      await putProfile({ gender, age, height, weight, notes, goals, dietary_restrictions: dietaryRestrictions })
       onClose()
     } catch (err) {
       showError(err, 'Failed to save profile.')
@@ -62,19 +65,25 @@
     <div class="fields">
       <label>
         <span>Gender</span>
-        <input type="text" bind:value={gender} placeholder="e.g. male, female, non-binary" disabled={saving} />
+        <input class="text-entry" type="text" bind:value={gender} placeholder="e.g. male, female, non-binary" disabled={saving} />
+      </label>
+      <label>
+        <span>Age</span>
+        <input class="text-entry" type="text" inputmode="numeric" bind:value={age} placeholder="e.g. 34" disabled={saving} />
       </label>
       <label>
         <span>Height</span>
-        <input type="text" bind:value={height} placeholder="e.g. 5'10&quot; or 178cm" disabled={saving} />
+        <input class="text-entry" type="text" bind:value={height} placeholder="e.g. 5'10&quot; or 178cm" disabled={saving} />
       </label>
       <label>
         <span>Weight</span>
-        <input type="text" bind:value={weight} placeholder="e.g. 170lbs or 77kg" disabled={saving} />
+        <input class="text-entry" type="text" bind:value={weight} placeholder="e.g. 170lbs or 77kg" disabled={saving} />
       </label>
       <label>
         <span>Notes</span>
         <textarea
+          class="text-entry"
+          use:autosize
           bind:value={notes}
           placeholder="Dietary restrictions, allergies…"
           rows="3"
@@ -84,6 +93,8 @@
       <label>
         <span>Goals</span>
         <textarea
+          class="text-entry"
+          use:autosize
           bind:value={goals}
           placeholder="e.g. lose weight, build muscle, eat more protein…"
           rows="3"
@@ -93,6 +104,8 @@
       <label>
         <span>Dietary Restrictions</span>
         <textarea
+          class="text-entry"
+          use:autosize
           bind:value={dietaryRestrictions}
           placeholder="e.g. vegetarian, no gluten, lactose intolerant…"
           rows="2"
@@ -180,18 +193,6 @@
     letter-spacing: 0.08em;
     color: #888;
     font-weight: 600;
-  }
-
-  input, textarea {
-    border: none;
-    border-bottom: 2px solid #2d2d2d;
-    padding: 0.3rem 0;
-    font-size: 1rem;
-    font-family: inherit;
-    background: transparent;
-    color: #1c1c1c;
-    outline: none;
-    resize: vertical;
   }
 
   .status {

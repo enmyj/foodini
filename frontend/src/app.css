@@ -1,8 +1,60 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --text-entry-border: #deded8;
+  --text-entry-border-focus: #2d2d2d;
+  --text-entry-bg: #fffdf8;
+  --text-entry-bg-disabled: #f2f1ec;
+  --text-entry-text: #1c1c1c;
+  --text-entry-placeholder: #8f8f88;
+  --text-entry-shadow: 0 1px 2px rgba(28, 28, 28, 0.04);
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #fafaf9;
   color: #1c1c1c;
   -webkit-font-smoothing: antialiased;
+}
+
+:global(.text-entry) {
+  width: 100%;
+  border: 1px solid var(--text-entry-border);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--text-entry-text);
+  background: var(--text-entry-bg);
+  box-shadow: var(--text-entry-shadow);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  appearance: none;
+}
+
+:global(.text-entry::placeholder) {
+  color: var(--text-entry-placeholder);
+}
+
+:global(.text-entry:focus) {
+  outline: none;
+  border-color: var(--text-entry-border-focus);
+  box-shadow: 0 0 0 3px rgba(45, 45, 45, 0.08);
+}
+
+:global(.text-entry:disabled) {
+  background: var(--text-entry-bg-disabled);
+  color: #7f7f79;
+  cursor: not-allowed;
+}
+
+:global(textarea.text-entry) {
+  resize: none;
+  min-height: calc(1.45em + 1.4rem);
+}
+
+:global(.text-entry.compact) {
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.9rem;
 }

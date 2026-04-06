@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"foodtracker/internal/auth"
+	"foodtracker/internal/sheets"
 
 	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
@@ -125,6 +126,22 @@ func TestWriteAPIErrOtherGoogle403StaysInternal(t *testing.T) {
 	}
 	if body["error"] == "insufficient_scopes" {
 		t.Fatalf("error body: unexpectedly rewrote non-scope 403 to insufficient_scopes")
+	}
+}
+
+func TestFormatProfileContextIncludesAge(t *testing.T) {
+	got := formatProfileContext(sheets.UserProfile{
+		Age:                 "34",
+		Gender:              "female",
+		Height:              "165cm",
+		Weight:              "60kg",
+		Goals:               "build muscle",
+		DietaryRestrictions: "vegetarian",
+	})
+
+	want := "User profile: age 34, female, 165cm, 60kg. Goals: build muscle. Dietary restrictions: vegetarian"
+	if got != want {
+		t.Fatalf("formatProfileContext: got %q, want %q", got, want)
 	}
 }
 
