@@ -545,6 +545,7 @@
               }
             }}
           >
+            <span class="meal-arrow" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
             {meal}
             {#if group.length > 0}<span class="meal-summary">· {group.reduce((s, e) => s + e.calories, 0)} cal</span>{/if}
           </button>
@@ -851,6 +852,19 @@
     display: flex;
     gap: 0.35rem;
     margin-left: auto;
+  }
+
+  @media (max-width: 480px) {
+    .totals-btns {
+      margin-left: 0;
+    }
+  }
+
+  .meal-arrow {
+    display: inline-block;
+    width: 0.7rem;
+    color: #bbb;
+    font-size: 0.7rem;
   }
 
   .week-btns {

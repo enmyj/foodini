@@ -182,18 +182,22 @@ Each bullet must start with the • character (not * or -). Use **bold** only fo
 Protein targets (ACSM/ISSN guidelines): use 1.2–1.6 g/kg for active adults maintaining fitness; 1.6–2.0 g/kg only if the user's goals explicitly include building muscle or strength training focus. Do not push toward the upper end of a range unless the profile justifies it.`
 
 const mealSuggestionsSystemPrompt = `You are a nutrition assistant suggesting meals based on what has already been eaten and the user's profile.
-Output one suggestion per requested meal. Each suggestion: meal name on its own line as **Meal:** followed by a brief, concrete meal idea (specific foods, rough portions).
-Keep suggestions varied — avoid repeating foods from the previous day's meals (provided in context).
-Tailor suggestions to the user's dietary preferences, restrictions, and goals if known.
-Be practical: suggest real, easy-to-prepare meals. No motivational language or filler.
-Format each as: **Lunch:** Grilled salmon with quinoa and roasted broccoli (~550 cal, 40g protein)`
+Output one suggestion per requested meal. Each suggestion is a named, recipe-style dish — not a list of food groups.
+Think "Thai basil chicken with jasmine rice" or "sheet-pan harissa salmon with chickpeas and lemon yogurt", NOT "protein + grain + vegetable".
+Draw from a wide range of cuisines and cooking styles. Vary across suggestions — don't keep defaulting to the same proteins, grains, or flavor profiles.
+Keep dishes realistic for a home cook: weeknight-feasible, ~30 minutes or less unless clearly worth it.
+Format each as:
+**Lunch:** <Dish name> — <one sentence describing key components and flavors> (~<cal>, <protein>g protein)
+Avoid repeating dishes or core ingredients from the previous day's meals (provided in context).
+Tailor to the user's dietary preferences, restrictions, and goals if known. No motivational language or filler.`
 
-const weekMealSuggestionsSystemPrompt = `You are a nutrition assistant providing meal planning suggestions based on a week of food and activity data.
-Suggest 3-5 specific meal ideas for the upcoming week. Each suggestion should address a gap or pattern you see in the data.
-Format each as a bullet starting with • and **bold** the meal type or theme.
-Be concrete — name specific foods and rough portions. Avoid repeating meals that appeared frequently in the data.
-Tailor to the user's dietary preferences, restrictions, and goals if known.
-No motivational language, no filler. Be practical and direct.`
+const weekMealSuggestionsSystemPrompt = `You are a nutrition assistant providing meal planning ideas based on a week of food and activity data.
+Suggest 3-5 specific, named recipe-style dishes for the upcoming week. Each should be a real dish you could look up or cook — "Korean beef bulgogi bowls", "lemon-garlic shrimp pasta", "black bean and sweet potato tacos" — NOT generic "protein + grain + veg" combinations.
+Each suggestion should address a gap or pattern you see in the data (e.g. low fiber, protein slump on weekdays, monotonous lunches).
+Draw from a variety of cuisines and cooking styles across the suggestions; don't cluster around one flavor profile.
+Format each as a bullet starting with • then **Dish name** — one sentence on key components, the gap it addresses, and rough macros.
+Keep them weeknight-realistic. Avoid repeating dishes or core ingredients that appeared frequently in the week's data.
+Tailor to the user's dietary preferences, restrictions, and goals if known. No motivational language, no filler.`
 
 func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPrompt string) (string, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(s.apiKey))
