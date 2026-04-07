@@ -1053,8 +1053,8 @@
     .thumb {
         position: relative;
         flex-shrink: 0;
-        width: 56px;
-        height: 56px;
+        width: 70px;
+        height: 70px;
         border-radius: var(--r-sm);
         overflow: hidden;
         border: 1px solid var(--rule);
@@ -1069,15 +1069,15 @@
 
     .thumb-remove {
         position: absolute;
-        top: -1px;
-        right: -1px;
-        width: 20px;
-        height: 20px;
+        top: 4px;
+        right: 4px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
-        background: var(--ink-2);
+        background: rgba(0, 0, 0, 0.6);
         color: var(--paper);
         border: none;
-        font-size: 0.6rem;
+        font-size: 0.78rem;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -1088,8 +1088,8 @@
 
     .thumb-add {
         flex-shrink: 0;
-        width: 56px;
-        height: 56px;
+        width: 70px;
+        height: 70px;
         border-radius: var(--r-sm);
         border: 1px dashed var(--rule-4);
         background: none;

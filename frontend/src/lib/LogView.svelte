@@ -785,15 +785,22 @@
     });
 
     $effect(() => {
-        const id = setInterval(() => {
-            if (document.hidden) return;
+        const refresh = () => {
             if (view === "day") {
                 loadDay(currentDate);
             } else {
                 loadHistory(historyWeeks);
             }
-        }, 60 * 1000);
-        return () => clearInterval(id);
+        };
+        const onVisible = () => {
+            if (!document.hidden) refresh();
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        window.addEventListener("focus", refresh);
+        return () => {
+            document.removeEventListener("visibilitychange", onVisible);
+            window.removeEventListener("focus", refresh);
+        };
     });
 </script>
 
@@ -1850,36 +1857,41 @@
     }
 
     .insights-panel {
-        padding: 0.75rem 0;
-        border-top: 1px solid var(--rule);
-        background: transparent;
+        position: relative;
+        padding: 0.9rem 2.2rem 0.95rem 0.95rem;
+        background: var(--paper-2);
+        border-radius: var(--r-sm);
+        margin-top: 0.5rem;
     }
 
     .day-insights-panel {
-        position: relative;
-        border-top: 1px solid var(--rule);
-        border-bottom: 1px solid var(--rule);
-        padding: 0.75rem 0;
         margin-bottom: 1.25rem;
         min-width: 0;
     }
 
     .insight-close {
         position: absolute;
-        top: 0.5rem;
-        right: 0;
+        top: 0.55rem;
+        right: 0.55rem;
+        width: 1.5rem;
+        height: 1.5rem;
         background: none;
         border: none;
+        border-radius: 50%;
         font-size: 0.75rem;
         color: var(--mute-3);
         cursor: pointer;
-        padding: 0.15rem 0.3rem;
+        padding: 0;
         line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
     @media (hover: hover) {
         .insight-close:hover {
             color: var(--ink-mute);
+            background: var(--paper-4);
         }
     }
 
@@ -1935,9 +1947,7 @@
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        margin-top: 0.6rem;
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--rule-2);
+        margin-top: 0.7rem;
     }
 
     .insight-ts {
@@ -1985,19 +1995,11 @@
     }
 
     .insight-detail {
-        margin-top: 0.25rem;
-        padding-top: 0.25rem;
-        border-top: 1px dashed var(--rule);
+        margin-top: 0.4rem;
     }
 
     .suggestions-panel {
-        border-top-color: var(--sugg-rule-2);
-        border-bottom-color: var(--sugg-rule-2);
-        background: transparent;
-    }
-
-    .suggestions-panel .insight-footer {
-        border-top-color: var(--sugg-rule-2);
+        background: var(--sugg-paper);
     }
 
     .suggestions-label {
