@@ -6,7 +6,7 @@
 
   let { open, onClose, onEntriesAdded, date = null, meal = null, initialTab = 'food', initialField = null } = $props()
 
-  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner']
+  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner', 'supplements']
 
   function todayStr() {
     const d = new Date()
@@ -286,8 +286,8 @@
     <!-- Tab switcher + date -->
     <div class="drawer-top">
       <div class="tabs">
-        <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}><span class="tab-icon" aria-hidden="true">🌯</span>Food</button>
-        <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}><span class="tab-icon" aria-hidden="true">🌯</span>Activity</button>
+        <button class="tab-btn" class:active={tab === 'food'} onclick={() => tab = 'food'}>Food</button>
+        <button class="tab-btn" class:active={tab === 'activity'} onclick={() => tab = 'activity'}>Activity</button>
       </div>
       <input class="date-input" type="date" bind:value={selectedDate} max={todayStr()} />
     </div>
@@ -431,7 +431,7 @@
         </div>
         <div class="activity-field">
           <div class="field-header">
-            <span class="field-label">💩</span>
+            <span class="field-label">Stool</span>
             <div class="toggle-group">
               <button class="toggle-btn" class:selected={poop === true} onclick={() => poop = true}>Yes</button>
               <button class="toggle-btn" class:selected={poop === false} onclick={() => poop = false}>No</button>
@@ -441,7 +441,7 @@
         </div>
         <div class="activity-field">
           <div class="field-header">
-            <label class="field-label" for="act-hydration">💧 Water</label>
+            <label class="field-label" for="act-hydration">Water</label>
             <div class="hydration-inline">
               <input id="act-hydration" bind:this={hydrationEl} class="hydration-input" type="number" min="0" max="10" step="0.1" bind:value={hydration} placeholder="0.0" />
               <span class="hydration-unit">L</span>
@@ -471,8 +471,8 @@
     right: 0;
     max-width: 640px;
     margin: 0 auto;
-    background: #fafaf9;
-    border-radius: 16px 16px 0 0;
+    background: var(--paper);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
     box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
     z-index: 11;
     display: flex;
@@ -485,9 +485,9 @@
 
   .handle {
     width: 36px;
-    height: 3px;
-    background: #e8e8e6;
-    border-radius: 2px;
+    height: 5px;
+    background: var(--rule);
+    border-radius: 3px;
     margin: 0 auto 0.75rem;
   }
 
@@ -507,46 +507,36 @@
   .tab-btn {
     background: none;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--r-pill);
     padding: 0.4rem 0.9rem;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-weight: 500;
-    color: #888;
+    color: var(--mute);
     cursor: pointer;
     font-family: inherit;
     min-height: 2.75rem;
   }
 
   .tab-btn.active {
-    background: #efefed;
-    color: #1c1c1c;
-  }
-
-  .tab-icon {
-    display: inline-block;
-    margin-right: 0.2em;
-    opacity: 0;
-  }
-
-  .tab-btn.active .tab-icon {
-    opacity: 1;
+    background: var(--paper-4);
+    color: var(--ink);
   }
 
   /* --- Date input --- */
   .date-input {
-    border: 1px solid #d0d0ce;
-    border-radius: 8px;
+    border: 1px solid var(--rule-4);
+    border-radius: var(--r-sm);
     padding: 0.3rem 0.6rem;
     font-size: 0.8rem;
     font-family: inherit;
-    color: #555;
+    color: var(--ink-mute);
     font-weight: 500;
-    background: #fafaf9;
+    background: var(--paper);
   }
 
   .date-input:focus {
     outline: none;
-    border-color: #2d2d2d;
+    border-color: var(--ink-2);
   }
 
   @keyframes shake {
@@ -574,12 +564,12 @@
 
   .meal-pill {
     padding: 0.3rem 0.75rem;
-    border: 1px solid #d0d0ce;
-    border-radius: 999px;
+    border: 1px solid var(--rule-4);
+    border-radius: var(--r-pill);
     background: none;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-mute);
     cursor: pointer;
     white-space: nowrap;
     touch-action: manipulation;
@@ -588,15 +578,15 @@
 
   @media (hover: hover) {
     .meal-pill:hover:not(:disabled) {
-      border-color: #2d2d2d;
-      color: #2d2d2d;
+      border-color: var(--ink-2);
+      color: var(--ink-2);
     }
   }
 
   .meal-pill.selected {
-    background: #2d2d2d;
-    border-color: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    border-color: var(--ink-2);
+    color: var(--paper);
   }
 
   .meta-locked {
@@ -604,10 +594,10 @@
   }
 
   .meta-chip {
-    font-size: 0.72rem;
+    font-size: var(--t-micro);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #aaa;
+    color: var(--mute-2);
     font-weight: 600;
   }
 
@@ -625,15 +615,15 @@
     100% { background-position: 200% 0; }
   }
 
+  /* Hairline ledger: no surrounding box */
   .skeleton-card {
-    border: 1px solid #e8e8e6;
-    border-radius: 12px;
-    overflow: hidden;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
   }
 
   .skeleton-entry {
-    padding: 0.75rem;
-    border-bottom: 1px solid #e8e8e6;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--rule);
   }
 
   .skeleton-entry:last-child {
@@ -643,16 +633,15 @@
   .sk-line {
     height: 12px;
     border-radius: 6px;
-    background: linear-gradient(90deg, #ebebea 25%, #f5f5f4 50%, #ebebea 75%);
+    background: linear-gradient(90deg, var(--rule-2) 25%, var(--paper-2) 50%, var(--rule-2) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.4s ease-in-out infinite;
   }
 
-  /* --- Result card --- */
+  /* --- Result ledger (hairlines, not boxes) --- */
   .result-card {
-    border: 1px solid #e8e8e6;
-    border-radius: 12px;
-    overflow: hidden;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
     transition: opacity 0.15s;
   }
 
@@ -661,8 +650,8 @@
   }
 
   .card-entry {
-    padding: 0.65rem 0.75rem;
-    border-bottom: 1px solid #f0f0ee;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid var(--rule);
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
@@ -673,9 +662,9 @@
   }
 
   .card-desc {
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-weight: 500;
-    color: #1c1c1c;
+    color: var(--ink);
     line-height: 1.3;
   }
 
@@ -684,6 +673,7 @@
     align-items: center;
     gap: 0.2rem;
     flex-wrap: wrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .macro-field {
@@ -695,14 +685,15 @@
   .macro-field input {
     width: 40px;
     border: none;
-    border-bottom: 1px solid #e0e0de;
+    border-bottom: 1px dotted var(--rule-3);
     background: transparent;
     text-align: right;
-    font-family: inherit;
-    font-size: 0.82rem;
-    color: #1c1c1c;
+    font-family: var(--num-stack);
+    font-size: var(--t-meta);
+    color: var(--ink);
     padding: 0 1px 1px;
     -moz-appearance: textfield;
+    font-variant-numeric: tabular-nums;
   }
 
   .macro-field input::-webkit-outer-spin-button,
@@ -712,22 +703,22 @@
 
   .macro-field input:focus {
     outline: none;
-    border-bottom-color: #2d2d2d;
+    border-bottom: 1px solid var(--ink-2);
   }
 
   .macro-field input:disabled {
-    color: #aaa;
+    color: var(--mute-2);
     border-bottom-color: transparent;
   }
 
   .macro-label {
     font-size: 0.75rem;
-    color: #aaa;
+    color: var(--mute-2);
     font-weight: 500;
   }
 
   .macro-sep {
-    color: #ddd;
+    color: var(--mute-4);
     font-size: 0.75rem;
     margin: 0 0.1rem;
   }
@@ -735,18 +726,18 @@
   /* --- Clarifying question --- */
   .clarifying {
     font-size: 0.88rem;
-    color: #555;
+    color: var(--ink-mute);
     margin: 0 0 0.75rem;
     line-height: 1.45;
     padding: 0.6rem 0.75rem;
-    background: #f3f3f2;
-    border-radius: 10px;
+    background: var(--paper-3);
+    border-radius: var(--r-md);
   }
 
   /* --- Refine row --- */
   .refine-note {
     font-size: 0.8rem;
-    color: #888;
+    color: var(--mute);
     margin: 0 0 0.4rem;
   }
 
@@ -758,20 +749,35 @@
 
   .refine-input {
     flex: 1;
+<<<<<<< Updated upstream
   }
 
   .refine-row button {
     min-height: 2.75rem;
+=======
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.88rem;
+    font-family: inherit;
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  .refine-row input:focus {
+    outline: none;
+    border-color: var(--ink-2);
+>>>>>>> Stashed changes
   }
 
   .save-btn {
     padding: 0.5rem 1rem;
-    background: #16a34a;
-    color: #fff;
+    background: var(--accent);
+    color: var(--paper);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     font-weight: 600;
     white-space: nowrap;
@@ -779,7 +785,7 @@
   }
 
   @media (hover: hover) {
-    .save-btn:not(:disabled):hover { background: #15803d; }
+    .save-btn:not(:disabled):hover { background: var(--accent-hover); }
   }
 
   .save-btn:disabled { opacity: 0.35; cursor: default; }
@@ -789,7 +795,7 @@
   button:focus-visible,
   input:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid #2d2d2d;
+    outline: 2px solid var(--ink-2);
     outline-offset: 2px;
   }
 
@@ -807,9 +813,9 @@
     flex-shrink: 0;
     width: 56px;
     height: 56px;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     overflow: hidden;
-    border: 1px solid #e8e8e6;
+    border: 1px solid var(--rule);
   }
 
   .thumb img {
@@ -824,8 +830,8 @@
     top: -1px; right: -1px;
     width: 20px; height: 20px;
     border-radius: 50%;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
     font-size: 0.6rem;
     cursor: pointer;
@@ -840,10 +846,10 @@
     flex-shrink: 0;
     width: 56px;
     height: 56px;
-    border-radius: 8px;
-    border: 1px dashed #d0d0ce;
+    border-radius: var(--r-sm);
+    border: 1px dashed var(--rule-4);
     background: none;
-    color: #aaa;
+    color: var(--mute-2);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -852,7 +858,7 @@
   }
 
   @media (hover: hover) {
-    .thumb-add:hover { border-color: #2d2d2d; color: #2d2d2d; }
+    .thumb-add:hover { border-color: var(--ink-2); color: var(--ink-2); }
   }
 
   /* --- Input row --- */
@@ -869,8 +875,8 @@
     height: 2.75rem;
     border-radius: 50%;
     background: none;
-    border: 1px solid #e8e8e6;
-    color: #888;
+    border: 1px solid var(--rule);
+    color: var(--mute);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -879,18 +885,35 @@
   }
 
   @media (hover: hover) {
-    .attach-btn:hover:not(:disabled) { border-color: #2d2d2d; color: #2d2d2d; }
+    .attach-btn:hover:not(:disabled) { border-color: var(--ink-2); color: var(--ink-2); }
   }
   .attach-btn:disabled { opacity: 0.35; cursor: default; }
 
+<<<<<<< Updated upstream
+=======
+  textarea {
+    flex: 1;
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
+    padding: 0.5rem 0.75rem;
+    font-size: var(--t-body);
+    resize: none;
+    font-family: inherit;
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  textarea:focus { outline: none; border-color: var(--ink-2); }
+
+>>>>>>> Stashed changes
   button {
     padding: 0.5rem 1rem;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     white-space: nowrap;
     min-height: 2.75rem;
@@ -914,11 +937,11 @@
   }
 
   .field-label {
-    font-size: 0.72rem;
+    font-size: var(--t-micro);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     font-weight: 600;
-    color: #aaa;
+    color: var(--mute-2);
   }
 
   .field-header {
@@ -942,12 +965,12 @@
 
   .toggle-btn {
     padding: 0.3rem 0.85rem;
-    border: 1px solid #d0d0ce;
-    border-radius: 999px;
+    border: 1px solid var(--rule-4);
+    border-radius: var(--r-pill);
     background: none;
     font-family: inherit;
     font-size: 0.8rem;
-    color: #555;
+    color: var(--ink-mute);
     cursor: pointer;
     font-weight: 500;
     flex-shrink: 0;
@@ -955,41 +978,42 @@
   }
 
   .toggle-btn.selected {
-    background: #2d2d2d;
-    border-color: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    border-color: var(--ink-2);
+    color: var(--paper);
   }
 
   .hydration-input {
     width: 80px;
     flex-shrink: 0;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
     padding: 0.5rem 0.5rem;
-    font-size: 1rem;
-    font-family: inherit;
-    background: #fafaf9;
-    color: #1c1c1c;
+    font-size: var(--t-body);
+    font-family: var(--num-stack);
+    background: var(--paper);
+    color: var(--ink);
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   .hydration-input::-webkit-outer-spin-button,
   .hydration-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-  .hydration-input:focus { outline: none; border-color: #2d2d2d; }
+  .hydration-input:focus { outline: none; border-color: var(--ink-2); }
 
   .hydration-unit {
-    font-size: 0.82rem;
-    color: #aaa;
+    font-size: var(--t-meta);
+    color: var(--mute-2);
   }
 
   .save-activity-btn {
     width: 100%;
     padding: 0.75rem 1rem;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 0.95rem;
     font-family: inherit;
@@ -999,7 +1023,7 @@
   }
 
   @media (hover: hover) {
-    .save-activity-btn:not(:disabled):hover { background: #1c1c1c; }
+    .save-activity-btn:not(:disabled):hover { background: var(--ink); }
   }
   .save-activity-btn:disabled { opacity: 0.35; cursor: default; }
 </style>

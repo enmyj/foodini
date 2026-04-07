@@ -20,7 +20,8 @@ Your job:
 3. Once you have enough information, return the entries.
 
 Rules:
-- meal_type must be one of: breakfast, snack, lunch, dinner
+- meal_type must be one of: breakfast, snack, lunch, dinner, supplements
+- Use "supplements" for vitamins, protein powders, and other supplements (not regular food)
 - All numeric values are integers (round estimates are fine)
 - Multiple foods in one meal → multiple entries, same meal_type
 - Use reasonable common serving sizes for estimates
@@ -44,7 +45,7 @@ var responseSchema = &genai.Schema{
 			Items: &genai.Schema{
 				Type: genai.TypeObject,
 				Properties: map[string]*genai.Schema{
-					"meal_type":   {Type: genai.TypeString, Description: "One of: breakfast, snack, lunch, dinner"},
+					"meal_type":   {Type: genai.TypeString, Description: "One of: breakfast, snack, lunch, dinner, supplements"},
 					"description": {Type: genai.TypeString, Description: "Brief description of the food"},
 					"calories":    {Type: genai.TypeInteger},
 					"protein":     {Type: genai.TypeInteger, Description: "Grams of protein"},
@@ -74,6 +75,49 @@ type Entry struct {
 type Response struct {
 	Message string  `json:"message"`
 	Entries []Entry `json:"entries"`
+}
+
+var validMealTypes = map[string]bool{
+	"breakfast": true,
+	"snack":     true,
+	"lunch":     true,
+	"dinner":      true,
+	"supplements": true,
+}
+
+// Validate checks an Entry for sane values before it's written to Sheets.
+// The schema enforces shape; this enforces semantics.
+func (e Entry) Validate() error {
+	if !validMealTypes[e.MealType] {
+		return fmt.Errorf("invalid meal_type %q", e.MealType)
+	}
+	desc := strings.TrimSpace(e.Description)
+	if desc == "" {
+		return fmt.Errorf("description is empty")
+	}
+	if len(desc) > 500 {
+		return fmt.Errorf("description too long (%d chars)", len(desc))
+	}
+	checks := []struct {
+		name string
+		val  int
+		max  int
+	}{
+		{"calories", e.Calories, 10000},
+		{"protein", e.Protein, 1000},
+		{"carbs", e.Carbs, 1000},
+		{"fat", e.Fat, 1000},
+		{"fiber", e.Fiber, 500},
+	}
+	for _, c := range checks {
+		if c.val < 0 {
+			return fmt.Errorf("%s is negative (%d)", c.name, c.val)
+		}
+		if c.val > c.max {
+			return fmt.Errorf("%s exceeds max (%d > %d)", c.name, c.val, c.max)
+		}
+	}
+	return nil
 }
 
 // ImageData carries an inline image to include alongside a chat message.
@@ -180,6 +224,12 @@ func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx
 	var result Response
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
 		return "", nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	for i, entry := range result.Entries {
+		if err := entry.Validate(); err != nil {
+			return "", nil, fmt.Errorf("entry %d: %w", i, err)
+		}
 	}
 
 	s.mu.Lock()

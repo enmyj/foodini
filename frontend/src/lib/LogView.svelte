@@ -7,7 +7,7 @@
   import ProfilePanel from './ProfilePanel.svelte'
   import { showError } from './toast.js'
 
-  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner']
+  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner', 'supplements']
   const DAY_ABBREV = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
   const HISTORY_STATE_KEY = 'foodiniNav'
 
@@ -502,6 +502,7 @@
     }
   })
 
+<<<<<<< Updated upstream
   onMount(() => {
     const initial = normalizeNavState(snapshotNavState())
     pushOrReplaceHistory(initial)
@@ -531,6 +532,18 @@
 
     if (navStateEqual(next, current)) return
     pushOrReplaceHistory(next, shouldPushHistory(current, next) ? 'push' : 'replace')
+=======
+  $effect(() => {
+    const id = setInterval(() => {
+      if (document.hidden) return
+      if (view === 'day') {
+        loadDay(currentDate)
+      } else {
+        loadHistory(historyWeeks)
+      }
+    }, 60 * 1000)
+    return () => clearInterval(id)
+>>>>>>> Stashed changes
   })
 </script>
 
@@ -592,7 +605,7 @@
                 onclick={toggleDayInsights}
                 aria-label="AI insights"
                 title="AI insights"
-              >✦ insights</button>
+              >insights</button>
             {/if}
             {#if showDaySuggestions}
               <button
@@ -601,7 +614,7 @@
                 onclick={toggleDaySuggestions}
                 aria-label="Meal suggestions"
                 title="Meal suggestions"
-              >🍽 suggestions</button>
+              >suggestions</button>
             {/if}
           </div>
         </div>
@@ -645,7 +658,7 @@
           {/if}
           <div class="insight-footer">
             {#if dayInsight.generatedAt}<span class="insight-ts">{formatGeneratedAt(dayInsight.generatedAt)}</span>{/if}
-            <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>↺ regenerate</button>
+            <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>regenerate</button>
           </div>
         {/if}
       </div>
@@ -667,7 +680,7 @@
           <p class="insights-text">{@html renderInsight(daySuggestions.text)}</p>
           <div class="insight-footer">
             {#if daySuggestions.generatedAt}<span class="insight-ts">{formatGeneratedAt(daySuggestions.generatedAt)}</span>{/if}
-            <button class="insight-regen" onclick={() => fetchDaySuggestions(currentDate, true)}>↺ regenerate</button>
+            <button class="insight-regen" onclick={() => fetchDaySuggestions(currentDate, true)}>regenerate</button>
           </div>
         {/if}
       </div>
@@ -741,14 +754,14 @@
                 onclick={() => toggleInsights(week.weekStart, week.weekEnd)}
                 aria-label="AI insights for this week"
                 title="AI insights"
-              >✦ insights</button>
+              >insights</button>
               <button
                 class="insights-btn suggestions-btn"
                 class:active={suggestionsByWeek[week.weekStart]?.open}
                 onclick={() => toggleWeekSuggestions(week.weekStart, week.weekEnd)}
                 aria-label="Meal suggestions for this week"
                 title="Meal suggestions"
-              >🍽 suggestions</button>
+              >suggestions</button>
             </div>
           {/if}
         </div>
@@ -787,7 +800,7 @@
               <p class="insights-text">{@html renderInsight(wi.text)}</p>
               <div class="insight-footer">
                 {#if wi.generatedAt}<span class="insight-ts">{formatGeneratedAt(wi.generatedAt)}</span>{/if}
-                <button class="insight-regen" onclick={() => fetchInsights(week.weekStart, week.weekEnd, true)}>↺ regenerate</button>
+                <button class="insight-regen" onclick={() => fetchInsights(week.weekStart, week.weekEnd, true)}>regenerate</button>
               </div>
             {/if}
           </div>
@@ -809,7 +822,7 @@
               <p class="insights-text">{@html renderInsight(ws.text)}</p>
               <div class="insight-footer">
                 {#if ws.generatedAt}<span class="insight-ts">{formatGeneratedAt(ws.generatedAt)}</span>{/if}
-                <button class="insight-regen" onclick={() => fetchWeekSuggestions(week.weekStart, week.weekEnd, true)}>↺ regenerate</button>
+                <button class="insight-regen" onclick={() => fetchWeekSuggestions(week.weekStart, week.weekEnd, true)}>regenerate</button>
               </div>
             {/if}
           </div>
@@ -846,9 +859,9 @@
     position: sticky;
     top: 0;
     z-index: 10;
-    background: #fafaf9;
+    background: var(--paper);
     padding: 1rem 0 0.75rem;
-    border-bottom: 1px solid #e8e8e6;
+    border-bottom: 1px solid var(--rule);
     margin-bottom: 1.25rem;
   }
 
@@ -871,14 +884,14 @@
     padding: 0 0 0.2rem;
     font-size: 0.95rem;
     font-weight: 500;
-    color: #888;
+    color: var(--mute);
     cursor: pointer;
     font-family: inherit;
   }
 
   .toggle button.active {
-    color: #1c1c1c;
-    border-bottom-color: #2d2d2d;
+    color: var(--ink);
+    border-bottom-color: var(--ink-2);
   }
 
   /* Week picker */
@@ -890,9 +903,9 @@
 
   .wp-btn {
     background: none;
-    border: 1px solid #e0e0de;
-    border-radius: 999px;
-    color: #888;
+    border: 1px solid var(--rule-3);
+    border-radius: var(--r-pill);
+    color: var(--mute);
     font-size: 0.72rem;
     padding: 0.2rem 0.6rem;
     cursor: pointer;
@@ -903,13 +916,13 @@
   }
 
   .wp-btn.active {
-    border-color: #2d2d2d;
-    color: #2d2d2d;
-    background: #f5f5f3;
+    border-color: var(--ink-2);
+    color: var(--ink-2);
+    background: var(--paper-2);
   }
 
   @media (hover: hover) {
-    .wp-btn:not(.active):hover { border-color: #aaa; color: #555; }
+    .wp-btn:not(.active):hover { border-color: var(--mute-2); color: var(--ink-mute); }
   }
 
   /* Date navigator */
@@ -925,7 +938,7 @@
     background: none;
     border: none;
     font-size: 1.6rem;
-    color: #555;
+    color: var(--ink-mute);
     cursor: pointer;
     padding: 0.1rem 0.4rem;
     line-height: 1;
@@ -938,7 +951,7 @@
 
   .nav-arrow.dimmed,
   .nav-arrow:disabled {
-    color: #ccc;
+    color: var(--mute-4);
     cursor: default;
   }
 
@@ -949,18 +962,18 @@
     font-family: inherit;
     font-size: 1rem;
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
     cursor: pointer;
     padding: 0.2rem 0.75rem;
     touch-action: manipulation;
     flex: 1;
     text-align: center;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     transition: background 0.12s;
   }
 
   @media (hover: hover) {
-    .nav-date:hover { background: #f0f0ee; }
+    .nav-date:hover { background: var(--paper-4); }
   }
 
   .date-input-hidden {
@@ -985,9 +998,10 @@
     gap: 0.4rem 1rem;
     align-items: center;
     font-size: 0.78rem;
-    color: #888;
+    color: var(--mute);
     padding-bottom: 0.1rem;
     padding-top: 0.3rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .totals-btns {
@@ -1005,7 +1019,7 @@
   .meal-arrow {
     display: inline-block;
     width: 0.7rem;
-    color: #bbb;
+    color: var(--mute-3);
     font-size: 0.7rem;
   }
 
@@ -1024,7 +1038,7 @@
     font-family: inherit;
     text-transform: uppercase;
     font-size: 0.72rem;
-    color: #888;
+    color: var(--mute);
     letter-spacing: 0.08em;
     font-weight: 600;
     cursor: pointer;
@@ -1036,12 +1050,12 @@
   }
 
   @media (hover: hover) {
-    .meal-name:hover { color: #2d2d2d; }
+    .meal-name:hover { color: var(--ink-2); }
   }
 
   .meal-summary {
     font-weight: 400;
-    color: #bbb;
+    color: var(--mute-3);
     letter-spacing: 0;
     text-transform: none;
     font-size: 0.72rem;
@@ -1057,7 +1071,7 @@
   .repeat-btn {
     background: none;
     border: none;
-    color: #ccc;
+    color: var(--mute-4);
     font-size: 1rem;
     line-height: 1;
     cursor: pointer;
@@ -1068,7 +1082,7 @@
   }
 
   @media (hover: hover) {
-    .repeat-btn:hover:not(:disabled) { color: #555; }
+    .repeat-btn:hover:not(:disabled) { color: var(--ink-mute); }
   }
 
   .repeat-btn:disabled { cursor: default; }
@@ -1081,11 +1095,11 @@
 
   .pick-btn {
     background: none;
-    border: 1px solid #d0d0ce;
-    border-radius: 999px;
+    border: 1px solid var(--rule-4);
+    border-radius: var(--r-pill);
     padding: 0.15rem 0.55rem;
     font-size: 0.7rem;
-    color: #555;
+    color: var(--ink-mute);
     cursor: pointer;
     font-family: inherit;
     font-weight: 500;
@@ -1096,13 +1110,13 @@
   }
 
   @media (hover: hover) {
-    .pick-btn:hover { border-color: #2d2d2d; color: #2d2d2d; }
+    .pick-btn:hover { border-color: var(--ink-2); color: var(--ink-2); }
   }
 
   .pick-cancel {
     background: none;
     border: none;
-    color: #ccc;
+    color: var(--mute-4);
     font-size: 0.75rem;
     cursor: pointer;
     padding: 0.15rem 0.2rem;
@@ -1112,12 +1126,12 @@
   }
 
   @media (hover: hover) {
-    .pick-cancel:hover { color: #888; }
+    .pick-cancel:hover { color: var(--mute); }
   }
 
   .repeat-btn.spinning {
     animation: spin 0.7s linear infinite;
-    color: #888;
+    color: var(--mute);
   }
 
   @keyframes spin {
@@ -1130,7 +1144,7 @@
     border: none;
     font-family: inherit;
     text-align: left;
-    color: #ccc;
+    color: var(--mute-4);
     font-size: 0.82rem;
     padding: 0.6rem 0;
     cursor: pointer;
@@ -1139,11 +1153,11 @@
   }
 
   @media (hover: hover) {
-    .add-row:hover { color: #888; }
+    .add-row:hover { color: var(--mute); }
   }
 
   .state {
-    color: #aaa;
+    color: var(--mute-2);
     text-align: center;
     margin-top: 4rem;
     font-size: 0.9rem;
@@ -1158,31 +1172,32 @@
   }
 
   .state.error {
-    color: #888;
+    color: var(--mute);
     margin-top: 0;
   }
 
   .state-link {
-    color: #2d2d2d;
+    color: var(--ink-2);
     text-decoration: underline;
     text-underline-offset: 2px;
     font-size: 0.88rem;
   }
 
-  /* Weekly history */
+  /* Weekly history — hairline ledger, not a box */
   .week-block {
-    border: 1px solid #e8e8e6;
-    border-radius: 12px;
-    overflow: hidden;
-    margin-bottom: 1rem;
+    border-top: 1px solid var(--rule);
+    margin-bottom: 1.25rem;
+  }
+
+  .week-block:last-of-type {
+    border-bottom: 1px solid var(--rule);
   }
 
   .week-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.65rem 0.875rem;
-    border-bottom: 1px solid #e8e8e6;
+    padding: 0.65rem 0;
   }
 
   .week-meta {
@@ -1194,19 +1209,19 @@
   .week-range {
     font-size: 0.88rem;
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .week-cal {
     font-size: 0.72rem;
-    color: #aaa;
+    color: var(--mute-2);
   }
 
   .insights-btn {
     background: none;
-    border: 1px solid #e0e0de;
-    border-radius: 999px;
-    color: #888;
+    border: 1px solid var(--rule-3);
+    border-radius: var(--r-pill);
+    color: var(--mute);
     font-size: 0.72rem;
     padding: 0.2rem 0.65rem;
     cursor: pointer;
@@ -1218,19 +1233,19 @@
   }
 
   .insights-btn.active {
-    border-color: #2d2d2d;
-    color: #2d2d2d;
-    background: #f5f5f3;
+    border-color: var(--ink-2);
+    color: var(--ink-2);
+    background: var(--paper-2);
   }
 
   @media (hover: hover) {
-    .insights-btn:hover { border-color: #2d2d2d; color: #2d2d2d; }
+    .insights-btn:hover { border-color: var(--ink-2); color: var(--ink-2); }
   }
 
   .week-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
-    padding: 0.4rem 0.25rem 0.5rem;
+    padding: 0.4rem 0 0.5rem;
     gap: 0;
   }
 
@@ -1243,13 +1258,13 @@
     gap: 0.1rem;
     padding: 0.4rem 0.1rem;
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     touch-action: manipulation;
     font-family: inherit;
   }
 
   @media (hover: hover) {
-    .day-cell:not(.future):hover { background: #f0f0ee; }
+    .day-cell:not(.future):hover { background: var(--paper-4); }
   }
 
   .day-cell.future {
@@ -1259,7 +1274,7 @@
 
   .dc-abbrev {
     font-size: 0.62rem;
-    color: #aaa;
+    color: var(--mute-2);
     text-transform: uppercase;
     letter-spacing: 0.03em;
     font-weight: 500;
@@ -1269,12 +1284,12 @@
   .dc-num {
     font-size: 0.85rem;
     font-weight: 500;
-    color: #1c1c1c;
+    color: var(--ink);
     line-height: 1.2;
   }
 
   .day-cell.has-food .dc-num {
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .dc-indicators {
@@ -1286,13 +1301,13 @@
 
   .dc-food {
     font-size: 0.4rem;
-    color: #2d2d2d;
+    color: var(--ink-2);
     line-height: 1;
   }
 
   .dc-empty {
     font-size: 0.4rem;
-    color: #ddd;
+    color: var(--mute-4);
     line-height: 1;
   }
 
@@ -1302,35 +1317,35 @@
   }
 
   .insights-panel {
-    padding: 0.75rem 0.875rem;
-    border-top: 1px solid #e8e8e6;
-    background: #f7f7f5;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--rule);
+    background: transparent;
   }
 
   .day-insights-panel {
     position: relative;
-    border: 1px solid #e8e8e6;
-    border-radius: 10px;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 0.75rem 0;
     margin-bottom: 1.25rem;
     min-width: 0;
-    overflow: hidden;
   }
 
   .insight-close {
     position: absolute;
     top: 0.5rem;
-    right: 0.5rem;
+    right: 0;
     background: none;
     border: none;
     font-size: 0.75rem;
-    color: #bbb;
+    color: var(--mute-3);
     cursor: pointer;
     padding: 0.15rem 0.3rem;
     line-height: 1;
   }
 
   @media (hover: hover) {
-    .insight-close:hover { color: #666; }
+    .insight-close:hover { color: var(--ink-mute); }
   }
 
   @keyframes shimmer {
@@ -1347,19 +1362,19 @@
   .isk-line {
     height: 0.78rem;
     border-radius: 4px;
-    background: linear-gradient(90deg, #e8e8e6 25%, #f2f2f0 50%, #e8e8e6 75%);
+    background: linear-gradient(90deg, var(--rule) 25%, var(--paper-3) 50%, var(--rule) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.4s ease-in-out infinite;
   }
 
   .insights-err {
     font-size: 0.85rem;
-    color: #c44;
+    color: var(--danger);
   }
 
   .insights-text {
     font-size: 0.85rem;
-    color: #1c1c1c;
+    color: var(--ink);
     line-height: 1.65;
     white-space: pre-line;
     overflow-wrap: break-word;
@@ -1369,7 +1384,7 @@
 
   .insights-text :global(strong) {
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .insight-footer {
@@ -1378,12 +1393,12 @@
     gap: 0.75rem;
     margin-top: 0.6rem;
     padding-top: 0.5rem;
-    border-top: 1px solid #ebebea;
+    border-top: 1px solid var(--rule-2);
   }
 
   .insight-ts {
     font-size: 0.72rem;
-    color: #bbb;
+    color: var(--mute-3);
   }
 
   .insight-regen {
@@ -1391,7 +1406,7 @@
     border: none;
     font-family: inherit;
     font-size: 0.72rem;
-    color: #aaa;
+    color: var(--mute-2);
     cursor: pointer;
     padding: 0;
     touch-action: manipulation;
@@ -1399,7 +1414,7 @@
   }
 
   @media (hover: hover) {
-    .insight-regen:hover { color: #555; }
+    .insight-regen:hover { color: var(--ink-mute); }
   }
 
   .detail-toggle {
@@ -1407,14 +1422,14 @@
     border: none;
     font-family: inherit;
     font-size: 0.72rem;
-    color: #aaa;
+    color: var(--mute-2);
     cursor: pointer;
     padding: 0.25rem 0 0.15rem;
     touch-action: manipulation;
   }
 
   @media (hover: hover) {
-    .detail-toggle:hover { color: #555; }
+    .detail-toggle:hover { color: var(--ink-mute); }
   }
 
   .insight-summary {
@@ -1424,16 +1439,17 @@
   .insight-detail {
     margin-top: 0.25rem;
     padding-top: 0.25rem;
-    border-top: 1px dashed #e8e8e6;
+    border-top: 1px dashed var(--rule);
   }
 
   .suggestions-panel {
-    border-color: #e0e8de;
-    background: #f7f9f5;
+    border-top-color: var(--sugg-rule-2);
+    border-bottom-color: var(--sugg-rule-2);
+    background: transparent;
   }
 
   .suggestions-panel .insight-footer {
-    border-top-color: #e0e8de;
+    border-top-color: var(--sugg-rule-2);
   }
 
   .suggestions-label {
@@ -1442,23 +1458,23 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #7a9a6e;
+    color: var(--sugg-mute);
     margin-bottom: 0.4rem;
   }
 
   .suggestions-btn {
-    border-color: #d0dece;
-    color: #7a9a6e;
+    border-color: var(--sugg-rule);
+    color: var(--sugg-mute);
   }
 
   .suggestions-btn.active {
-    border-color: #7a9a6e;
-    color: #5a7a4e;
-    background: #f0f5ee;
+    border-color: var(--sugg-mute);
+    color: var(--sugg-ink);
+    background: var(--sugg-paper);
   }
 
   @media (hover: hover) {
-    .suggestions-btn:hover { border-color: #7a9a6e; color: #5a7a4e; }
+    .suggestions-btn:hover { border-color: var(--sugg-mute); color: var(--sugg-ink); }
   }
 
   /* FAB + shared actions */
@@ -1469,8 +1485,8 @@
     width: 3.5rem;
     height: 3.5rem;
     border-radius: 50%;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,0.18);
@@ -1481,7 +1497,7 @@
   }
 
   @media (hover: hover) {
-    .fab:hover { background: #1c1c1c; }
+    .fab:hover { background: var(--ink); }
   }
 
   .header-actions {
@@ -1493,7 +1509,7 @@
   .sheet-link {
     display: flex;
     align-items: center;
-    color: #888;
+    color: var(--mute);
     padding: 0.5rem 0.4rem;
     text-decoration: none;
     touch-action: manipulation;
@@ -1501,14 +1517,14 @@
   }
 
   @media (hover: hover) {
-    .sheet-link:hover { color: #2d2d2d; }
+    .sheet-link:hover { color: var(--ink-2); }
   }
 
   .settings-btn {
     background: none;
     border: none;
     font-size: 1.1rem;
-    color: #888;
+    color: var(--mute);
     cursor: pointer;
     padding: 0.5rem 0.5rem;
     line-height: 1;
@@ -1517,13 +1533,13 @@
   }
 
   @media (hover: hover) {
-    .settings-btn:hover { color: #2d2d2d; }
+    .settings-btn:hover { color: var(--ink-2); }
   }
 
   .signout-btn {
     display: flex;
     align-items: center;
-    color: #888;
+    color: var(--mute);
     padding: 0.5rem 0.4rem;
     text-decoration: none;
     touch-action: manipulation;
@@ -1531,6 +1547,6 @@
   }
 
   @media (hover: hover) {
-    .signout-btn:hover { color: #2d2d2d; }
+    .signout-btn:hover { color: var(--ink-2); }
   }
 </style>

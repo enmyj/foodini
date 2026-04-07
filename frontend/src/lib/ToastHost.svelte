@@ -30,9 +30,9 @@
     align-items: flex-start;
     gap: 0.75rem;
     padding: 0.85rem 1rem;
-    border-radius: 12px;
+    border-radius: var(--r-md);
     background: rgba(28,0,0,0.96);
-    color: #fafaf9;
+    color: var(--paper);
     box-shadow: 0 10px 30px rgba(0,0,0,0.18);
     pointer-events: auto;
   }

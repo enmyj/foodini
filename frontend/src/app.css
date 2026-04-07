@@ -1,6 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+<<<<<<< Updated upstream
   --text-entry-border: #deded8;
   --text-entry-border-focus: #2d2d2d;
   --text-entry-bg: #fffdf8;
@@ -15,6 +16,71 @@ body {
   background: #fafaf9;
   color: #1c1c1c;
   -webkit-font-smoothing: antialiased;
+=======
+  /* Ink (text) */
+  --ink: #1c1c1c;
+  --ink-2: #2d2d2d;
+  --ink-mute: #555;
+  --mute: #888;
+  --mute-2: #aaa;
+  --mute-3: #bbb;
+  --mute-4: #ccc;
+
+  /* Paper (surfaces) */
+  --paper: #fafaf9;
+  --paper-2: #f5f5f3;
+  --paper-3: #f3f3f2;
+  --paper-4: #f0f0ee;
+
+  /* Rules (hairlines) */
+  --rule: #e8e8e6;
+  --rule-2: #ebebea;
+  --rule-3: #e0e0de;
+  --rule-4: #d0d0ce;
+
+  /* Semantic accents */
+  --accent: #16a34a;
+  --accent-hover: #15803d;
+  --danger: #e11d48;
+
+  /* Suggestions tint (kept distinct so it doesn't read as primary) */
+  --sugg-ink: #5a7a4e;
+  --sugg-mute: #7a9a6e;
+  --sugg-rule: #d0dece;
+  --sugg-rule-2: #e0e8de;
+  --sugg-paper: #f0f5ee;
+  --sugg-paper-2: #f7f9f5;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* Type scale */
+  --t-micro: 0.72rem; /* uppercase labels, meta */
+  --t-meta: 0.82rem;
+  --t-body-sm: 0.9rem;
+  --t-body: 1rem;
+  --t-title: 1.05rem;
+
+  /* Numerics */
+  --num-stack: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tabular figures everywhere a number lives */
+input[type="number"],
+input[type="date"] {
+  font-variant-numeric: tabular-nums;
+>>>>>>> Stashed changes
 }
 
 .text-entry {

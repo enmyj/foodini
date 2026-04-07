@@ -5,7 +5,7 @@
 
   let { entry, onUpdate, onDelete } = $props()
 
-  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner']
+  const MEALS = ['breakfast', 'lunch', 'snack', 'dinner', 'supplements']
 
   let modalOpen = $state(false)
   let editDesc = $state('')
@@ -148,7 +148,7 @@
     display: flex;
     align-items: center;
     padding: 0.75rem 0;
-    border-bottom: 1px solid #e8e8e6;
+    border-bottom: 1px solid var(--rule);
     gap: 0.5rem;
   }
 
@@ -166,25 +166,26 @@
   }
 
   .main:hover .desc {
-    color: #555;
+    color: var(--ink-mute);
   }
 
   .desc {
     font-size: 0.95rem;
     line-height: 1.4;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .macros {
     font-size: 0.78rem;
-    color: #888;
+    color: var(--mute);
     line-height: 1.3;
+    font-variant-numeric: tabular-nums;
   }
 
   .del {
     background: none;
     border: none;
-    color: #ccc;
+    color: var(--mute-4);
     font-size: 1.1rem;
     line-height: 1;
     cursor: pointer;
@@ -199,18 +200,18 @@
   }
 
   .del.confirm {
-    color: #e11d48;
+    color: var(--danger);
     font-weight: 600;
   }
 
   @media (hover: hover) {
     .del:hover {
-      color: #888;
+      color: var(--mute);
     }
   }
 
   .del:focus-visible {
-    outline: 2px solid #2d2d2d;
+    outline: 2px solid var(--ink-2);
     outline-offset: 2px;
   }
 
@@ -232,8 +233,8 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #fafaf9;
-    border-radius: 12px;
+    background: var(--paper);
+    border-radius: var(--r-md);
     width: min(92vw, 420px);
     max-height: 85vh;
     overflow-y: auto;
@@ -245,7 +246,7 @@
   .modal h3 {
     font-size: 0.95rem;
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
     margin-bottom: 1.25rem;
     text-transform: none;
     letter-spacing: 0;
@@ -259,28 +260,39 @@
   }
 
   .label {
-    font-size: 0.72rem;
+    font-size: var(--t-micro);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #888;
+    color: var(--mute);
   }
 
+<<<<<<< Updated upstream
   input, select {
     border: 1px solid #e8e8e6;
     border-radius: 6px;
+=======
+  textarea, input, select {
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
+>>>>>>> Stashed changes
     padding: 0.5rem 0.6rem;
     font-family: inherit;
-    font-size: 1rem;
-    background: #fff;
-    color: #1c1c1c;
+    font-size: var(--t-body);
+    background: var(--paper);
+    color: var(--ink);
     outline: none;
     width: 100%;
     box-sizing: border-box;
   }
 
+<<<<<<< Updated upstream
   input:focus, select:focus {
     border-color: #2d2d2d;
+=======
+  textarea:focus, input:focus, select:focus {
+    border-color: var(--ink-2);
+>>>>>>> Stashed changes
   }
 
   select {
@@ -312,12 +324,12 @@
   .save-btn {
     flex: 1;
     padding: 0.6rem 1rem;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     font-weight: 500;
     touch-action: manipulation;
@@ -325,7 +337,7 @@
 
   @media (hover: hover) {
     .save-btn:hover:not(:disabled) {
-      background: #1c1c1c;
+      background: var(--ink);
     }
   }
 
@@ -337,18 +349,18 @@
   .cancel-btn {
     padding: 0.6rem 1rem;
     background: none;
-    color: #888;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
+    color: var(--mute);
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     touch-action: manipulation;
   }
 
   @media (hover: hover) {
     .cancel-btn:hover:not(:disabled) {
-      border-color: #888;
+      border-color: var(--mute);
     }
   }
 </style>

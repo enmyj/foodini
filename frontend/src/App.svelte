@@ -146,8 +146,8 @@
         align-items: center;
         justify-content: center;
         height: 100vh;
-        color: #888;
-        font-size: 0.9rem;
+        color: var(--mute);
+        font-size: var(--t-body-sm);
     }
 
     .landing {
@@ -161,16 +161,16 @@
         align-items: center;
         justify-content: space-between;
         padding: 0.75rem 1.5rem;
-        border-bottom: 1px solid #e8e8e6;
+        border-bottom: 1px solid var(--rule);
         position: sticky;
         top: 0;
-        background: #fafaf9;
+        background: var(--paper);
     }
 
     .nav-title {
         font-size: 0.95rem;
         font-weight: 500;
-        color: #1c1c1c;
+        color: var(--ink);
         letter-spacing: -0.01em;
     }
 
@@ -182,8 +182,8 @@
     }
 
     .error-msg {
-        font-size: 0.9rem;
-        color: #888;
+        font-size: var(--t-body-sm);
+        color: var(--mute);
         max-width: 480px;
         line-height: 1.6;
         text-align: center;
@@ -191,9 +191,9 @@
 
     .btn {
         padding: 0.5rem 1rem;
-        border: 1px solid #2d2d2d;
-        color: #2d2d2d;
-        border-radius: 6px;
+        border: 1px solid var(--ink-2);
+        color: var(--ink-2);
+        border-radius: var(--r-sm);
         text-decoration: none;
         font-size: 0.85rem;
         letter-spacing: 0.01em;
@@ -201,8 +201,8 @@
     }
 
     .btn:hover {
-        background: #2d2d2d;
-        color: #fafaf9;
+        background: var(--ink-2);
+        color: var(--paper);
     }
 
     .about {
@@ -211,17 +211,17 @@
     }
 
     .about h2 {
-        font-size: 0.72rem;
+        font-size: var(--t-micro);
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: #aaa;
+        color: var(--mute-2);
         font-weight: 600;
         margin-bottom: 0.75rem;
     }
 
     .about p {
-        font-size: 0.9rem;
-        color: #888;
+        font-size: var(--t-body-sm);
+        color: var(--mute);
         line-height: 1.6;
         margin: 0;
     }
@@ -231,8 +231,8 @@
     }
 
     .about ol {
-        font-size: 0.9rem;
-        color: #888;
+        font-size: var(--t-body-sm);
+        color: var(--mute);
         line-height: 1.6;
         margin: 0.5rem 0 0.75rem 1.25rem;
         padding: 0;
@@ -242,12 +242,12 @@
     }
 
     .link {
-        color: #2d2d2d;
+        color: var(--ink-2);
         text-decoration: underline;
         text-underline-offset: 2px;
     }
 
     .link:hover {
-        color: #555;
+        color: var(--ink-mute);
     }
 </style>

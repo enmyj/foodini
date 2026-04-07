@@ -135,8 +135,8 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #fafaf9;
-    border-radius: 12px;
+    background: var(--paper);
+    border-radius: var(--r-md);
     width: min(92vw, 420px);
     max-height: 80vh;
     overflow-y: auto;
@@ -153,24 +153,24 @@
   }
 
   .panel-header h2 {
-    font-size: 1.05rem;
+    font-size: var(--t-title);
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .close {
     background: none;
     border: none;
     font-size: 1rem;
-    color: #888;
+    color: var(--mute);
     cursor: pointer;
     padding: 0.25rem;
     line-height: 1;
   }
 
   .hint-text {
-    font-size: 0.82rem;
-    color: #888;
+    font-size: var(--t-meta);
+    color: var(--mute);
     margin-bottom: 1.25rem;
     line-height: 1.5;
   }
@@ -191,13 +191,28 @@
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #888;
+    color: var(--mute);
     font-weight: 600;
   }
 
+<<<<<<< Updated upstream
+=======
+  input, textarea {
+    border: none;
+    border-bottom: 2px solid var(--ink-2);
+    padding: 0.3rem 0;
+    font-size: var(--t-body);
+    font-family: inherit;
+    background: transparent;
+    color: var(--ink);
+    outline: none;
+    resize: vertical;
+  }
+
+>>>>>>> Stashed changes
   .status {
     font-size: 0.78rem;
-    color: #aaa;
+    color: var(--mute-2);
     margin-top: 0.75rem;
   }
 
@@ -210,19 +225,19 @@
   .save-btn {
     flex: 1;
     padding: 0.6rem 1rem;
-    background: #2d2d2d;
-    color: #fafaf9;
+    background: var(--ink-2);
+    color: var(--paper);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     font-weight: 500;
     touch-action: manipulation;
   }
 
   .save-btn:hover:not(:disabled) {
-    background: #1c1c1c;
+    background: var(--ink);
   }
 
   .save-btn:disabled {
@@ -233,17 +248,17 @@
   .cancel-btn {
     padding: 0.6rem 1rem;
     background: none;
-    color: #888;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
+    color: var(--mute);
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
     touch-action: manipulation;
   }
 
   .cancel-btn:hover:not(:disabled) {
-    border-color: #888;
+    border-color: var(--mute);
   }
 
 </style>

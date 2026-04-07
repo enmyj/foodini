@@ -1,7 +1,7 @@
 <script>
   let { day, onClose, onDelete = null, onAddFood = null } = $props()
 
-  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner']
+  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner', 'supplements']
 
   function groupedByMeal(entries) {
     const g = {}
@@ -80,7 +80,7 @@
 
   {#if day.dayLog?.poop || day.dayLog?.poop_notes}
     <div class="modal-section">
-      <h3>💩</h3>
+      <h3>Stool</h3>
       <p>
         {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
       </p>
@@ -89,7 +89,7 @@
 
   {#if day.dayLog?.hydration}
     <div class="modal-section">
-      <h3>💧 Water</h3>
+      <h3>Water</h3>
       <p>{day.dayLog.hydration} L</p>
     </div>
   {/if}
@@ -108,8 +108,8 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: #fafaf9;
-    border-radius: 12px;
+    background: var(--paper);
+    border-radius: var(--r-md);
     width: min(92vw, 520px);
     max-height: 80vh;
     overflow-y: auto;
@@ -126,16 +126,16 @@
   }
 
   .modal-header h2 {
-    font-size: 1.05rem;
+    font-size: var(--t-title);
     font-weight: 600;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .close {
     background: none;
     border: none;
     font-size: 1rem;
-    color: #888;
+    color: var(--mute);
     cursor: pointer;
     padding: 0.25rem;
     line-height: 1;
@@ -144,7 +144,7 @@
   .modal-section {
     margin-bottom: 1.25rem;
     padding-bottom: 1.25rem;
-    border-bottom: 1px solid #e8e8e6;
+    border-bottom: 1px solid var(--rule);
   }
 
   .modal-section:last-child {
@@ -155,8 +155,8 @@
 
   h3 {
     text-transform: uppercase;
-    font-size: 0.72rem;
-    color: #888;
+    font-size: var(--t-micro);
+    color: var(--mute);
     letter-spacing: 0.08em;
     font-weight: 600;
     margin-bottom: 0.4rem;
@@ -165,7 +165,7 @@
   h4 {
     text-transform: capitalize;
     font-size: 0.75rem;
-    color: #888;
+    color: var(--mute);
     letter-spacing: 0.04em;
     margin: 0.75rem 0 0.3rem;
   }
@@ -175,8 +175,8 @@
   }
 
   p {
-    font-size: 0.9rem;
-    color: #1c1c1c;
+    font-size: var(--t-body-sm);
+    color: var(--ink);
     line-height: 1.5;
   }
 
@@ -189,7 +189,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.35rem 0;
-    border-bottom: 1px solid #f3f3f2;
+    border-bottom: 1px solid var(--paper-3);
     gap: 0.5rem;
   }
 
@@ -202,26 +202,28 @@
 
   .entry-desc {
     font-size: 0.88rem;
-    color: #1c1c1c;
+    color: var(--ink);
   }
 
   .entry-macros {
     font-size: 0.78rem;
-    color: #aaa;
+    color: var(--mute-2);
+    font-variant-numeric: tabular-nums;
   }
 
   .day-totals {
     margin-top: 0.75rem;
     font-size: 0.8rem;
-    color: #888;
+    color: var(--mute);
     font-weight: 500;
+    font-variant-numeric: tabular-nums;
   }
 
   .entry-del {
     background: none;
     border: none;
-    color: #ccc;
-    font-size: 0.9rem;
+    color: var(--mute-4);
+    font-size: var(--t-body-sm);
     cursor: pointer;
     padding: 0 0.15rem;
     margin-left: 0.5rem;
@@ -231,14 +233,14 @@
 
   @media (hover: hover) {
     .entry-del:hover {
-      color: #888;
+      color: var(--mute);
     }
   }
 
   .entry-del:focus-visible,
   .add-food-btn:focus-visible,
   .close:focus-visible {
-    outline: 2px solid #2d2d2d;
+    outline: 2px solid var(--ink-2);
     outline-offset: 2px;
   }
 
@@ -246,10 +248,10 @@
     width: 100%;
     margin-top: 1rem;
     padding: 0.5rem 1rem;
-    background: #fafaf9;
-    color: #2d2d2d;
-    border: 1px solid #e8e8e6;
-    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 0.88rem;
     font-family: inherit;
@@ -257,7 +259,7 @@
 
   @media (hover: hover) {
     .add-food-btn:hover {
-      border-color: #2d2d2d;
+      border-color: var(--ink-2);
     }
   }
 </style>
