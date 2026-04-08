@@ -150,6 +150,30 @@ export async function generateWeekSuggestions(start, end) {
   })).json()
 }
 
+export async function getFavorites() {
+  return (await apiFetch('/api/favorites')).json()
+}
+
+export async function addFavorite(entry) {
+  return (await apiFetch('/api/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      description: entry.description,
+      meal_type: entry.meal_type,
+      calories: entry.calories,
+      protein: entry.protein,
+      carbs: entry.carbs,
+      fat: entry.fat,
+      fiber: entry.fiber ?? 0,
+    }),
+  })).json()
+}
+
+export async function deleteFavorite(id) {
+  await apiFetch(`/api/favorites/${id}`, { method: 'DELETE' })
+}
+
 export async function getProfile() {
   return (await apiFetch('/api/profile')).json()
 }

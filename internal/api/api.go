@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,11 @@ type Handler struct {
 	gemini  *gemini.Service
 	cacheMu sync.RWMutex
 	cache   map[string]cacheItem
+	// migratedIDs tracks spreadsheet IDs that have been confirmed at
+	// CurrentSchemaVersion this server lifetime, so we only pay the
+	// GetSchemaVersion cost once per restart for already-current sheets.
+	migratedMu  sync.RWMutex
+	migratedIDs map[string]bool
 }
 
 type cacheItem struct {
@@ -46,9 +52,10 @@ const cacheTTL = 60 * time.Second
 
 func NewHandler(authHandler *auth.Handler, geminiAPIKey string) *Handler {
 	return &Handler{
-		auth:   authHandler,
-		gemini: gemini.NewService(geminiAPIKey),
-		cache:  make(map[string]cacheItem),
+		auth:        authHandler,
+		gemini:      gemini.NewService(geminiAPIKey),
+		cache:       make(map[string]cacheItem),
+		migratedIDs: make(map[string]bool),
 	}
 }
 
@@ -242,6 +249,34 @@ func (h *Handler) sheetsSvc(r *http.Request, session *auth.Session) (*sheets.Ser
 // Returns false and writes an error response if it fails.
 func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, session *auth.Session) bool {
 	if session.SpreadsheetID != "" {
+		// Fast path: if we've already confirmed this spreadsheet is at the
+		// current schema version this server lifetime, skip the version check.
+		h.migratedMu.RLock()
+		done := h.migratedIDs[session.SpreadsheetID]
+		h.migratedMu.RUnlock()
+		if done {
+			return true
+		}
+		// Slow path: check version and run any missing migrations.
+		ts := h.auth.TokenSource(r.Context(), session)
+		svc, err := sheets.NewService(r.Context(), ts, session.SpreadsheetID)
+		if err != nil {
+			h.writeAPIErr(w, err)
+			return false
+		}
+		version, err := svc.GetSchemaVersion(r.Context())
+		if err != nil {
+			h.writeAPIErr(w, err)
+			return false
+		}
+		if version < sheets.CurrentSchemaVersion {
+			if !h.runMigrations(w, r, ts, session.SpreadsheetID, version) {
+				return false
+			}
+		}
+		h.migratedMu.Lock()
+		h.migratedIDs[session.SpreadsheetID] = true
+		h.migratedMu.Unlock()
 		return true
 	}
 	ts := h.auth.TokenSource(r.Context(), session)
@@ -265,55 +300,11 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 			h.writeAPIErr(w, err)
 			return false
 		}
-		if version == 1 {
-			// Migrate v1 → v2: add poop columns to Activity sheet header
-			if err := sheets.MigrateV1toV2(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-			version = 2
-		}
-		if version == 2 {
-			// Migrate v2 → v3: add hydration column to Activity sheet header
-			if err := sheets.MigrateV2toV3(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-			version = 3
-		}
-		if version == 3 {
-			// Migrate v3 → v4: add goals column to Profile sheet header
-			if err := sheets.MigrateV3toV4(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-			version = 4
-		}
-		if version == 4 {
-			// Migrate v4 → v5: add dietary_restrictions column to Profile sheet header
-			if err := sheets.MigrateV4toV5(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-			version = 5
-		}
-		if version == 5 {
-			// Migrate v5 → v6: add Insights sheet for persisting AI insights
-			if err := sheets.MigrateV5toV6(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-			version = 6
-		}
-		if version == 6 {
-			// Migrate v6 → v7: add age column to Profile sheet header
-			if err := sheets.MigrateV6toV7(r.Context(), ts, id); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
-				return false
-			}
-		}
 		if version < 1 {
 			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
+			return false
+		}
+		if !h.runMigrations(w, r, ts, id, version) {
 			return false
 		}
 		session.SpreadsheetID = id
@@ -330,6 +321,34 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 	if err := h.auth.SetSession(w, session); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session save failed")
 		return false
+	}
+	return true
+}
+
+// runMigrations applies all schema upgrades from version → CurrentSchemaVersion.
+// Returns false and writes an error response if any step fails.
+func (h *Handler) runMigrations(w http.ResponseWriter, r *http.Request, ts oauth2.TokenSource, spreadsheetID string, version int) bool {
+	type step struct {
+		from    int
+		migrate func(context.Context, oauth2.TokenSource, string) error
+	}
+	steps := []step{
+		{1, sheets.MigrateV1toV2},
+		{2, sheets.MigrateV2toV3},
+		{3, sheets.MigrateV3toV4},
+		{4, sheets.MigrateV4toV5},
+		{5, sheets.MigrateV5toV6},
+		{6, sheets.MigrateV6toV7},
+		{7, sheets.MigrateV7toV8},
+	}
+	for _, s := range steps {
+		if version == s.from {
+			if err := s.migrate(r.Context(), ts, spreadsheetID); err != nil {
+				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return false
+			}
+			version++
+		}
 	}
 	return true
 }
@@ -674,6 +693,90 @@ func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
 	WriteJSON(w, http.StatusOK, req)
+}
+
+// GET /api/favorites
+func (h *Handler) GetFavorites(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	favs, err := svc.GetFavorites(r.Context())
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	if favs == nil {
+		favs = []sheets.FavoriteEntry{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"favorites": favs})
+}
+
+// POST /api/favorites — body: {description, meal_type, calories, protein, carbs, fat, fiber}
+func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	if !h.ensureSpreadsheet(w, r, session) {
+		return
+	}
+	var req struct {
+		Description string `json:"description"`
+		MealType    string `json:"meal_type"`
+		Calories    int    `json:"calories"`
+		Protein     int    `json:"protein"`
+		Carbs       int    `json:"carbs"`
+		Fat         int    `json:"fat"`
+		Fiber       int    `json:"fiber"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Description == "" {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	fav := sheets.FavoriteEntry{
+		ID:          uuid.NewString(),
+		Description: req.Description,
+		MealType:    req.MealType,
+		Calories:    req.Calories,
+		Protein:     req.Protein,
+		Carbs:       req.Carbs,
+		Fat:         req.Fat,
+		Fiber:       req.Fiber,
+		CreatedAt:   sheets.DateString(LocalNow(r)),
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	if err := svc.AddFavorite(r.Context(), fav); err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, fav)
+}
+
+// DELETE /api/favorites/{id}
+func (h *Handler) DeleteFavorite(w http.ResponseWriter, r *http.Request) {
+	session := auth.SessionFromContext(r.Context())
+	id := r.PathValue("id")
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "missing id")
+		return
+	}
+	svc, err := h.sheetsSvc(r, session)
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	if err := svc.DeleteFavorite(r.Context(), id); err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PATCH /api/entries/{id} — body: FoodEntry JSON (all fields)

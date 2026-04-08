@@ -91,6 +91,9 @@ func main() {
 	mux.HandleFunc("DELETE /api/entries/{id}", protect(apiHandler.DeleteEntry))
 	mux.HandleFunc("GET /api/profile", protect(apiHandler.GetProfile))
 	mux.HandleFunc("PUT /api/profile", protect(apiHandler.PutProfile))
+	mux.HandleFunc("GET /api/favorites", protect(apiHandler.GetFavorites))
+	mux.HandleFunc("POST /api/favorites", protect(apiHandler.AddFavorite))
+	mux.HandleFunc("DELETE /api/favorites/{id}", protect(apiHandler.DeleteFavorite))
 
 	// Serve Svelte SPA.
 	distFS, err := fs.Sub(frontendDist, "frontend/dist")

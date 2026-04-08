@@ -3,6 +3,8 @@
     import {
         getLog,
         confirmChat,
+        addFavorite,
+        getFavorites,
         generateInsights,
         generateDayInsights,
         fetchStoredInsight,
@@ -16,6 +18,7 @@
     import ChatDrawer from "./ChatDrawer.svelte";
     import ActivityNote from "./ActivityNote.svelte";
     import ProfilePanel from "./ProfilePanel.svelte";
+    import FavoritesView from "./FavoritesView.svelte";
     import { showError } from "./toast.js";
 
     const MEAL_ORDER = ["breakfast", "lunch", "snack", "dinner", "supplements"];
@@ -53,6 +56,7 @@
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
     let historyReady = false;
     let skipHistorySync = false;
+    let favoritedDescs = $state(new Set());
 
     let isToday = $derived(currentDate === todayStr());
     let isDayComplete = $derived.by(() => {
@@ -155,7 +159,7 @@
 
     function normalizeNavState(state) {
         const today = todayStr();
-        const nextView = state?.view === "history" ? "history" : "day";
+        const nextView = state?.view === "history" ? "history" : state?.view === "favorites" ? "favorites" : "day";
         const nextDate =
             typeof state?.currentDate === "string" && state.currentDate
                 ? state.currentDate
@@ -419,6 +423,21 @@
             ...dayData,
             entries: (dayData.entries ?? []).filter((e) => e.id !== id),
         };
+    }
+
+    async function handleFavoriteEntry(entry) {
+        if (favoritedDescs.has(entry.description)) return;
+        try {
+            await addFavorite(entry);
+            favoritedDescs = new Set([...favoritedDescs, entry.description]);
+        } catch (e) {
+            console.error("addFavorite failed:", e);
+            showError(e, "Failed to add to favorites.");
+        }
+    }
+
+    function syncFavoritedDescs(favorites) {
+        favoritedDescs = new Set(favorites.map((f) => f.description));
     }
 
     function openActivityDrawer(field = null) {
@@ -769,6 +788,12 @@
         }
     }
 
+    onMount(() => {
+        getFavorites()
+            .then((res) => syncFavoritedDescs(res.favorites ?? []))
+            .catch(() => {}); // non-critical; stars just start empty
+    });
+
     $effect(() => {
         const v = view;
         const d = currentDate;
@@ -779,7 +804,7 @@
             daySuggestions = null;
             loadDay(d);
             loadYesterday(d);
-        } else {
+        } else if (v === "history") {
             loadHistory(hw);
         }
     });
@@ -788,7 +813,7 @@
         const refresh = () => {
             if (view === "day") {
                 loadDay(currentDate);
-            } else {
+            } else if (view === "history") {
                 loadHistory(historyWeeks);
             }
         };
@@ -817,6 +842,10 @@
                 <button
                     class:active={view === "history"}
                     onclick={() => (view = "history")}>History</button
+                >
+                <button
+                    class:active={view === "favorites"}
+                    onclick={() => (view = "favorites")}>Favorites</button
                 >
             </div>
             <div class="header-actions">
@@ -1135,6 +1164,8 @@
                             {entry}
                             onUpdate={handleUpdate}
                             onDelete={handleDelete}
+                            onFavorite={handleFavoriteEntry}
+                            isFavorited={favoritedDescs.has(entry.description)}
                         />
                     {/each}
                     <button
@@ -1155,6 +1186,8 @@
             onOpen={openActivityDrawer}
             refreshKey={activityRefreshKey}
         />
+    {:else if view === "favorites"}
+        <FavoritesView onLoad={syncFavoritedDescs} />
     {:else}
         {#each weekGroupsData as week}
             <div class="week-block">

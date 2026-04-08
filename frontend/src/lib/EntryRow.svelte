@@ -3,7 +3,7 @@
     import { autosize } from "./autosize.js";
     import { showError } from "./toast.js";
 
-    let { entry, onUpdate, onDelete } = $props();
+    let { entry, onUpdate, onDelete, onFavorite = null, isFavorited = false } = $props();
 
     const MEALS = ["breakfast", "lunch", "snack", "dinner", "supplements"];
 
@@ -17,6 +17,7 @@
     let editFiber = $state(0);
     let saving = $state(false);
     let deleting = $state(false);
+    let favoriting = $state(false);
     let pendingDelete = $state(false);
     let deleteTimer = null;
 
@@ -84,6 +85,16 @@
         if (e.key === "Escape") modalOpen = false;
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }
+
+    async function handleFavorite() {
+        if (!onFavorite || favoriting) return;
+        favoriting = true;
+        try {
+            await onFavorite(entry);
+        } finally {
+            favoriting = false;
+        }
+    }
 </script>
 
 <div class="row" class:fading={deleting}>
@@ -95,6 +106,17 @@
             F{entry.fiber ? ` · ${entry.fiber}g Fb` : ""}</span
         >
     </div>
+    {#if onFavorite}
+        <button
+            class="fav"
+            class:starred={isFavorited}
+            onclick={handleFavorite}
+            disabled={favoriting || isFavorited}
+            aria-label={isFavorited ? "Already in favorites" : "Add to favorites"}
+            title={isFavorited ? "Already in favorites" : "Add to favorites"}
+            >{isFavorited ? "★" : "☆"}</button
+        >
+    {/if}
     <button
         class="del"
         class:confirm={pendingDelete}
@@ -219,6 +241,42 @@
         color: var(--mute);
         line-height: 1.3;
         font-variant-numeric: tabular-nums;
+    }
+
+    .fav {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+        flex-shrink: 0;
+        min-width: 2.25rem;
+        min-height: 2.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: manipulation;
+    }
+
+    .fav.starred {
+        color: var(--ink-2);
+    }
+
+    @media (hover: hover) {
+        .fav:not(.starred):hover {
+            color: var(--ink-2);
+        }
+    }
+
+    .fav:disabled {
+        opacity: 1;
+        cursor: default;
+    }
+
+    .fav:not(.starred):disabled {
+        opacity: 0.35;
     }
 
     .del {

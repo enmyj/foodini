@@ -170,8 +170,8 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 7 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 7", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 8 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 8", sheets.CurrentSchemaVersion)
 	}
 }
 

@@ -16,13 +16,14 @@ import (
 )
 
 const (
-	foodSheet     = "Food"
-	activitySheet = "Activity"
-	metaSheet     = "Meta"
-	profileSheet  = "Profile"
-	insightsSheet = "Insights"
+	foodSheet      = "Food"
+	activitySheet  = "Activity"
+	metaSheet      = "Meta"
+	profileSheet   = "Profile"
+	insightsSheet  = "Insights"
+	favoritesSheet = "Favorites"
 
-	CurrentSchemaVersion = 7
+	CurrentSchemaVersion = 8
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -170,6 +171,133 @@ type InsightRecord struct {
 	Insight     string `json:"insight"`
 }
 
+// FavoriteEntry is one row in the Favorites sheet.
+// Schema: id | description | meal_type | calories | protein | carbs | fat | fiber | created_at
+type FavoriteEntry struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	MealType    string `json:"meal_type"`
+	Calories    int    `json:"calories"`
+	Protein     int    `json:"protein"`
+	Carbs       int    `json:"carbs"`
+	Fat         int    `json:"fat"`
+	Fiber       int    `json:"fiber"`
+	CreatedAt   string `json:"created_at"`
+}
+
+func (f FavoriteEntry) ToRow() []interface{} {
+	return []interface{}{
+		f.ID, f.Description, f.MealType,
+		strconv.Itoa(f.Calories), strconv.Itoa(f.Protein),
+		strconv.Itoa(f.Carbs), strconv.Itoa(f.Fat), strconv.Itoa(f.Fiber),
+		f.CreatedAt,
+	}
+}
+
+func FavoriteEntryFromRow(row []interface{}) (*FavoriteEntry, error) {
+	if len(row) < 8 {
+		return nil, fmt.Errorf("favorite row has %d columns, need at least 8", len(row))
+	}
+	str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+	num := func(v interface{}) int {
+		n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
+		return n
+	}
+	f := &FavoriteEntry{
+		ID: str(row[0]), Description: str(row[1]), MealType: str(row[2]),
+		Calories: num(row[3]), Protein: num(row[4]),
+		Carbs: num(row[5]), Fat: num(row[6]), Fiber: num(row[7]),
+	}
+	if len(row) >= 9 {
+		f.CreatedAt = str(row[8])
+	}
+	return f, nil
+}
+
+// GetFavorites returns all saved favorite entries.
+func (s *Service) GetFavorites(ctx context.Context) ([]FavoriteEntry, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, favoritesSheet+"!A:I").Context(ctx).Do()
+	if err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == 400 {
+			return nil, nil // sheet not yet created
+		}
+		return nil, err
+	}
+	var out []FavoriteEntry
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 8 {
+			continue
+		}
+		f, err := FavoriteEntryFromRow(row)
+		if err != nil {
+			continue
+		}
+		out = append(out, *f)
+	}
+	return out, nil
+}
+
+// AddFavorite appends a favorite entry row.
+func (s *Service) AddFavorite(ctx context.Context, f FavoriteEntry) error {
+	vr := &googlesheets.ValueRange{Values: [][]interface{}{f.ToRow()}}
+	_, err := s.svc.Spreadsheets.Values.Append(
+		s.spreadsheetID, favoritesSheet+"!A:I", vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// DeleteFavorite removes the favorite entry row with the given ID.
+func (s *Service) DeleteFavorite(ctx context.Context, id string) error {
+	ss, err := s.svc.Spreadsheets.Get(s.spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get spreadsheet: %w", err)
+	}
+	var sheetID int64 = -1
+	for _, sh := range ss.Sheets {
+		if sh.Properties.Title == favoritesSheet {
+			sheetID = sh.Properties.SheetId
+			break
+		}
+	}
+	if sheetID < 0 {
+		return fmt.Errorf("favorites sheet not found")
+	}
+
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, favoritesSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get ids: %w", err)
+	}
+	rowIdx := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		return fmt.Errorf("favorite %q not found", id)
+	}
+
+	req := &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			DeleteDimension: &googlesheets.DeleteDimensionRequest{
+				Range: &googlesheets.DimensionRange{
+					SheetId:    sheetID,
+					Dimension:  "ROWS",
+					StartIndex: int64(rowIdx),
+					EndIndex:   int64(rowIdx + 1),
+				},
+			},
+		}},
+	}
+	_, err = s.svc.Spreadsheets.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do()
+	return err
+}
+
 // SaveInsight appends an insight record to the Insights sheet.
 func (s *Service) SaveInsight(ctx context.Context, rec InsightRecord) error {
 	vr := &googlesheets.ValueRange{
@@ -271,6 +399,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 			{Properties: &googlesheets.SheetProperties{Title: metaSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: insightsSheet}},
+			{Properties: &googlesheets.SheetProperties{Title: favoritesSheet}},
 		},
 	}
 	created, err := sheetsSvc.Spreadsheets.Create(ss).Context(ctx).Do()
@@ -330,6 +459,17 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("insights headers: %w", err)
+	}
+
+	// Favorites sheet: headers row
+	favHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"id", "description", "meal_type", "calories", "protein", "carbs", "fat", "fiber", "created_at"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, favoritesSheet+"!A1:I1", favHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("favorites headers: %w", err)
 	}
 
 	return created.SpreadsheetId, nil
@@ -488,6 +628,40 @@ func MigrateV6toV7(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"7"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV7toV8 upgrades an existing spreadsheet from schema v7 to v8.
+// It adds the Favorites sheet for storing saved food entries.
+func MigrateV7toV8(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	// Add Favorites sheet; ignore error if it already exists.
+	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			AddSheet: &googlesheets.AddSheetRequest{
+				Properties: &googlesheets.SheetProperties{Title: favoritesSheet},
+			},
+		}},
+	}).Context(ctx).Do()
+
+	favHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"id", "description", "meal_type", "calories", "protein", "carbs", "fat", "fiber", "created_at"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, favoritesSheet+"!A1:I1", favHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v7→v8 favorites header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"8"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()
