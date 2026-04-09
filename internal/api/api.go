@@ -208,11 +208,14 @@ func LocalNow(r *http.Request) time.Time {
 }
 
 // formatProfileContext builds the profile preamble injected into Gemini's system prompt.
-// Returns "" if all profile fields are empty.
-func formatProfileContext(p sheets.UserProfile) string {
+// Returns "" if all profile fields are empty. currentYear is used to compute
+// age from the stored birth year.
+func formatProfileContext(p sheets.UserProfile, currentYear int) string {
 	var parts []string
-	if p.Age != "" {
-		parts = append(parts, "age "+p.Age)
+	if p.BirthYear != "" {
+		if by, err := strconv.Atoi(strings.TrimSpace(p.BirthYear)); err == nil && by > 1900 && by <= currentYear {
+			parts = append(parts, fmt.Sprintf("age %d", currentYear-by))
+		}
 	}
 	if p.Gender != "" {
 		parts = append(parts, p.Gender)
@@ -340,6 +343,7 @@ func (h *Handler) runMigrations(w http.ResponseWriter, r *http.Request, ts oauth
 		{5, sheets.MigrateV5toV6},
 		{6, sheets.MigrateV6toV7},
 		{7, sheets.MigrateV7toV8},
+		{8, sheets.MigrateV8toV9},
 	}
 	for _, s := range steps {
 		if version == s.from {
@@ -475,7 +479,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		profile, _ := svc.GetProfile(r.Context())
-		profileCtx = formatProfileContext(profile)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
@@ -895,7 +899,7 @@ func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
 		profileCtx = string(cached)
 	} else {
 		profile, _ := svc.GetProfile(r.Context())
-		profileCtx = formatProfileContext(profile)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
@@ -966,7 +970,7 @@ func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
 		profileCtx = string(cached)
 	} else {
 		profile, _ := svc.GetProfile(r.Context())
-		profileCtx = formatProfileContext(profile)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
@@ -1203,7 +1207,7 @@ func (h *Handler) DaySuggestions(w http.ResponseWriter, r *http.Request) {
 		profileCtx = string(cached)
 	} else {
 		profile, _ := svc.GetProfile(r.Context())
-		profileCtx = formatProfileContext(profile)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
@@ -1325,7 +1329,7 @@ func (h *Handler) WeekSuggestions(w http.ResponseWriter, r *http.Request) {
 		profileCtx = string(cached)
 	} else {
 		profile, _ := svc.GetProfile(r.Context())
-		profileCtx = formatProfileContext(profile)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 

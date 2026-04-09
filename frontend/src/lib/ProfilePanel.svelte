@@ -7,7 +7,7 @@
     let { onClose } = $props();
 
     let gender = $state("");
-    let age = $state("");
+    let birthYear = $state("");
     let height = $state("");
     let weight = $state("");
     let notes = $state("");
@@ -20,7 +20,7 @@
         try {
             const p = await getProfile();
             gender = p.gender ?? "";
-            age = p.age ?? "";
+            birthYear = p.birth_year ?? "";
             height = p.height ?? "";
             weight = p.weight ?? "";
             notes = p.notes ?? "";
@@ -37,7 +37,7 @@
         try {
             await putProfile({
                 gender,
-                age,
+                birth_year: birthYear,
                 height,
                 weight,
                 notes,
@@ -89,13 +89,13 @@
                 />
             </label>
             <label>
-                <span>Age</span>
+                <span>Birth year</span>
                 <input
                     class="text-entry"
                     type="text"
                     inputmode="numeric"
-                    bind:value={age}
-                    placeholder="e.g. 34"
+                    bind:value={birthYear}
+                    placeholder="e.g. 1990"
                     disabled={saving}
                 />
             </label>

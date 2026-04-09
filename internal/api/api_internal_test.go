@@ -131,13 +131,13 @@ func TestWriteAPIErrOtherGoogle403StaysInternal(t *testing.T) {
 
 func TestFormatProfileContextIncludesAge(t *testing.T) {
 	got := formatProfileContext(sheets.UserProfile{
-		Age:                 "34",
+		BirthYear:           "1990",
 		Gender:              "female",
 		Height:              "165cm",
 		Weight:              "60kg",
 		Goals:               "build muscle",
 		DietaryRestrictions: "vegetarian",
-	})
+	}, 2024)
 
 	want := "User profile: age 34, female, 165cm, 60kg. Goals: build muscle. Dietary restrictions: vegetarian"
 	if got != want {

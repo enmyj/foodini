@@ -23,7 +23,7 @@ const (
 	insightsSheet  = "Insights"
 	favoritesSheet = "Favorites"
 
-	CurrentSchemaVersion = 8
+	CurrentSchemaVersion = 9
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -128,7 +128,7 @@ func DayLogFromRow(row []interface{}) DayLog {
 }
 
 // UserProfile stores user context for improving Gemini macro estimates.
-// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | age
+// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | birth_year
 type UserProfile struct {
 	Gender              string `json:"gender"`
 	Height              string `json:"height"`
@@ -136,11 +136,11 @@ type UserProfile struct {
 	Notes               string `json:"notes"`
 	Goals               string `json:"goals"`
 	DietaryRestrictions string `json:"dietary_restrictions"`
-	Age                 string `json:"age"`
+	BirthYear           string `json:"birth_year"`
 }
 
 func (p UserProfile) ToRow() []interface{} {
-	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions, p.Age}
+	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions, p.BirthYear}
 }
 
 func UserProfileFromRow(row []interface{}) UserProfile {
@@ -157,7 +157,7 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 		Notes:               str(3),
 		Goals:               str(4),
 		DietaryRestrictions: str(5),
-		Age:                 str(6),
+		BirthYear:           str(6),
 	}
 }
 
@@ -448,7 +448,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 
 	// Profile sheet: headers row
 	profHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "age"}},
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "birth_year"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		created.SpreadsheetId, profileSheet+"!A1:G1", profHeaders,
@@ -669,6 +669,55 @@ func MigrateV7toV8(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"8"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV8toV9 upgrades an existing spreadsheet from schema v8 to v9.
+// Renames the Profile column "age" to "birth_year" and converts any existing
+// integer age value into a birth year using the server's current year.
+// Non-numeric or out-of-range values are cleared.
+func MigrateV8toV9(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	// Read existing age cell (G2) before rewriting the header.
+	existing, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, profileSheet+"!G2").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v8→v9 read age: %w", err)
+	}
+	converted := ""
+	if len(existing.Values) > 0 && len(existing.Values[0]) > 0 {
+		raw := strings.TrimSpace(fmt.Sprintf("%v", existing.Values[0][0]))
+		if n, convErr := strconv.Atoi(raw); convErr == nil && n > 0 && n < 130 {
+			converted = strconv.Itoa(time.Now().Year() - n)
+		}
+	}
+
+	profHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "birth_year"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, profileSheet+"!A1:G1", profHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v8→v9 profile header: %w", err)
+	}
+
+	// Overwrite G2 with the converted birth year (or clear it).
+	ageCell := &googlesheets.ValueRange{Values: [][]interface{}{{converted}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, profileSheet+"!G2", ageCell,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v8→v9 profile value: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"9"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()
