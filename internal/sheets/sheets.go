@@ -238,6 +238,13 @@ func (s *Service) GetFavorites(ctx context.Context) ([]FavoriteEntry, error) {
 	return out, nil
 }
 
+// NormalizeFavoriteKey returns a canonical lookup key for a favorite
+// description: lowercased, trimmed, with internal whitespace collapsed to a
+// single space. Used to detect duplicates regardless of casing/spacing.
+func NormalizeFavoriteKey(desc string) string {
+	return strings.ToLower(strings.Join(strings.Fields(desc), " "))
+}
+
 // AddFavorite appends a favorite entry row.
 func (s *Service) AddFavorite(ctx context.Context, f FavoriteEntry) error {
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{f.ToRow()}}

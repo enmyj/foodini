@@ -13,6 +13,7 @@
         fetchStoredDaySuggestions,
         generateWeekSuggestions,
         fetchStoredWeekSuggestions,
+        patchEntry,
     } from "./api.js";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
@@ -42,6 +43,8 @@
     let repeating = $state(null);
     let repeatedMeals = $state(new Set());
     let repeatPicker = $state(null);
+    let scalePickerMeal = $state(null);
+    let scalingMeal = $state(null);
     let longPressTimer = null;
     let dateInputEl = $state(null);
 
@@ -59,15 +62,11 @@
     let favoritedDescs = $state(new Set());
 
     let isToday = $derived(currentDate === todayStr());
-    let isDayComplete = $derived.by(() => {
-        if (!dayData?.entries) return false;
-        const meals = new Set(dayData.entries.map((e) => e.meal_type));
-        return (
-            meals.has("breakfast") && meals.has("lunch") && meals.has("dinner")
-        );
-    });
-    // Day view: show insights if day is complete OR it's a past day
-    let showDayInsights = $derived(!isToday || isDayComplete);
+    let hasAnyEntry = $derived((dayData?.entries?.length ?? 0) > 0);
+    // Day view: show insights for any past day, or for today as soon as
+    // something has been logged. (Not everyone eats breakfast — don't gate
+    // insights on breakfast/lunch/dinner all being present.)
+    let showDayInsights = $derived(!isToday || hasAnyEntry);
     // Day view: show suggestions only for today
     let showDaySuggestions = $derived(isToday);
 
@@ -240,42 +239,52 @@
         }
     }
 
-    async function loadDay(date) {
-        loading = true;
-        loadError = "";
-        loadErrorAction = null;
-        collapsedMeals = new Set(MEAL_ORDER);
+    async function loadDay(date, { silent = false } = {}) {
+        if (!silent) {
+            loading = true;
+            loadError = "";
+            loadErrorAction = null;
+            collapsedMeals = new Set(MEAL_ORDER);
+        }
         try {
-            dayData = await getLog({ date });
-            if (dayData?.spreadsheet_url && !spreadsheetUrl)
-                spreadsheetUrl = dayData.spreadsheet_url;
+            const next = await getLog({ date });
+            dayData = next;
+            if (next?.spreadsheet_url && !spreadsheetUrl)
+                spreadsheetUrl = next.spreadsheet_url;
         } catch (err) {
-            dayData = null;
-            setLoadError(
-                err,
-                "Could not load this day. Try reloading, or sign in again.",
-            );
+            if (!silent) {
+                dayData = null;
+                setLoadError(
+                    err,
+                    "Could not load this day. Try reloading, or sign in again.",
+                );
+            }
         } finally {
-            loading = false;
+            if (!silent) loading = false;
         }
     }
 
-    async function loadHistory(weeks = historyWeeks) {
-        loading = true;
-        loadError = "";
-        loadErrorAction = null;
+    async function loadHistory(weeks = historyWeeks, { silent = false } = {}) {
+        if (!silent) {
+            loading = true;
+            loadError = "";
+            loadErrorAction = null;
+        }
         try {
-            historyData = await getLog({ days: weeks * 7 });
-            if (historyData?.spreadsheet_url && !spreadsheetUrl)
-                spreadsheetUrl = historyData.spreadsheet_url;
+            const next = await getLog({ days: weeks * 7 });
+            historyData = next;
+            if (next?.spreadsheet_url && !spreadsheetUrl)
+                spreadsheetUrl = next.spreadsheet_url;
         } catch (err) {
-            historyData = null;
-            setLoadError(
-                err,
-                "Could not load history. Try reloading, or sign in again.",
-            );
+            if (!silent) {
+                historyData = null;
+                setLoadError(
+                    err,
+                    "Could not load history. Try reloading, or sign in again.",
+                );
+            }
         } finally {
-            loading = false;
+            if (!silent) loading = false;
         }
     }
 
@@ -418,6 +427,32 @@
         };
     }
 
+    async function scaleMeal(meal, group, factor) {
+        if (scalingMeal) return;
+        scalingMeal = meal;
+        scalePickerMeal = null;
+        try {
+            const r1 = (v) => Math.round(v * factor);
+            const r10 = (v) => Math.round(v * factor * 10) / 10;
+            const updates = group.map((e) => ({
+                ...e,
+                calories: r1(e.calories),
+                protein: r10(e.protein),
+                carbs: r10(e.carbs),
+                fat: r10(e.fat),
+                fiber: r10(e.fiber ?? 0),
+            }));
+            const saved = await Promise.all(
+                updates.map((u) => patchEntry(u.id, u)),
+            );
+            for (const s of saved) handleUpdate(s);
+        } catch (err) {
+            showError(err, "Failed to scale meal.");
+        } finally {
+            scalingMeal = null;
+        }
+    }
+
     function handleDelete(id) {
         dayData = {
             ...dayData,
@@ -425,19 +460,31 @@
         };
     }
 
+    function normalizeFavoriteKey(desc) {
+        return (desc ?? "").toLowerCase().trim().replace(/\s+/g, " ");
+    }
+
     async function handleFavoriteEntry(entry) {
-        if (favoritedDescs.has(entry.description)) return;
+        const key = normalizeFavoriteKey(entry.description);
+        if (favoritedDescs.has(key)) return;
         try {
             await addFavorite(entry);
-            favoritedDescs = new Set([...favoritedDescs, entry.description]);
+            favoritedDescs = new Set([...favoritedDescs, key]);
         } catch (e) {
+            if (e?.status === 409 || e?.code === "favorite_exists") {
+                // Server knows about it — reconcile our local state and stop.
+                favoritedDescs = new Set([...favoritedDescs, key]);
+                return;
+            }
             console.error("addFavorite failed:", e);
             showError(e, "Failed to add to favorites.");
         }
     }
 
     function syncFavoritedDescs(favorites) {
-        favoritedDescs = new Set(favorites.map((f) => f.description));
+        favoritedDescs = new Set(
+            favorites.map((f) => normalizeFavoriteKey(f.description)),
+        );
     }
 
     function openActivityDrawer(field = null) {
@@ -810,11 +857,16 @@
     });
 
     $effect(() => {
+        const REFRESH_COOLDOWN_MS = 15_000;
+        let lastRefresh = 0;
         const refresh = () => {
+            const now = Date.now();
+            if (now - lastRefresh < REFRESH_COOLDOWN_MS) return;
+            lastRefresh = now;
             if (view === "day") {
-                loadDay(currentDate);
+                loadDay(currentDate, { silent: true });
             } else if (view === "history") {
-                loadHistory(historyWeeks);
+                loadHistory(historyWeeks, { silent: true });
             }
         };
         const onVisible = () => {
@@ -1126,6 +1178,38 @@
                                 >· {group.reduce((s, e) => s + e.calories, 0)} cal</span
                             >{/if}
                     </button>
+                    {#if group.length > 0}
+                        {#if scalePickerMeal === meal}
+                            <div class="scale-picker">
+                                <button
+                                    class="scale-opt"
+                                    onclick={() => scaleMeal(meal, group, 1.5)}
+                                    disabled={scalingMeal !== null}
+                                    >×1.5</button
+                                >
+                                <button
+                                    class="scale-opt"
+                                    onclick={() => scaleMeal(meal, group, 2)}
+                                    disabled={scalingMeal !== null}
+                                    >×2</button
+                                >
+                                <button
+                                    class="pick-cancel"
+                                    onclick={() => (scalePickerMeal = null)}
+                                    aria-label="Cancel scale">✕</button
+                                >
+                            </div>
+                        {:else}
+                            <button
+                                class="scale-meal-btn"
+                                class:spinning={scalingMeal === meal}
+                                onclick={() => (scalePickerMeal = meal)}
+                                disabled={scalingMeal !== null}
+                                aria-label="Scale {meal} portion"
+                                title="Scale {meal} portion">⊕</button
+                            >
+                        {/if}
+                    {/if}
                     {#if yesterdayByMeal[meal]?.length && !group.length}
                         {#if repeatPicker === meal}
                             <div class="repeat-picker">
@@ -1165,7 +1249,9 @@
                             onUpdate={handleUpdate}
                             onDelete={handleDelete}
                             onFavorite={handleFavoriteEntry}
-                            isFavorited={favoritedDescs.has(entry.description)}
+                            isFavorited={favoritedDescs.has(
+                                normalizeFavoriteKey(entry.description),
+                            )}
                         />
                     {/each}
                     <button
@@ -1686,6 +1772,68 @@
         .pick-cancel:hover {
             color: var(--mute);
         }
+    }
+
+    .scale-meal-btn {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 1rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.2rem 0.3rem;
+        touch-action: manipulation;
+        display: flex;
+        align-items: center;
+    }
+
+    @media (hover: hover) {
+        .scale-meal-btn:hover:not(:disabled) {
+            color: var(--ink-mute);
+        }
+    }
+
+    .scale-meal-btn:disabled {
+        cursor: default;
+        opacity: 0.4;
+    }
+
+    .scale-meal-btn.spinning {
+        animation: spin 0.7s linear infinite;
+        color: var(--mute);
+    }
+
+    .scale-picker {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .scale-picker .scale-opt {
+        background: none;
+        border: 1px solid var(--rule-4);
+        border-radius: var(--r-pill);
+        padding: 0.15rem 0.55rem;
+        font-size: 0.7rem;
+        color: var(--ink-mute);
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .scale-picker .scale-opt:hover:not(:disabled) {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .scale-picker .scale-opt:disabled {
+        opacity: 0.4;
+        cursor: default;
     }
 
     .repeat-btn.spinning {

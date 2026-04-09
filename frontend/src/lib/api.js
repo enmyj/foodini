@@ -3,6 +3,7 @@ const SAFE_ERROR_MESSAGES = {
   session_expired: 'Your session expired. Sign in again.',
   insufficient_scopes: 'Google permissions are missing. Re-authorize to continue.',
   upload_too_large: 'Photos are too large for one request. Try fewer photos and send again.',
+  favorite_exists: 'That favorite already exists.',
 }
 
 async function throwResponseError(res) {

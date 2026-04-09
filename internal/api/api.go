@@ -752,6 +752,18 @@ func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 		h.writeAPIErr(w, err)
 		return
 	}
+	existing, err := svc.GetFavorites(r.Context())
+	if err != nil {
+		h.writeAPIErr(w, err)
+		return
+	}
+	key := sheets.NormalizeFavoriteKey(fav.Description)
+	for _, e := range existing {
+		if sheets.NormalizeFavoriteKey(e.Description) == key {
+			writeErr(w, http.StatusConflict, "favorite_exists")
+			return
+		}
+	}
 	if err := svc.AddFavorite(r.Context(), fav); err != nil {
 		h.writeAPIErr(w, err)
 		return
@@ -945,7 +957,8 @@ func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	summary := buildDaySummary(req.Date, entries, dailyLogs)
+	today := sheets.DateString(LocalNow(r))
+	summary := buildDaySummary(req.Date, entries, dailyLogs, req.Date == today)
 
 	profileCacheKey := session.SpreadsheetID + "|profile"
 	var profileCtx string
@@ -1029,7 +1042,7 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 	return b.String()
 }
 
-func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
+func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog, inProgress bool) string {
 	// Reuse buildWeekSummary's per-day logic but with a single-day header.
 	logByDate := map[string]sheets.DayLog{}
 	for _, l := range dailyLogs {
@@ -1039,7 +1052,13 @@ func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets
 	log := logByDate[date]
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Day: %s (%s)\n\n", date, t.Weekday())
+	fmt.Fprintf(&b, "Day: %s (%s)\n", date, t.Weekday())
+	if inProgress {
+		fmt.Fprintf(&b, "Status: TODAY — day is still in progress; more meals may be logged later.\n")
+	} else {
+		fmt.Fprintf(&b, "Status: past day — complete log.\n")
+	}
+	b.WriteString("\n")
 	if len(entries) == 0 {
 		fmt.Fprintf(&b, "  No food logged\n")
 	} else {

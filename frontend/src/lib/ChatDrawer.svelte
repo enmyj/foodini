@@ -1000,7 +1000,7 @@
         color: var(--ink);
     }
 
-    .refine-row input:focus {
+    .refine-row textarea:focus {
         outline: none;
         border-color: var(--ink-2);
     }

@@ -18,10 +18,13 @@
     let saving = $state(false);
     let deleting = $state(false);
     let favoriting = $state(false);
+    let scaling = $state(false);
+    let scaleOpen = $state(false);
     let pendingDelete = $state(false);
     let deleteTimer = null;
 
     function openModal() {
+        scaleOpen = false;
         editDesc = entry.description;
         editMeal = entry.meal_type;
         editCal = entry.calories;
@@ -86,6 +89,30 @@
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }
 
+    async function scaleEntry(factor) {
+        if (scaling) return;
+        scaling = true;
+        scaleOpen = false;
+        try {
+            const r1 = (v) => Math.round(v * factor);
+            const r10 = (v) => Math.round(v * factor * 10) / 10;
+            const updated = {
+                ...entry,
+                calories: r1(entry.calories),
+                protein: r10(entry.protein),
+                carbs: r10(entry.carbs),
+                fat: r10(entry.fat),
+                fiber: r10(entry.fiber ?? 0),
+            };
+            const saved = await patchEntry(entry.id, updated);
+            onUpdate(saved);
+        } catch (e) {
+            showError(e, "Failed to scale entry.");
+        } finally {
+            scaling = false;
+        }
+    }
+
     async function handleFavorite() {
         if (!onFavorite || favoriting) return;
         favoriting = true;
@@ -106,6 +133,19 @@
             F{entry.fiber ? ` · ${entry.fiber}g Fb` : ""}</span
         >
     </div>
+    {#if scaleOpen}
+        <button class="scale-opt" onclick={() => scaleEntry(1.5)} disabled={scaling}>×1.5</button>
+        <button class="scale-opt" onclick={() => scaleEntry(2)} disabled={scaling}>×2</button>
+    {/if}
+    <button
+        class="scale-toggle"
+        class:open={scaleOpen}
+        onclick={() => (scaleOpen = !scaleOpen)}
+        disabled={scaling}
+        aria-label="Scale portion"
+        title="Scale portion"
+        >⊕</button
+    >
     {#if onFavorite}
         <button
             class="fav"
@@ -241,6 +281,69 @@
         color: var(--mute);
         line-height: 1.3;
         font-variant-numeric: tabular-nums;
+    }
+
+    .scale-toggle {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+        flex-shrink: 0;
+        min-width: 2.25rem;
+        min-height: 2.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: manipulation;
+    }
+
+    .scale-toggle.open {
+        color: var(--ink-2);
+    }
+
+    .scale-toggle:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .scale-toggle:not(:disabled):hover {
+            color: var(--ink-2);
+        }
+    }
+
+    .scale-opt {
+        background: none;
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        color: var(--ink-2);
+        font-size: 0.72rem;
+        font-weight: 600;
+        font-family: inherit;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.25rem 0.35rem;
+        flex-shrink: 0;
+        min-height: 2.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: manipulation;
+        white-space: nowrap;
+    }
+
+    @media (hover: hover) {
+        .scale-opt:hover:not(:disabled) {
+            background: var(--rule);
+        }
+    }
+
+    .scale-opt:disabled {
+        opacity: 0.35;
+        cursor: default;
     }
 
     .fav {
