@@ -27,7 +27,14 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	// --- Global middleware (outermost first) ---
 	e.Use(middleware.Recover())
 	e.Use(requestLogger())
-	e.Use(middleware.BodyLimit(defaultBodyLimit))
+	blCfg := middleware.BodyLimitConfig{
+		LimitBytes: defaultBodyLimit,
+		Skipper: func(c *echo.Context) bool {
+			return c.Request().URL.Path == "/api/chat"
+		},
+	}
+	blMw, _ := blCfg.ToMiddleware()
+	e.Use(blMw)
 
 	// Security headers
 	secureMw, _ := middleware.SecureConfig{
