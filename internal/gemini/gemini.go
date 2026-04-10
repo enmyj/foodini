@@ -261,7 +261,7 @@ Each bullet must start with the • character (not * or -). Use **bold** only fo
 
 The summary will indicate whether the day is still in progress (today) or a completed past day.
 - Past day: analyze the full log as-is. Do not prescribe changes for that day.
-- In-progress day: lean forward-looking. Frame suggestions as "for the rest of the day, focus on X to hit your goals" rather than diagnosing the day as under-target. Do NOT treat missing meals (breakfast, lunch, etc.) as a deficiency — many people skip meals intentionally; only comment on meal timing if the logged data suggests a real problem (e.g. no food at all by late evening). Prioritize what the user could still adjust before bed.
+- In-progress day: assume the user will still eat more. Never flag low totals (calories, protein, etc.) just because the day isn't finished — they know dinner is coming. Only comment on something obviously lopsided in what's been logged so far (e.g. zero vegetables across three meals, very high sodium already). Frame any suggestion forward: "consider adding X to a later meal" rather than diagnosing the day as under-target.
 
 Nutrition benchmarks (general RDA): protein 1.2–2.0 g/kg depending on activity and goals; ~5 servings fruits/veg per day; 25-30g fiber; added sugar <25g; sodium <2,300mg; variety across food groups. Flag a gap only when the log clearly shows it — don't harp on the same nutrient every day or nitpick isolated meals.`
 
