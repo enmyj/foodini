@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v5"
+
 	"foodtracker/internal/auth"
 )
 
@@ -21,17 +23,21 @@ func TestSessionRoundTrip(t *testing.T) {
 		SpreadsheetID: "sheet-123",
 	}
 
+	// Use echo context to set session cookie.
 	w := httptest.NewRecorder()
-	if err := h.SetSession(w, session); err != nil {
+	req := httptest.NewRequest("GET", "/", nil)
+	c := echo.NewContext(req, w)
+	if err := h.SetSession(c, session); err != nil {
 		t.Fatalf("SetSession: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/", nil)
-	for _, c := range w.Result().Cookies() {
-		req.AddCookie(c)
+	// Read it back via GetSession (which reads from *http.Request).
+	req2 := httptest.NewRequest("GET", "/", nil)
+	for _, ck := range w.Result().Cookies() {
+		req2.AddCookie(ck)
 	}
 
-	got, err := h.GetSession(req)
+	got, err := h.GetSession(req2)
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}

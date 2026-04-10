@@ -2,8 +2,8 @@
 // golang.org/x/time/rate (the canonical Go token-bucket limiter).
 //
 // A single Limiter holds one token bucket per key. A key-extractor function
-// lets callers partition by user, IP, API token, etc. The limiter evicts
-// idle keys periodically so the map stays bounded.
+// lets callers partition by user, IP, etc. The limiter evicts idle keys
+// periodically so the map stays bounded.
 package ratelimit
 
 import (
@@ -13,15 +13,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/labstack/echo/v5"
 	"golang.org/x/time/rate"
 
 	"foodtracker/internal/auth"
 )
 
-// KeyFunc extracts a rate-limit key from a request. Returning "" bypasses
-// limiting for that request (useful when a session is unavailable and
-// auth will reject the request anyway).
-type KeyFunc func(*http.Request) string
+// KeyFunc extracts a rate-limit key from an echo context. Returning "" bypasses
+// limiting for that request.
+type KeyFunc func(c *echo.Context) string
 
 // Limiter holds a token bucket per key.
 type Limiter struct {
@@ -76,29 +76,27 @@ func (l *Limiter) get(key string) *rate.Limiter {
 	return e.limiter
 }
 
-// Middleware returns an http middleware that enforces the limit keyed by keyFn.
-func (l *Limiter) Middleware(keyFn KeyFunc) func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			key := keyFn(r)
+// Middleware returns an Echo middleware that enforces the limit keyed by keyFn.
+func (l *Limiter) Middleware(keyFn KeyFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			key := keyFn(c)
 			if key == "" {
-				next(w, r)
-				return
+				return next(c)
 			}
 			if !l.get(key).Allow() {
-				w.Header().Set("Retry-After", "1")
-				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-				return
+				c.Response().Header().Set("Retry-After", "1")
+				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 			}
-			next(w, r)
+			return next(c)
 		}
 	}
 }
 
 // UserKey keys rate-limit buckets by the authenticated user's email.
-// Must be used inside auth.Authenticated so the session is in context.
-func UserKey(r *http.Request) string {
-	s := auth.SessionFromContext(r.Context())
+// Must be used after auth middleware so the session is in context.
+func UserKey(c *echo.Context) string {
+	s := auth.SessionFrom(c)
 	if s == nil || s.UserEmail == "" {
 		return ""
 	}
@@ -108,24 +106,15 @@ func UserKey(r *http.Request) string {
 // IPKey keys rate-limit buckets by the client IP.
 //
 // Deployment assumption: this app runs on Cloud Run behind Cloudflare.
-//   - Cloudflare (when proxied) sets CF-Connecting-IP to the real client.
-//   - Cloud Run's front end sets X-Forwarded-For; the leftmost entry is
-//     the client that hit the front end (which, when proxied, is
-//     Cloudflare — so we prefer CF-Connecting-IP when present).
-//   - r.RemoteAddr on Cloud Run is a Google front-end address and is
-//     useless as a limiter key (everyone would share it).
-//
-// Caveat: Cloud Run services are also reachable directly at their
-// *.run.app URL, bypassing Cloudflare. A determined attacker could hit
-// that URL and set CF-Connecting-IP to anything. To fully close that
-// gap, lock Cloud Run ingress to Cloudflare's IP ranges (or put Cloud
-// Run behind an internal LB).
-func IPKey(r *http.Request) string {
+//   - Cloudflare sets CF-Connecting-IP to the real client.
+//   - Cloud Run sets X-Forwarded-For; the leftmost entry is the client.
+//   - r.RemoteAddr on Cloud Run is a Google front-end address.
+func IPKey(c *echo.Context) string {
+	r := c.Request()
 	if cf := r.Header.Get("CF-Connecting-IP"); cf != "" {
 		return "ip:" + cf
 	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Leftmost entry = original client.
 		first, _, _ := strings.Cut(xff, ",")
 		return "ip:" + strings.TrimSpace(first)
 	}

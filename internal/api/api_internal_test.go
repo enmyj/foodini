@@ -12,11 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"foodtracker/internal/auth"
-	"foodtracker/internal/sheets"
-
+	"github.com/labstack/echo/v5"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
+
+	"foodtracker/internal/auth"
+	"foodtracker/internal/sheets"
 )
 
 func newTestHandler(t *testing.T) *Handler {
@@ -28,16 +29,30 @@ func newTestHandler(t *testing.T) *Handler {
 	}), "")
 }
 
+var testEcho = echo.New()
+
+func newEchoContext(req *http.Request) *echo.Context {
+	rec := httptest.NewRecorder()
+	return testEcho.NewContext(req, rec)
+}
+
+func recorderFrom(c *echo.Context) *httptest.ResponseRecorder {
+	resp := c.Response().(*echo.Response)
+	return resp.ResponseWriter.(*httptest.ResponseRecorder)
+}
+
 func TestWriteAPIErrSessionExpiredClearsCookie(t *testing.T) {
 	h := newTestHandler(t)
-	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newEchoContext(req)
 
-	h.writeAPIErr(w, fmt.Errorf("token refresh failed: %w", &oauth2.RetrieveError{
+	h.writeAPIErr(c, fmt.Errorf("token refresh failed: %w", &oauth2.RetrieveError{
 		Response:         &http.Response{StatusCode: http.StatusBadRequest},
 		ErrorCode:        "invalid_grant",
 		ErrorDescription: "refresh token revoked",
 	}))
 
+	w := recorderFrom(c)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
 	}
@@ -55,9 +70,10 @@ func TestWriteAPIErrSessionExpiredClearsCookie(t *testing.T) {
 
 func TestWriteAPIErrInsufficientScopes(t *testing.T) {
 	h := newTestHandler(t)
-	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newEchoContext(req)
 
-	h.writeAPIErr(w, &googleapi.Error{
+	h.writeAPIErr(c, &googleapi.Error{
 		Code: http.StatusForbidden,
 		Errors: []googleapi.ErrorItem{{
 			Reason:  "insufficientPermissions",
@@ -65,6 +81,7 @@ func TestWriteAPIErrInsufficientScopes(t *testing.T) {
 		}},
 	})
 
+	w := recorderFrom(c)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusForbidden)
 	}
@@ -79,9 +96,10 @@ func TestWriteAPIErrInsufficientScopes(t *testing.T) {
 
 func TestWriteAPIErrInsufficientScopesFromDetails(t *testing.T) {
 	h := newTestHandler(t)
-	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newEchoContext(req)
 
-	h.writeAPIErr(w, &googleapi.Error{
+	h.writeAPIErr(c, &googleapi.Error{
 		Code:    http.StatusForbidden,
 		Message: "Permission denied",
 		Details: []interface{}{
@@ -92,6 +110,7 @@ func TestWriteAPIErrInsufficientScopesFromDetails(t *testing.T) {
 		},
 	})
 
+	w := recorderFrom(c)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusForbidden)
 	}
@@ -106,9 +125,10 @@ func TestWriteAPIErrInsufficientScopesFromDetails(t *testing.T) {
 
 func TestWriteAPIErrOtherGoogle403StaysInternal(t *testing.T) {
 	h := newTestHandler(t)
-	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	c := newEchoContext(req)
 
-	h.writeAPIErr(w, &googleapi.Error{
+	h.writeAPIErr(c, &googleapi.Error{
 		Code:    http.StatusForbidden,
 		Message: "Rate Limit Exceeded",
 		Errors: []googleapi.ErrorItem{{
@@ -117,6 +137,7 @@ func TestWriteAPIErrOtherGoogle403StaysInternal(t *testing.T) {
 		}},
 	})
 
+	w := recorderFrom(c)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusInternalServerError)
 	}

@@ -13,25 +13,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/googleapi"
+
 	"foodtracker/internal/auth"
 	"foodtracker/internal/gemini"
 	"foodtracker/internal/sheets"
-
-	"github.com/google/uuid"
-	"golang.org/x/oauth2"
-	"google.golang.org/api/googleapi"
 )
 
 // Handler holds references to auth and gemini services.
-// The sheets service is created per-request using the user's token source.
 type Handler struct {
 	auth    *auth.Handler
 	gemini  *gemini.Service
 	cacheMu sync.RWMutex
 	cache   map[string]cacheItem
-	// migratedIDs tracks spreadsheet IDs that have been confirmed at
-	// CurrentSchemaVersion this server lifetime, so we only pay the
-	// GetSchemaVersion cost once per restart for already-current sheets.
+	// migratedIDs tracks spreadsheet IDs confirmed at CurrentSchemaVersion.
 	migratedMu  sync.RWMutex
 	migratedIDs map[string]bool
 }
@@ -75,7 +73,6 @@ func (h *Handler) cacheSet(key string, data []byte) {
 	h.cacheMu.Unlock()
 }
 
-// cacheInvalidate removes all log cache entries for a spreadsheet.
 func (h *Handler) cacheInvalidate(spreadsheetID string) {
 	prefix := spreadsheetID + "|"
 	h.cacheMu.Lock()
@@ -87,19 +84,12 @@ func (h *Handler) cacheInvalidate(spreadsheetID string) {
 	h.cacheMu.Unlock()
 }
 
-// Authenticated delegates to the auth handler's middleware.
-func (h *Handler) Authenticated(next http.HandlerFunc) http.HandlerFunc {
-	return h.auth.Authenticated(next)
+func writeJSON(c *echo.Context, status int, v any) error {
+	return c.JSON(status, v)
 }
 
-func WriteJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	WriteJSON(w, status, map[string]string{"error": msg})
+func writeErr(c *echo.Context, status int, msg string) error {
+	return c.JSON(status, map[string]string{"error": msg})
 }
 
 func isSessionExpiredErr(err error) bool {
@@ -180,23 +170,18 @@ func detailHasInsufficientScopes(detail any) bool {
 	return false
 }
 
-// writeAPIErr maps auth and Google API failures to stable frontend-facing errors.
-func (h *Handler) writeAPIErr(w http.ResponseWriter, err error) {
+func (h *Handler) writeAPIErr(c *echo.Context, err error) error {
 	if isSessionExpiredErr(err) {
-		h.auth.ClearSession(w)
-		writeErr(w, http.StatusUnauthorized, "session_expired")
-		return
+		h.auth.ClearSession(c)
+		return writeErr(c, http.StatusUnauthorized, "session_expired")
 	}
 	if isInsufficientScopesErr(err) {
-		writeErr(w, http.StatusForbidden, "insufficient_scopes")
-		return
+		return writeErr(c, http.StatusForbidden, "insufficient_scopes")
 	}
-	writeErr(w, http.StatusInternalServerError, err.Error())
+	return writeErr(c, http.StatusInternalServerError, err.Error())
 }
 
 // LocalNow returns the current time in the user's local timezone.
-// It reads the IANA timezone name from the X-Timezone request header.
-// Falls back to server time if the header is missing or invalid.
 func LocalNow(r *http.Request) time.Time {
 	tz := r.Header.Get("X-Timezone")
 	if tz != "" {
@@ -207,9 +192,6 @@ func LocalNow(r *http.Request) time.Time {
 	return time.Now()
 }
 
-// formatProfileContext builds the profile preamble injected into Gemini's system prompt.
-// Returns "" if all profile fields are empty. currentYear is used to compute
-// age from the stored birth year.
 func formatProfileContext(p sheets.UserProfile, currentYear int) string {
 	var parts []string
 	if p.BirthYear != "" {
@@ -242,38 +224,36 @@ func formatProfileContext(p sheets.UserProfile, currentYear int) string {
 	return ctx
 }
 
-func (h *Handler) sheetsSvc(r *http.Request, session *auth.Session) (*sheets.Service, error) {
-	ts := h.auth.TokenSource(r.Context(), session)
-	return sheets.NewService(r.Context(), ts, session.SpreadsheetID)
+func (h *Handler) sheetsSvc(c *echo.Context, session *auth.Session) (*sheets.Service, error) {
+	ctx := c.Request().Context()
+	ts := h.auth.TokenSource(ctx, session)
+	return sheets.NewService(ctx, ts, session.SpreadsheetID)
 }
 
 // ensureSpreadsheet finds or creates the user's spreadsheet.
-// Updates the session cookie with the spreadsheet ID.
-// Returns false and writes an error response if it fails.
-func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, session *auth.Session) bool {
+// Returns false if it fails (error response already written).
+func (h *Handler) ensureSpreadsheet(c *echo.Context, session *auth.Session) bool {
+	r := c.Request()
 	if session.SpreadsheetID != "" {
-		// Fast path: if we've already confirmed this spreadsheet is at the
-		// current schema version this server lifetime, skip the version check.
 		h.migratedMu.RLock()
 		done := h.migratedIDs[session.SpreadsheetID]
 		h.migratedMu.RUnlock()
 		if done {
 			return true
 		}
-		// Slow path: check version and run any missing migrations.
 		ts := h.auth.TokenSource(r.Context(), session)
 		svc, err := sheets.NewService(r.Context(), ts, session.SpreadsheetID)
 		if err != nil {
-			h.writeAPIErr(w, err)
+			h.writeAPIErr(c, err)
 			return false
 		}
 		version, err := svc.GetSchemaVersion(r.Context())
 		if err != nil {
-			h.writeAPIErr(w, err)
+			h.writeAPIErr(c, err)
 			return false
 		}
 		if version < sheets.CurrentSchemaVersion {
-			if !h.runMigrations(w, r, ts, session.SpreadsheetID, version) {
+			if !h.runMigrations(c, ts, session.SpreadsheetID, version) {
 				return false
 			}
 		}
@@ -284,53 +264,49 @@ func (h *Handler) ensureSpreadsheet(w http.ResponseWriter, r *http.Request, sess
 	}
 	ts := h.auth.TokenSource(r.Context(), session)
 
-	// Search Drive for an existing spreadsheet from a previous session
 	id, err := sheets.FindExistingSpreadsheet(r.Context(), ts, session.UserEmail)
 	if err != nil {
-		h.writeAPIErr(w, err)
+		h.writeAPIErr(c, err)
 		return false
 	}
 
 	if id != "" {
-		// Found an existing spreadsheet — check its schema version
 		svc, err := sheets.NewService(r.Context(), ts, id)
 		if err != nil {
-			h.writeAPIErr(w, err)
+			h.writeAPIErr(c, err)
 			return false
 		}
 		version, err := svc.GetSchemaVersion(r.Context())
 		if err != nil {
-			h.writeAPIErr(w, err)
+			h.writeAPIErr(c, err)
 			return false
 		}
 		if version < 1 {
-			writeErr(w, http.StatusConflict, "incompatible_spreadsheet")
+			writeErr(c, http.StatusConflict, "incompatible_spreadsheet")
 			return false
 		}
-		if !h.runMigrations(w, r, ts, id, version) {
+		if !h.runMigrations(c, ts, id, version) {
 			return false
 		}
 		session.SpreadsheetID = id
 	} else {
-		// No existing spreadsheet — create a new one
 		id, err = sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
 		if err != nil {
-			h.writeAPIErr(w, err)
+			h.writeAPIErr(c, err)
 			return false
 		}
 		session.SpreadsheetID = id
 	}
 
-	if err := h.auth.SetSession(w, session); err != nil {
-		writeErr(w, http.StatusInternalServerError, "session save failed")
+	if err := h.auth.SetSession(c, session); err != nil {
+		writeErr(c, http.StatusInternalServerError, "session save failed")
 		return false
 	}
 	return true
 }
 
-// runMigrations applies all schema upgrades from version → CurrentSchemaVersion.
-// Returns false and writes an error response if any step fails.
-func (h *Handler) runMigrations(w http.ResponseWriter, r *http.Request, ts oauth2.TokenSource, spreadsheetID string, version int) bool {
+func (h *Handler) runMigrations(c *echo.Context, ts oauth2.TokenSource, spreadsheetID string, version int) bool {
+	ctx := c.Request().Context()
 	type step struct {
 		from    int
 		migrate func(context.Context, oauth2.TokenSource, string) error
@@ -347,8 +323,8 @@ func (h *Handler) runMigrations(w http.ResponseWriter, r *http.Request, ts oauth
 	}
 	for _, s := range steps {
 		if version == s.from {
-			if err := s.migrate(r.Context(), ts, spreadsheetID); err != nil {
-				writeErr(w, http.StatusInternalServerError, "migration failed: "+err.Error())
+			if err := s.migrate(ctx, ts, spreadsheetID); err != nil {
+				writeErr(c, http.StatusInternalServerError, "migration failed: "+err.Error())
 				return false
 			}
 			version++
@@ -357,42 +333,38 @@ func (h *Handler) runMigrations(w http.ResponseWriter, r *http.Request, ts oauth
 	return true
 }
 
-// GET /api/log?date=YYYY-MM-DD   → today's entries grouped with activity note
-// GET /api/log?days=N             → last N days (1-365, default 30)
-func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// GET /api/log?date=YYYY-MM-DD or ?days=N
+func (h *Handler) GetLog(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	today := sheets.DateString(LocalNow(r))
 
-	if daysStr := r.URL.Query().Get("days"); daysStr != "" {
+	if daysStr := c.QueryParam("days"); daysStr != "" {
 		days, err := strconv.Atoi(daysStr)
 		if err != nil || days < 1 || days > 365 {
 			days = 30
 		}
 		cacheKey := session.SpreadsheetID + "|days|" + strconv.Itoa(days)
 		if cached, ok := h.cacheGet(cacheKey); ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(cached)
-			return
+			return c.Blob(http.StatusOK, "application/json", cached)
 		}
 		start := sheets.DateString(LocalNow(r).AddDate(0, 0, -(days - 1)))
-		entries, err := svc.GetFoodByDateRange(r.Context(), start, today)
+		entries, err := svc.GetFoodByDateRange(ctx, start, today)
 		if err != nil {
-			h.writeAPIErr(w, err)
-			return
+			return h.writeAPIErr(c, err)
 		}
-		dailyLogs, err := svc.GetActivityByDateRange(r.Context(), start, today)
+		dailyLogs, err := svc.GetActivityByDateRange(ctx, start, today)
 		if err != nil {
-			h.writeAPIErr(w, err)
-			return
+			return h.writeAPIErr(c, err)
 		}
 		data, _ := json.Marshal(map[string]any{
 			"entries":         entries,
@@ -402,30 +374,24 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 			"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 		})
 		h.cacheSet(cacheKey, data)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
-		return
+		return c.Blob(http.StatusOK, "application/json", data)
 	}
 
-	date := r.URL.Query().Get("date")
+	date := c.QueryParam("date")
 	if date == "" {
 		date = today
 	}
 	cacheKey := session.SpreadsheetID + "|date|" + date
 	if cached, ok := h.cacheGet(cacheKey); ok {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(cached)
-		return
+		return c.Blob(http.StatusOK, "application/json", cached)
 	}
-	entries, err := svc.GetFoodByDate(r.Context(), date)
+	entries, err := svc.GetFoodByDate(ctx, date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	dayLog, err := svc.GetActivity(r.Context(), date)
+	dayLog, err := svc.GetActivity(ctx, date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	data, _ := json.Marshal(map[string]any{
 		"entries":         entries,
@@ -434,32 +400,28 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 	})
 	h.cacheSet(cacheKey, data)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	return c.Blob(http.StatusOK, "application/json", data)
 }
 
-// POST /api/chat — accepts JSON or multipart/form-data with optional images.
-// Returns {"done": false, "message": "..."} for clarifying questions.
-// Returns {"done": false, "pending": true, "entries": [...]} when entries are ready for confirmation.
-func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/chat
+func (h *Handler) Chat(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	req, err := parseChatRequest(r)
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "upload_too_large")
-			return
+			return writeErr(c, http.StatusRequestEntityTooLarge, "upload_too_large")
 		}
-		writeErr(w, http.StatusBadRequest, "invalid request body")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid request body")
 	}
 	if strings.TrimSpace(req.Message) == "" && len(req.Images) == 0 {
-		writeErr(w, http.StatusBadRequest, "message or image required")
-		return
+		return writeErr(c, http.StatusBadRequest, "message or image required")
 	}
 
 	targetDate := req.Date
@@ -467,18 +429,16 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		targetDate = sheets.DateString(LocalNow(r))
 	}
 
-	// Fetch user profile for Gemini context (cached; invalidated on profile save)
 	profileCacheKey := session.SpreadsheetID + "|profile"
 	var profileCtx string
 	if cached, ok := h.cacheGet(profileCacheKey); ok {
 		profileCtx = string(cached)
 	} else {
-		svc, err := h.sheetsSvc(r, session)
+		svc, err := h.sheetsSvc(c, session)
 		if err != nil {
-			h.writeAPIErr(w, err)
-			return
+			return h.writeAPIErr(c, err)
 		}
-		profile, _ := svc.GetProfile(r.Context())
+		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
@@ -488,18 +448,16 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		message = "(meal type: " + req.Meal + ") " + message
 	}
 
-	responseText, entries, err := h.gemini.Chat(r.Context(), session.UserEmail, targetDate, message, profileCtx, req.Images)
+	responseText, entries, err := h.gemini.Chat(ctx, session.UserEmail, targetDate, message, profileCtx, req.Images)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
-		return
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 
 	if len(entries) == 0 {
-		WriteJSON(w, http.StatusOK, map[string]any{"done": false, "message": responseText})
-		return
+		return writeJSON(c, http.StatusOK, map[string]any{"done": false, "message": responseText})
 	}
 
-	WriteJSON(w, http.StatusOK, map[string]any{
+	return writeJSON(c, http.StatusOK, map[string]any{
 		"done":    false,
 		"pending": true,
 		"entries": entries,
@@ -586,21 +544,21 @@ func parseMultipartChatRequest(r *http.Request) (chatRequest, error) {
 	return req, nil
 }
 
-// POST /api/chat/confirm — body: {"entries": [...], "date": "YYYY-MM-DD"}
-// Saves confirmed entries returned from a pending chat response.
-func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/chat/confirm
+func (h *Handler) ConfirmChat(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Entries []sheets.FoodEntry `json:"entries"`
-		Date    string             `json:"date"` // optional; defaults to today
+		Date    string             `json:"date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Entries) == 0 {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid request body")
 	}
 
 	targetDate := req.Date
@@ -608,10 +566,9 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 		targetDate = sheets.DateString(LocalNow(r))
 	}
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
 	now := LocalNow(r)
@@ -629,104 +586,96 @@ func (h *Handler) ConfirmChat(w http.ResponseWriter, r *http.Request) {
 			Fat:         e.Fat,
 			Fiber:       e.Fiber,
 		}
-		if err := svc.AppendFood(r.Context(), fe); err != nil {
-			h.writeAPIErr(w, fmt.Errorf("sheet write: %w", err))
-			return
+		if err := svc.AppendFood(ctx, fe); err != nil {
+			return h.writeAPIErr(c, fmt.Errorf("sheet write: %w", err))
 		}
 		saved = append(saved, fe)
 	}
 
 	h.gemini.ClearConversation(session.UserEmail, targetDate)
 	h.cacheInvalidate(session.SpreadsheetID)
-	WriteJSON(w, http.StatusOK, map[string]any{"done": true, "entries": saved})
+	return writeJSON(c, http.StatusOK, map[string]any{"done": true, "entries": saved})
 }
 
-// DELETE /api/entries/{id}
-func (h *Handler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	id := r.PathValue("id")
+// DELETE /api/entries/:id
+func (h *Handler) DeleteEntry(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	id := c.Param("id")
 	if id == "" {
-		writeErr(w, http.StatusBadRequest, "missing id")
-		return
+		return writeErr(c, http.StatusBadRequest, "missing id")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	if err := svc.DeleteFood(r.Context(), id); err != nil {
-		h.writeAPIErr(w, err)
-		return
+	if err := svc.DeleteFood(c.Request().Context(), id); err != nil {
+		return h.writeAPIErr(c, err)
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
 // GET /api/profile
-func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	svc, err := h.sheetsSvc(r, session)
+func (h *Handler) GetProfile(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	p, err := svc.GetProfile(r.Context())
+	p, err := svc.GetProfile(c.Request().Context())
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	WriteJSON(w, http.StatusOK, p)
+	return writeJSON(c, http.StatusOK, p)
 }
 
-// PUT /api/profile — body: {gender, age, height, weight, notes, goals, dietary_restrictions}
-func (h *Handler) PutProfile(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
+// PUT /api/profile
+func (h *Handler) PutProfile(c *echo.Context) error {
+	session := auth.SessionFrom(c)
 	var req sheets.UserProfile
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
-		return
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return writeErr(c, http.StatusBadRequest, "invalid body")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	if err := svc.SetProfile(r.Context(), req); err != nil {
-		h.writeAPIErr(w, err)
-		return
+	if err := svc.SetProfile(c.Request().Context(), req); err != nil {
+		return h.writeAPIErr(c, err)
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
-	WriteJSON(w, http.StatusOK, req)
+	return writeJSON(c, http.StatusOK, req)
 }
 
 // GET /api/favorites
-func (h *Handler) GetFavorites(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+func (h *Handler) GetFavorites(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	favs, err := svc.GetFavorites(r.Context())
+	ctx := c.Request().Context()
+	favs, err := svc.GetFavorites(ctx)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	if favs == nil {
 		favs = []sheets.FavoriteEntry{}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"favorites": favs})
+	return writeJSON(c, http.StatusOK, map[string]any{"favorites": favs})
 }
 
-// POST /api/favorites — body: {description, meal_type, calories, protein, carbs, fat, fiber}
-func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/favorites
+func (h *Handler) AddFavorite(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Description string `json:"description"`
 		MealType    string `json:"meal_type"`
@@ -737,8 +686,7 @@ func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 		Fiber       int    `json:"fiber"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Description == "" {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid request body")
 	}
 	fav := sheets.FavoriteEntry{
 		ID:          uuid.NewString(),
@@ -751,144 +699,148 @@ func (h *Handler) AddFavorite(w http.ResponseWriter, r *http.Request) {
 		Fiber:       req.Fiber,
 		CreatedAt:   sheets.DateString(LocalNow(r)),
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	existing, err := svc.GetFavorites(r.Context())
+	existing, err := svc.GetFavorites(ctx)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	key := sheets.NormalizeFavoriteKey(fav.Description)
 	for _, e := range existing {
 		if sheets.NormalizeFavoriteKey(e.Description) == key {
-			writeErr(w, http.StatusConflict, "favorite_exists")
-			return
+			return writeErr(c, http.StatusConflict, "favorite_exists")
 		}
 	}
-	if err := svc.AddFavorite(r.Context(), fav); err != nil {
-		h.writeAPIErr(w, err)
-		return
+	if err := svc.AddFavorite(ctx, fav); err != nil {
+		return h.writeAPIErr(c, err)
 	}
-	WriteJSON(w, http.StatusOK, fav)
+	return writeJSON(c, http.StatusOK, fav)
 }
 
-// DELETE /api/favorites/{id}
-func (h *Handler) DeleteFavorite(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	id := r.PathValue("id")
+// DELETE /api/favorites/:id
+func (h *Handler) DeleteFavorite(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	id := c.Param("id")
 	if id == "" {
-		writeErr(w, http.StatusBadRequest, "missing id")
-		return
+		return writeErr(c, http.StatusBadRequest, "missing id")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	if err := svc.DeleteFavorite(r.Context(), id); err != nil {
-		h.writeAPIErr(w, err)
-		return
+	if err := svc.DeleteFavorite(c.Request().Context(), id); err != nil {
+		return h.writeAPIErr(c, err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return c.NoContent(http.StatusNoContent)
 }
 
-// PATCH /api/entries/{id} — body: FoodEntry JSON (all fields)
-func (h *Handler) PatchEntry(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	id := r.PathValue("id")
+// PATCH /api/entries/:id
+func (h *Handler) PatchEntry(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	id := c.Param("id")
 	if id == "" {
-		writeErr(w, http.StatusBadRequest, "missing id")
-		return
+		return writeErr(c, http.StatusBadRequest, "missing id")
 	}
 	var entry sheets.FoodEntry
-	if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
-		return
+	if err := json.NewDecoder(c.Request().Body).Decode(&entry); err != nil {
+		return writeErr(c, http.StatusBadRequest, "invalid body")
 	}
 	entry.ID = id
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	if err := svc.UpdateFood(r.Context(), id, entry); err != nil {
-		h.writeAPIErr(w, err)
-		return
+	if err := svc.UpdateFood(c.Request().Context(), id, entry); err != nil {
+		return h.writeAPIErr(c, err)
 	}
 	h.cacheInvalidate(session.SpreadsheetID)
-	WriteJSON(w, http.StatusOK, entry)
+	return writeJSON(c, http.StatusOK, entry)
 }
 
 // GET /api/activity?date=YYYY-MM-DD
-func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	svc, err := h.sheetsSvc(r, session)
+func (h *Handler) GetActivity(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	date := r.URL.Query().Get("date")
+	r := c.Request()
+	date := c.QueryParam("date")
 	if date == "" {
 		date = sheets.DateString(LocalNow(r))
 	}
 	dayLog, err := svc.GetActivity(r.Context(), date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	WriteJSON(w, http.StatusOK, dayLog)
+	return writeJSON(c, http.StatusOK, dayLog)
 }
 
-// POST /api/insights — body: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
-// Returns {"insight": "..."} — a free-form Gemini analysis of the week.
-func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// PUT /api/activity
+func (h *Handler) PutActivity(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	r := c.Request()
+	var req sheets.DayLog
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return writeErr(c, http.StatusBadRequest, "invalid body")
+	}
+	if req.Date == "" {
+		req.Date = sheets.DateString(LocalNow(r))
+	}
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if err := svc.SetActivity(r.Context(), req); err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	h.cacheInvalidate(session.SpreadsheetID)
+	return writeJSON(c, http.StatusOK, req)
+}
+
+// POST /api/insights
+func (h *Handler) Insights(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Start == "" || req.End == "" {
-		writeErr(w, http.StatusBadRequest, "start and end dates required")
-		return
+		return writeErr(c, http.StatusBadRequest, "start and end dates required")
 	}
 	if _, err := time.Parse("2006-01-02", req.Start); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid start date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid start date")
 	}
 	if _, err := time.Parse("2006-01-02", req.End); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid end date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid end date")
 	}
 	startT, _ := time.Parse("2006-01-02", req.Start)
 	endT, _ := time.Parse("2006-01-02", req.End)
 	if endT.Sub(startT) > 31*24*time.Hour {
-		writeErr(w, http.StatusBadRequest, "date range too large")
-		return
+		return writeErr(c, http.StatusBadRequest, "date range too large")
 	}
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
-	entries, err := svc.GetFoodByDateRange(r.Context(), req.Start, req.End)
+	entries, err := svc.GetFoodByDateRange(ctx, req.Start, req.End)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Start, req.End)
+	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Start, req.End)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
 	summary := buildWeekSummary(req.Start, req.End, entries, dailyLogs)
@@ -898,67 +850,61 @@ func (h *Handler) Insights(w http.ResponseWriter, r *http.Request) {
 	if cached, ok := h.cacheGet(profileCacheKey); ok {
 		profileCtx = string(cached)
 	} else {
-		profile, _ := svc.GetProfile(r.Context())
+		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	insight, err := h.gemini.Insights(r.Context(), summary, profileCtx)
+	insight, err := h.gemini.Insights(ctx, summary, profileCtx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
-		return
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
-	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
 		Type:        "week",
 		StartDate:   req.Start,
 		EndDate:     req.End,
 		GeneratedAt: generatedAt,
 		Insight:     insight,
 	})
-	WriteJSON(w, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
 }
 
-// POST /api/insights/day — body: {"date": "YYYY-MM-DD"}
-// Returns {"insight": "..."} — a single-day Gemini analysis.
-func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/insights/day
+func (h *Handler) DayInsights(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Date string `json:"date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Date == "" {
-		writeErr(w, http.StatusBadRequest, "date required")
-		return
+		return writeErr(c, http.StatusBadRequest, "date required")
 	}
 	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid date")
 	}
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
-	entries, err := svc.GetFoodByDateRange(r.Context(), req.Date, req.Date)
+	entries, err := svc.GetFoodByDateRange(ctx, req.Date, req.Date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Date, req.Date)
+	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Date, req.Date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
 	if len(entries) == 0 && len(dailyLogs) == 0 {
-		writeErr(w, http.StatusBadRequest, "no data for this day")
-		return
+		return writeErr(c, http.StatusBadRequest, "no data for this day")
 	}
 
 	today := sheets.DateString(LocalNow(r))
@@ -969,25 +915,24 @@ func (h *Handler) DayInsights(w http.ResponseWriter, r *http.Request) {
 	if cached, ok := h.cacheGet(profileCacheKey); ok {
 		profileCtx = string(cached)
 	} else {
-		profile, _ := svc.GetProfile(r.Context())
+		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	insight, err := h.gemini.DayInsights(r.Context(), summary, profileCtx)
+	insight, err := h.gemini.DayInsights(ctx, summary, profileCtx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
-		return
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
-	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
 		Type:        "day",
 		StartDate:   req.Date,
 		EndDate:     req.Date,
 		GeneratedAt: generatedAt,
 		Insight:     insight,
 	})
-	WriteJSON(w, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
 }
 
 func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
@@ -1047,7 +992,6 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 }
 
 func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog, inProgress bool) string {
-	// Reuse buildWeekSummary's per-day logic but with a single-day header.
 	logByDate := map[string]sheets.DayLog{}
 	for _, l := range dailyLogs {
 		logByDate[l.Date] = l
@@ -1100,129 +1044,113 @@ func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets
 	return b.String()
 }
 
-// GET /api/insights?start=YYYY-MM-DD&end=YYYY-MM-DD — returns most recent stored week insight or null
-func (h *Handler) GetStoredInsights(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// GET /api/insights?start=...&end=...
+func (h *Handler) GetStoredInsights(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	start := r.URL.Query().Get("start")
-	end := r.URL.Query().Get("end")
+	start := c.QueryParam("start")
+	end := c.QueryParam("end")
 	if start == "" || end == "" {
-		writeErr(w, http.StatusBadRequest, "start and end required")
-		return
+		return writeErr(c, http.StatusBadRequest, "start and end required")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	rec, err := svc.GetInsight(r.Context(), "week", start, end)
+	rec, err := svc.GetInsight(c.Request().Context(), "week", start, end)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	if rec == nil {
-		WriteJSON(w, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
-		return
+		return writeJSON(c, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
 }
 
-// GET /api/insights/day?date=YYYY-MM-DD — returns most recent stored day insight or null
-func (h *Handler) GetStoredDayInsights(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// GET /api/insights/day?date=...
+func (h *Handler) GetStoredDayInsights(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	date := r.URL.Query().Get("date")
+	date := c.QueryParam("date")
 	if date == "" {
-		writeErr(w, http.StatusBadRequest, "date required")
-		return
+		return writeErr(c, http.StatusBadRequest, "date required")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	rec, err := svc.GetInsight(r.Context(), "day", date, date)
+	rec, err := svc.GetInsight(c.Request().Context(), "day", date, date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	if rec == nil {
-		WriteJSON(w, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
-		return
+		return writeJSON(c, http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
 }
 
-// POST /api/suggestions/day — body: {"date": "YYYY-MM-DD"}
-// Generates meal suggestions. If B/L/D all present → next-day suggestions; otherwise → remaining meal suggestions.
-// Returns {"suggestions": "...", "type": "remaining"|"next-day", "generated_at": "..."}
-func (h *Handler) DaySuggestions(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/suggestions/day
+func (h *Handler) DaySuggestions(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Date string `json:"date"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Date == "" {
-		writeErr(w, http.StatusBadRequest, "date required")
-		return
+		return writeErr(c, http.StatusBadRequest, "date required")
 	}
 	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid date")
 	}
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
-	entries, err := svc.GetFoodByDateRange(r.Context(), req.Date, req.Date)
+	entries, err := svc.GetFoodByDateRange(ctx, req.Date, req.Date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
-	// Determine which meals are present
 	hasMeal := map[string]bool{}
 	for _, e := range entries {
 		hasMeal[e.MealType] = true
 	}
 	complete := hasMeal["breakfast"] && hasMeal["lunch"] && hasMeal["dinner"]
 
-	// Get previous day's entries for variety
 	prevDate := addDaysStr(req.Date, -1)
-	prevEntries, _ := svc.GetFoodByDateRange(r.Context(), prevDate, prevDate)
+	prevEntries, _ := svc.GetFoodByDateRange(ctx, prevDate, prevDate)
 
 	profileCacheKey := session.SpreadsheetID + "|profile"
 	var profileCtx string
 	if cached, ok := h.cacheGet(profileCacheKey); ok {
 		profileCtx = string(cached)
 	} else {
-		profile, _ := svc.GetProfile(r.Context())
+		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	// Fetch existing day insights to inform suggestions
 	var insightText string
-	if rec, _ := svc.GetInsight(r.Context(), "day", req.Date, req.Date); rec != nil {
+	if rec, _ := svc.GetInsight(ctx, "day", req.Date, req.Date); rec != nil {
 		insightText = rec.Insight
 	}
 
 	summary := buildMealSuggestionSummary(req.Date, entries, prevEntries, complete, insightText)
 
-	suggestions, err := h.gemini.MealSuggestions(r.Context(), summary, profileCtx)
+	suggestions, err := h.gemini.MealSuggestions(ctx, summary, profileCtx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
-		return
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 
 	sugType := "remaining"
@@ -1230,96 +1158,86 @@ func (h *Handler) DaySuggestions(w http.ResponseWriter, r *http.Request) {
 		sugType = "next-day"
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
-	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
 		Type:        "day-suggestions",
 		StartDate:   req.Date,
 		EndDate:     req.Date,
 		GeneratedAt: generatedAt,
 		Insight:     sugType + "\n" + suggestions,
 	})
-	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "type": sugType, "generated_at": generatedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"suggestions": suggestions, "type": sugType, "generated_at": generatedAt})
 }
 
-// GET /api/suggestions/day?date=YYYY-MM-DD — returns most recent stored day suggestions or null
-func (h *Handler) GetStoredDaySuggestions(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// GET /api/suggestions/day?date=...
+func (h *Handler) GetStoredDaySuggestions(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	date := r.URL.Query().Get("date")
+	date := c.QueryParam("date")
 	if date == "" {
-		writeErr(w, http.StatusBadRequest, "date required")
-		return
+		return writeErr(c, http.StatusBadRequest, "date required")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	rec, err := svc.GetInsight(r.Context(), "day-suggestions", date, date)
+	rec, err := svc.GetInsight(c.Request().Context(), "day-suggestions", date, date)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	if rec == nil {
-		WriteJSON(w, http.StatusOK, map[string]any{"suggestions": nil, "type": nil, "generated_at": nil})
-		return
+		return writeJSON(c, http.StatusOK, map[string]any{"suggestions": nil, "type": nil, "generated_at": nil})
 	}
-	// Parse type from stored format: "type\nsuggestions"
 	sugType := "remaining"
 	sugText := rec.Insight
 	if parts := strings.SplitN(rec.Insight, "\n", 2); len(parts) == 2 {
 		sugType = parts[0]
 		sugText = parts[1]
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": sugText, "type": sugType, "generated_at": rec.GeneratedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"suggestions": sugText, "type": sugType, "generated_at": rec.GeneratedAt})
 }
 
-// POST /api/suggestions/week — body: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
-func (h *Handler) WeekSuggestions(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// POST /api/suggestions/week
+func (h *Handler) WeekSuggestions(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
 
+	r := c.Request()
+	ctx := r.Context()
 	var req struct {
 		Start string `json:"start"`
 		End   string `json:"end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Start == "" || req.End == "" {
-		writeErr(w, http.StatusBadRequest, "start and end dates required")
-		return
+		return writeErr(c, http.StatusBadRequest, "start and end dates required")
 	}
 	if _, err := time.Parse("2006-01-02", req.Start); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid start date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid start date")
 	}
 	if _, err := time.Parse("2006-01-02", req.End); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid end date")
-		return
+		return writeErr(c, http.StatusBadRequest, "invalid end date")
 	}
 
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
-	entries, err := svc.GetFoodByDateRange(r.Context(), req.Start, req.End)
+	entries, err := svc.GetFoodByDateRange(ctx, req.Start, req.End)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(r.Context(), req.Start, req.End)
+	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Start, req.End)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 
 	summary := buildWeekSummary(req.Start, req.End, entries, dailyLogs)
 
-	// Fetch existing week insights to inform suggestions
-	if rec, _ := svc.GetInsight(r.Context(), "week", req.Start, req.End); rec != nil {
+	if rec, _ := svc.GetInsight(ctx, "week", req.Start, req.End); rec != nil {
 		summary += "\nInsights for this week:\n" + rec.Insight + "\n"
 	}
 
@@ -1328,54 +1246,49 @@ func (h *Handler) WeekSuggestions(w http.ResponseWriter, r *http.Request) {
 	if cached, ok := h.cacheGet(profileCacheKey); ok {
 		profileCtx = string(cached)
 	} else {
-		profile, _ := svc.GetProfile(r.Context())
+		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	suggestions, err := h.gemini.WeekMealSuggestions(r.Context(), summary, profileCtx)
+	suggestions, err := h.gemini.WeekMealSuggestions(ctx, summary, profileCtx)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "gemini error: "+err.Error())
-		return
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
-	_ = svc.SaveInsight(r.Context(), sheets.InsightRecord{
+	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
 		Type:        "week-suggestions",
 		StartDate:   req.Start,
 		EndDate:     req.End,
 		GeneratedAt: generatedAt,
 		Insight:     suggestions,
 	})
-	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions, "generated_at": generatedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"suggestions": suggestions, "generated_at": generatedAt})
 }
 
-// GET /api/suggestions/week?start=YYYY-MM-DD&end=YYYY-MM-DD
-func (h *Handler) GetStoredWeekSuggestions(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	if !h.ensureSpreadsheet(w, r, session) {
-		return
+// GET /api/suggestions/week?start=...&end=...
+func (h *Handler) GetStoredWeekSuggestions(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	if !h.ensureSpreadsheet(c, session) {
+		return nil
 	}
-	start := r.URL.Query().Get("start")
-	end := r.URL.Query().Get("end")
+	start := c.QueryParam("start")
+	end := c.QueryParam("end")
 	if start == "" || end == "" {
-		writeErr(w, http.StatusBadRequest, "start and end required")
-		return
+		return writeErr(c, http.StatusBadRequest, "start and end required")
 	}
-	svc, err := h.sheetsSvc(r, session)
+	svc, err := h.sheetsSvc(c, session)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
-	rec, err := svc.GetInsight(r.Context(), "week-suggestions", start, end)
+	rec, err := svc.GetInsight(c.Request().Context(), "week-suggestions", start, end)
 	if err != nil {
-		h.writeAPIErr(w, err)
-		return
+		return h.writeAPIErr(c, err)
 	}
 	if rec == nil {
-		WriteJSON(w, http.StatusOK, map[string]any{"suggestions": nil, "generated_at": nil})
-		return
+		return writeJSON(c, http.StatusOK, map[string]any{"suggestions": nil, "generated_at": nil})
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"suggestions": rec.Insight, "generated_at": rec.GeneratedAt})
+	return writeJSON(c, http.StatusOK, map[string]any{"suggestions": rec.Insight, "generated_at": rec.GeneratedAt})
 }
 
 func addDaysStr(dateStr string, n int) string {
@@ -1389,7 +1302,6 @@ func buildMealSuggestionSummary(date string, entries, prevEntries []sheets.FoodE
 	if complete {
 		fmt.Fprintf(&b, "Today (%s) is complete. Suggest meals for tomorrow.\n\n", date)
 	} else {
-		// Figure out missing meals
 		hasMeal := map[string]bool{}
 		for _, e := range entries {
 			hasMeal[e.MealType] = true
@@ -1403,12 +1315,10 @@ func buildMealSuggestionSummary(date string, entries, prevEntries []sheets.FoodE
 		fmt.Fprintf(&b, "Suggest meals for: %s\n\n", strings.Join(missing, ", "))
 	}
 
-	// Include insights if available — suggestions should address these
 	if insightText != "" {
 		fmt.Fprintf(&b, "Nutrition insights for today (factor these into suggestions):\n%s\n\n", insightText)
 	}
 
-	// What was eaten today
 	if len(entries) > 0 {
 		fmt.Fprintf(&b, "Already eaten today:\n")
 		for _, e := range entries {
@@ -1422,7 +1332,6 @@ func buildMealSuggestionSummary(date string, entries, prevEntries []sheets.FoodE
 		fmt.Fprintf(&b, "  Today's totals so far: %d cal, %dg protein\n\n", totalCal, totalProt)
 	}
 
-	// Yesterday's meals (for variety)
 	if len(prevEntries) > 0 {
 		fmt.Fprintf(&b, "Yesterday's meals (avoid repeating):\n")
 		for _, e := range prevEntries {
@@ -1431,28 +1340,4 @@ func buildMealSuggestionSummary(date string, entries, prevEntries []sheets.FoodE
 	}
 
 	return b.String()
-}
-
-// PUT /api/activity — body: {"date": "YYYY-MM-DD", "activity": "...", "feeling_score": 0, "feeling_notes": "..."}
-func (h *Handler) PutActivity(w http.ResponseWriter, r *http.Request) {
-	session := auth.SessionFromContext(r.Context())
-	var req sheets.DayLog
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	if req.Date == "" {
-		req.Date = sheets.DateString(LocalNow(r))
-	}
-	svc, err := h.sheetsSvc(r, session)
-	if err != nil {
-		h.writeAPIErr(w, err)
-		return
-	}
-	if err := svc.SetActivity(r.Context(), req); err != nil {
-		h.writeAPIErr(w, err)
-		return
-	}
-	h.cacheInvalidate(session.SpreadsheetID)
-	WriteJSON(w, http.StatusOK, req)
 }
