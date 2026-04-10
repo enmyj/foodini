@@ -1,10 +1,26 @@
 <script>
-    import { onMount } from "svelte";
+    import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
     import { getProfile, putProfile } from "./api.js";
     import { autosize } from "./autosize.js";
     import { showError } from "./toast.js";
 
     let { onClose } = $props();
+
+    const queryClient = useQueryClient();
+
+    const profileQuery = createQuery(() => ({
+        queryKey: ["profile"],
+        queryFn: getProfile,
+    }));
+
+    const saveMutation = createMutation(() => ({
+        mutationFn: (data) => putProfile(data),
+        onSuccess: (data) => {
+            queryClient.setQueryData(["profile"], data);
+            onClose();
+        },
+        onError: (err) => showError(err, "Failed to save profile."),
+    }));
 
     let gender = $state("");
     let birthYear = $state("");
@@ -13,12 +29,11 @@
     let notes = $state("");
     let goals = $state("");
     let dietaryRestrictions = $state("");
-    let saving = $state(false);
-    let loaded = $state(false);
 
-    onMount(async () => {
-        try {
-            const p = await getProfile();
+    // Populate fields when profile data loads
+    $effect(() => {
+        const p = profileQuery.data;
+        if (p) {
             gender = p.gender ?? "";
             birthYear = p.birth_year ?? "";
             height = p.height ?? "";
@@ -26,31 +41,23 @@
             notes = p.notes ?? "";
             goals = p.goals ?? "";
             dietaryRestrictions = p.dietary_restrictions ?? "";
-        } catch (err) {
-            showError(err, "Failed to load profile.");
         }
-        loaded = true;
     });
 
-    async function save() {
-        saving = true;
-        try {
-            await putProfile({
-                gender,
-                birth_year: birthYear,
-                height,
-                weight,
-                notes,
-                goals,
-                dietary_restrictions: dietaryRestrictions,
-            });
-            onClose();
-        } catch (err) {
-            showError(err, "Failed to save profile.");
-        } finally {
-            saving = false;
-        }
+    function save() {
+        saveMutation.mutate({
+            gender,
+            birth_year: birthYear,
+            height,
+            weight,
+            notes,
+            goals,
+            dietary_restrictions: dietaryRestrictions,
+        });
     }
+
+    let saving = $derived(saveMutation.isPending);
+    let loaded = $derived(profileQuery.isSuccess);
 
     function onKeyDown(e) {
         if (e.key === "Escape") onClose();

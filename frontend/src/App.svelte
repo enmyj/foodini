@@ -1,5 +1,7 @@
 <script>
     import { onMount } from "svelte";
+    import { QueryClientProvider } from "@tanstack/svelte-query";
+    import { queryClient } from "./lib/queryClient.js";
     import LogView from "./lib/LogView.svelte";
     import ToastHost from "./lib/ToastHost.svelte";
 
@@ -135,7 +137,9 @@
         </main>
     </div>
 {:else}
-    <LogView />
+    <QueryClientProvider client={queryClient}>
+        <LogView />
+    </QueryClientProvider>
 {/if}
 
 <ToastHost />

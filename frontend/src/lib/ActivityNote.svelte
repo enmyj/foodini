@@ -1,19 +1,16 @@
 <script>
+  import { createQuery } from '@tanstack/svelte-query'
   import { getActivity } from './api.js'
-  import { showError } from './toast.js'
 
   let { date, onOpen, refreshKey = 0 } = $props()
 
-  let data = $state(null)
+  const query = createQuery(() => ({
+    queryKey: ['activity', date, refreshKey],
+    queryFn: () => getActivity(date),
+    enabled: !!date,
+  }))
 
-  $effect(() => {
-    refreshKey // re-run when this changes
-    if (!date) return
-    getActivity(date).then(res => { data = res }).catch(err => {
-      data = null
-      showError(err, 'Failed to load activity.')
-    })
-  })
+  let data = $derived(query.data ?? null)
 </script>
 
 <div class="activity-row">

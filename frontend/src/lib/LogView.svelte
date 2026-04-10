@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from "svelte";
+    import { createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
         confirmChat,
@@ -22,16 +22,14 @@
     import FavoritesView from "./FavoritesView.svelte";
     import { showError } from "./toast.js";
 
+    const queryClient = useQueryClient();
+
     const MEAL_ORDER = ["breakfast", "lunch", "snack", "dinner", "supplements"];
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
     const HISTORY_STATE_KEY = "foodiniNav";
 
     let view = $state("day");
     let currentDate = $state(todayStr());
-    let spreadsheetUrl = $state("");
-    let dayData = $state(null);
-    let historyData = $state(null);
-    let loading = $state(true);
     let profileOpen = $state(false);
     let drawerOpen = $state(false);
     let drawerTab = $state("food");
@@ -39,7 +37,6 @@
     let drawerDate = $state(null);
     let drawerMeal = $state(null);
     let drawerField = $state(null);
-    let yesterdayByMeal = $state({});
     let repeating = $state(null);
     let repeatedMeals = $state(new Set());
     let repeatPicker = $state(null);
@@ -50,25 +47,114 @@
 
     let insightsByWeek = $state({});
     let suggestionsByWeek = $state({});
-    let dayInsight = $state(null); // { loading, text, error, open, generatedAt, detailOpen }
-    let daySuggestions = $state(null); // { loading, text, error, open, generatedAt, type }
+    let dayInsight = $state(null);
+    let daySuggestions = $state(null);
     let collapsedMeals = $state(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
-    let loadError = $state("");
-    let loadErrorAction = $state(null);
-    let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
     let historyReady = false;
     let skipHistorySync = false;
     let favoritedDescs = $state(new Set());
 
+    // --- TanStack Queries ---
+
+    const dayQuery = createQuery(() => ({
+        queryKey: ["log", currentDate],
+        queryFn: () => getLog({ date: currentDate }),
+        enabled: view === "day",
+    }));
+
+    const yesterdayQuery = createQuery(() => ({
+        queryKey: ["log", addDays(currentDate, -1)],
+        queryFn: () => getLog({ date: addDays(currentDate, -1) }),
+        enabled: view === "day",
+    }));
+
+    const historyQuery = createQuery(() => ({
+        queryKey: ["log", "history", historyWeeks],
+        queryFn: () => getLog({ days: historyWeeks * 7 }),
+        enabled: view === "history",
+    }));
+
+    const favoritesQuery = createQuery(() => ({
+        queryKey: ["favorites"],
+        queryFn: getFavorites,
+    }));
+
+    // --- Derived state from queries (same variable names as before) ---
+
+    let dayData = $derived(dayQuery.data ?? null);
+    let historyData = $derived(historyQuery.data ?? null);
+    let loading = $derived(
+        (view === "day" && dayQuery.isPending) ||
+        (view === "history" && historyQuery.isPending),
+    );
+    let spreadsheetUrl = $derived(
+        dayQuery.data?.spreadsheet_url ||
+        historyQuery.data?.spreadsheet_url ||
+        "",
+    );
+
+    // Derive load error from active query
+    let loadError = $derived.by(() => {
+        const err = view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null;
+        if (!err) return "";
+        if (err?.status === 401 || err?.code === "session_expired")
+            return "Your session expired. Sign in again.";
+        if (err?.code === "insufficient_scopes")
+            return "Google permissions are missing. Re-authorize to continue.";
+        return view === "day"
+            ? "Could not load this day. Try reloading, or sign in again."
+            : "Could not load history. Try reloading, or sign in again.";
+    });
+    let loadErrorAction = $derived.by(() => {
+        const err = view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null;
+        if (!err) return null;
+        if (err?.status === 401 || err?.code === "session_expired")
+            return { href: "/auth/login", label: "Sign in" };
+        if (err?.code === "insufficient_scopes")
+            return { href: "/auth/login?consent=1", label: "Re-authorize" };
+        return null;
+    });
+
+    let yesterdayByMeal = $derived.by(() => {
+        const entries = yesterdayQuery.data?.entries ?? [];
+        const g = {};
+        for (const e of entries) {
+            (g[e.meal_type] ??= []).push(e);
+        }
+        for (const meal of repeatedMeals) {
+            g[meal] = [];
+        }
+        return g;
+    });
+
+    let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
+
     let isToday = $derived(currentDate === todayStr());
     let hasAnyEntry = $derived((dayData?.entries?.length ?? 0) > 0);
-    // Day view: show insights for any past day, or for today as soon as
-    // something has been logged. (Not everyone eats breakfast — don't gate
-    // insights on breakfast/lunch/dinner all being present.)
     let showDayInsights = $derived(!isToday || hasAnyEntry);
-    // Day view: show suggestions only for today
     let showDaySuggestions = $derived(isToday);
+
+    // Sync favorited descriptions from query
+    $effect(() => {
+        const favs = favoritesQuery.data?.favorites;
+        if (favs) {
+            favoritedDescs = new Set(
+                favs.map((f) => normalizeFavoriteKey(f.description)),
+            );
+        }
+    });
+
+    // Reset UI state when date/view changes
+    $effect(() => {
+        if (view === "day") {
+            void currentDate;
+            collapsedMeals = new Set(MEAL_ORDER);
+            repeatedMeals = new Set();
+            dayInsight = null;
+            daySuggestions = null;
+        }
+    });
 
     function todayStr() {
         const d = new Date();
@@ -121,25 +207,6 @@
         const em = e.toLocaleDateString("en-US", { month: "short" });
         if (sm === em) return `${sm} ${s.getDate()}–${e.getDate()}`;
         return `${sm} ${s.getDate()} – ${em} ${e.getDate()}`;
-    }
-
-    function setLoadError(err, fallback) {
-        if (err?.status === 401 || err?.code === "session_expired") {
-            loadError = "Your session expired. Sign in again.";
-            loadErrorAction = { href: "/auth/login", label: "Sign in" };
-            return;
-        }
-        if (err?.code === "insufficient_scopes") {
-            loadError =
-                "Google permissions are missing. Re-authorize to continue.";
-            loadErrorAction = {
-                href: "/auth/login?consent=1",
-                label: "Re-authorize",
-            };
-            return;
-        }
-        loadError = fallback;
-        loadErrorAction = null;
     }
 
     function snapshotNavState() {
@@ -239,55 +306,6 @@
         }
     }
 
-    async function loadDay(date, { silent = false } = {}) {
-        if (!silent) {
-            loading = true;
-            loadError = "";
-            loadErrorAction = null;
-            collapsedMeals = new Set(MEAL_ORDER);
-        }
-        try {
-            const next = await getLog({ date });
-            dayData = next;
-            if (next?.spreadsheet_url && !spreadsheetUrl)
-                spreadsheetUrl = next.spreadsheet_url;
-        } catch (err) {
-            if (!silent) {
-                dayData = null;
-                setLoadError(
-                    err,
-                    "Could not load this day. Try reloading, or sign in again.",
-                );
-            }
-        } finally {
-            if (!silent) loading = false;
-        }
-    }
-
-    async function loadHistory(weeks = historyWeeks, { silent = false } = {}) {
-        if (!silent) {
-            loading = true;
-            loadError = "";
-            loadErrorAction = null;
-        }
-        try {
-            const next = await getLog({ days: weeks * 7 });
-            historyData = next;
-            if (next?.spreadsheet_url && !spreadsheetUrl)
-                spreadsheetUrl = next.spreadsheet_url;
-        } catch (err) {
-            if (!silent) {
-                historyData = null;
-                setLoadError(
-                    err,
-                    "Could not load history. Try reloading, or sign in again.",
-                );
-            }
-        } finally {
-            if (!silent) loading = false;
-        }
-    }
-
     function groupedByMeal(entries) {
         const g = {};
         for (const e of entries ?? []) {
@@ -352,24 +370,6 @@
         return weeks.reverse();
     }
 
-    async function loadYesterday(date) {
-        const yStr = addDays(date, -1);
-        try {
-            const res = await getLog({ date: yStr });
-            const g = {};
-            for (const e of res.entries ?? []) {
-                (g[e.meal_type] ??= []).push(e);
-            }
-            for (const meal of repeatedMeals) {
-                g[meal] = [];
-            }
-            yesterdayByMeal = g;
-        } catch (err) {
-            yesterdayByMeal = {};
-            showError(err, "Failed to load yesterday's meals.");
-        }
-    }
-
     async function repeatMeal(targetMeal, sourceMeal = targetMeal) {
         if (repeating !== null) return;
         repeating = targetMeal;
@@ -379,12 +379,12 @@
                 ...e,
                 meal_type: targetMeal,
             }));
-            const res = await confirmChat(entries, dayData?.date ?? todayStr());
-            dayData = {
-                ...dayData,
-                entries: [...(dayData.entries ?? []), ...res.entries],
-            };
-            yesterdayByMeal = { ...yesterdayByMeal, [targetMeal]: [] };
+            const res = await confirmChat(entries, currentDate ?? todayStr());
+            queryClient.setQueryData(["log", currentDate], (old) => ({
+                ...old,
+                entries: [...(old?.entries ?? []), ...res.entries],
+            }));
+            queryClient.invalidateQueries({ queryKey: ["log"] });
             repeatedMeals = new Set([...repeatedMeals, targetMeal]);
             collapsedMeals = new Set(
                 [...collapsedMeals].filter((m) => m !== targetMeal),
@@ -419,12 +419,12 @@
     }
 
     function handleUpdate(updated) {
-        dayData = {
-            ...dayData,
-            entries: dayData.entries.map((e) =>
+        queryClient.setQueryData(["log", currentDate], (old) => ({
+            ...old,
+            entries: (old?.entries ?? []).map((e) =>
                 e.id === updated.id ? updated : e,
             ),
-        };
+        }));
     }
 
     async function scaleMeal(meal, group, factor) {
@@ -454,10 +454,11 @@
     }
 
     function handleDelete(id) {
-        dayData = {
-            ...dayData,
-            entries: (dayData.entries ?? []).filter((e) => e.id !== id),
-        };
+        queryClient.setQueryData(["log", currentDate], (old) => ({
+            ...old,
+            entries: (old?.entries ?? []).filter((e) => e.id !== id),
+        }));
+        queryClient.invalidateQueries({ queryKey: ["log"] });
     }
 
     function normalizeFavoriteKey(desc) {
@@ -470,9 +471,9 @@
         try {
             await addFavorite(entry);
             favoritedDescs = new Set([...favoritedDescs, key]);
+            queryClient.invalidateQueries({ queryKey: ["favorites"] });
         } catch (e) {
             if (e?.status === 409 || e?.code === "favorite_exists") {
-                // Server knows about it — reconcile our local state and stop.
                 favoritedDescs = new Set([...favoritedDescs, key]);
                 return;
             }
@@ -519,10 +520,11 @@
     }
 
     function onEntriesAdded(newEntries) {
-        dayData = {
-            ...dayData,
-            entries: [...(dayData.entries ?? []), ...newEntries],
-        };
+        queryClient.setQueryData(["log", currentDate], (old) => ({
+            ...old,
+            entries: [...(old?.entries ?? []), ...newEntries],
+        }));
+        queryClient.invalidateQueries({ queryKey: ["log"] });
         drawerOpen = false;
         if (newEntries.length > 0) {
             const addedMeal = newEntries[0].meal_type;
@@ -531,6 +533,8 @@
             );
         }
     }
+
+    // --- Insights & suggestions (kept imperative — complex toggle/regenerate UI) ---
 
     async function fetchInsights(weekStart, weekEnd, regenerate = false) {
         insightsByWeek = {
@@ -635,7 +639,6 @@
     }
 
     function parseDayInsight(text) {
-        // New format: first non-bullet line is summary, bullet lines are detail
         const lines = text
             .split("\n")
             .map((l) => l.trim())
@@ -834,51 +837,6 @@
             };
         }
     }
-
-    onMount(() => {
-        getFavorites()
-            .then((res) => syncFavoritedDescs(res.favorites ?? []))
-            .catch(() => {}); // non-critical; stars just start empty
-    });
-
-    $effect(() => {
-        const v = view;
-        const d = currentDate;
-        const hw = historyWeeks;
-        if (v === "day") {
-            repeatedMeals = new Set();
-            dayInsight = null;
-            daySuggestions = null;
-            loadDay(d);
-            loadYesterday(d);
-        } else if (v === "history") {
-            loadHistory(hw);
-        }
-    });
-
-    $effect(() => {
-        const REFRESH_COOLDOWN_MS = 15_000;
-        let lastRefresh = 0;
-        const refresh = () => {
-            const now = Date.now();
-            if (now - lastRefresh < REFRESH_COOLDOWN_MS) return;
-            lastRefresh = now;
-            if (view === "day") {
-                loadDay(currentDate, { silent: true });
-            } else if (view === "history") {
-                loadHistory(historyWeeks, { silent: true });
-            }
-        };
-        const onVisible = () => {
-            if (!document.hidden) refresh();
-        };
-        document.addEventListener("visibilitychange", onVisible);
-        window.addEventListener("focus", refresh);
-        return () => {
-            document.removeEventListener("visibilitychange", onVisible);
-            window.removeEventListener("focus", refresh);
-        };
-    });
 </script>
 
 <div class="wrap">

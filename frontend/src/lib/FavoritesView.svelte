@@ -1,5 +1,5 @@
 <script>
-    import { onMount } from "svelte";
+    import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
     import { getFavorites, deleteFavorite, confirmChat } from "./api.js";
     import { showError } from "./toast.js";
 
@@ -7,8 +7,34 @@
 
     let { onLoad = null } = $props();
 
-    let favorites = $state([]);
-    let loading = $state(true);
+    const queryClient = useQueryClient();
+
+    const favoritesQuery = createQuery(() => ({
+        queryKey: ["favorites"],
+        queryFn: getFavorites,
+    }));
+
+    const deleteMutation = createMutation(() => ({
+        mutationFn: (id) => deleteFavorite(id),
+        onSuccess: (_data, id) => {
+            queryClient.setQueryData(["favorites"], (old) => ({
+                ...old,
+                favorites: (old?.favorites ?? []).filter((f) => f.id !== id),
+            }));
+        },
+        onError: (err) => showError(err, "Failed to delete favorite."),
+    }));
+
+    let favorites = $derived(favoritesQuery.data?.favorites ?? []);
+    let loading = $derived(favoritesQuery.isPending);
+
+    // Notify parent when favorites load
+    $effect(() => {
+        if (favoritesQuery.isSuccess) {
+            onLoad?.(favorites);
+        }
+    });
+
     let search = $state("");
 
     // Modal state for adding a favorite to a day
@@ -36,26 +62,8 @@
         ].join("-");
     }
 
-    onMount(async () => {
-        try {
-            const res = await getFavorites();
-            favorites = res.favorites ?? [];
-            onLoad?.(favorites);
-        } catch (e) {
-            showError(e, "Failed to load favorites.");
-        } finally {
-            loading = false;
-        }
-    });
-
-    async function handleDelete(fav) {
-        try {
-            await deleteFavorite(fav.id);
-            favorites = favorites.filter((f) => f.id !== fav.id);
-            onLoad?.(favorites);
-        } catch (e) {
-            showError(e, "Failed to delete favorite.");
-        }
+    function handleDelete(fav) {
+        deleteMutation.mutate(fav.id);
     }
 
     function openAddModal(fav) {
@@ -73,6 +81,7 @@
                 meal_type: addMeal,
             };
             await confirmChat([entry], addDate);
+            queryClient.invalidateQueries({ queryKey: ["log"] });
             addModal = null;
         } catch (e) {
             console.error("confirmChat (from favorites) failed:", e);
