@@ -14,6 +14,7 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "@tanstack/svelte-query": "^6.1.14"
+    "@tanstack/svelte-query": "^6.1.14",
+    "marked": "^18.0.0"
   }
 }

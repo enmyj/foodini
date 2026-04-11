@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -113,7 +114,27 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.DELETE("/favorites/:id", apiHandler.DeleteFavorite)
 
 	// --- Serve Svelte SPA ---
-	e.StaticFS("/", frontendFS)
+	// Serve static files first; fall back to index.html for client-side routes.
+	fileServer := http.FileServerFS(frontendFS)
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			p := c.Request().URL.Path
+			// Let API and auth routes pass through.
+			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/auth/") {
+				return next(c)
+			}
+			// Try serving a real file (JS, CSS, favicon, etc.).
+			if f, err := frontendFS.Open(strings.TrimPrefix(p, "/")); err == nil {
+				f.Close()
+				fileServer.ServeHTTP(c.Response(), c.Request())
+				return nil
+			}
+			// SPA fallback: serve index.html for client-side routes.
+			c.Request().URL.Path = "/"
+			fileServer.ServeHTTP(c.Response(), c.Request())
+			return nil
+		}
+	})
 
 	return e
 }

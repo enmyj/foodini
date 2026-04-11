@@ -2,14 +2,25 @@
     import { onMount } from "svelte";
     import { QueryClientProvider } from "@tanstack/svelte-query";
     import { queryClient } from "./lib/queryClient.js";
+    import { navigate, init as initRouter, getCurrent } from "./lib/router.svelte.js";
+    import { marked } from "marked";
     import LogView from "./lib/LogView.svelte";
+    import MarkdownPage from "./lib/MarkdownPage.svelte";
     import ToastHost from "./lib/ToastHost.svelte";
 
+    import aboutMd from "../content/about.md?raw";
+    import legalMd from "../content/legal.md?raw";
+
+    const aboutHtml = marked.parse(aboutMd);
+    const legalHtml = marked.parse(legalMd);
+
     let authed = $state(null); // null=loading, false=logged out, true=logged in
-    let schemaError = $state(false); // true if spreadsheet schema is incompatible
-    let scopeError = $state(false); // true if Google permissions are missing
+    let schemaError = $state(false);
+    let scopeError = $state(false);
     let sessionExpired = $state(false);
     let loadError = $state("");
+
+    let path = $derived(getCurrent());
 
     async function readError(res) {
         const contentType = res.headers.get("content-type") || "";
@@ -21,7 +32,7 @@
         return text || `Could not load the app (${res.status})`;
     }
 
-    onMount(async () => {
+    async function checkAuth() {
         scopeError = false;
         schemaError = false;
         sessionExpired = false;
@@ -58,88 +69,148 @@
             loadError = "Could not reach the server. Try reloading.";
             authed = false;
         }
+    }
+
+    onMount(() => {
+        initRouter();
+        // Only check auth when navigating to /app
+        if (path === "/app") {
+            checkAuth();
+        }
     });
+
+    // Re-check auth when navigating to /app
+    $effect(() => {
+        if (path === "/app" && authed === null) {
+            checkAuth();
+        }
+    });
+
+    function go(e, href) {
+        e.preventDefault();
+        navigate(href);
+    }
+
+    function goApp(e) {
+        e.preventDefault();
+        authed = null; // trigger loading state
+        navigate("/app");
+        checkAuth();
+    }
 </script>
 
-{#if authed === null}
-    <div class="center">Loading...</div>
-{:else if scopeError}
-    <div class="landing">
-        <header class="top-nav">
-            <span class="nav-title">Food Tracker</span>
-            <a href="/auth/logout" class="btn">Sign out</a>
-        </header>
-        <main class="content">
-            <p class="error-msg">
-                Missing required Google permissions.<br />
-                <a href="/auth/login?consent=1" class="btn" style="display:inline-block;margin-top:1rem;">Re-authorize</a>
-            </p>
-        </main>
-    </div>
-{:else if schemaError}
-    <div class="landing">
-        <header class="top-nav">
-            <span class="nav-title">Food Tracker</span>
-            <a href="/auth/logout" class="btn">Sign out</a>
-        </header>
-        <main class="content">
-            <p class="error-msg">
-                Your existing Food Tracker spreadsheet is from an older version.<br
-                />
-                Please rename it in Google Drive, then reload the page to create a
-                fresh one.
-            </p>
-        </main>
-    </div>
-{:else if sessionExpired}
-    <div class="landing">
-        <header class="top-nav">
-            <span class="nav-title">Food Tracker</span>
-            <a href="/auth/login" class="btn">Sign in with Google</a>
-        </header>
-        <main class="content">
-            <p class="error-msg">
-                Your session expired or became invalid.<br />
-                Sign in again to reload your data.
-            </p>
-        </main>
-    </div>
-{:else if loadError}
-    <div class="landing">
-        <header class="top-nav">
-            <span class="nav-title">Food Tracker</span>
-            <a href="/auth/logout" class="btn">Sign out</a>
-        </header>
-        <main class="content">
-            <p class="error-msg">{loadError}</p>
-        </main>
-    </div>
-{:else if authed === false}
-    <div class="landing">
-        <header class="top-nav">
-            <span class="nav-title">Food Tracker</span>
-            <a href="/auth/login" class="btn">Sign in with Google</a>
-        </header>
-        <main class="content">
-            <section class="about">
-                <h2>About</h2>
-                <p>This app aims to be unique from other food trackers in two ways:</p>
-                <ol>
-                    <li>All data is stored in the user's own Google Drive for better data ownership.</li>
-                    <li>Gemini Flash is used to parse natural-language meal descriptions into structured entries.</li>
-                </ol>
-                <p><a href="/auth/login" class="link">Sign in with Google</a> to get started.</p>
-                <p>
-                    The code is <a href="https://github.com/enmyj/foodini">open source</a
-                    > — feel free to fork or self-host with your own API key.
+{#if path === "/about"}
+    <MarkdownPage html={aboutHtml} />
+{:else if path === "/legal"}
+    <MarkdownPage html={legalHtml} />
+{:else if path === "/app"}
+    {#if authed === null}
+        <div class="center">Loading...</div>
+    {:else if scopeError}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/auth/logout" class="btn">Sign out</a>
+            </header>
+            <main class="content">
+                <p class="error-msg">
+                    Missing required Google permissions.<br />
+                    <a href="/auth/login?consent=1" class="btn" style="display:inline-block;margin-top:1rem;">Re-authorize</a>
                 </p>
+            </main>
+        </div>
+    {:else if schemaError}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/auth/logout" class="btn">Sign out</a>
+            </header>
+            <main class="content">
+                <p class="error-msg">
+                    Your existing Food Tracker spreadsheet is from an older version.<br />
+                    Please rename it in Google Drive, then reload the page to create a fresh one.
+                </p>
+            </main>
+        </div>
+    {:else if sessionExpired}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/auth/login" class="btn">Sign in with Google</a>
+            </header>
+            <main class="content">
+                <p class="error-msg">
+                    Your session expired or became invalid.<br />
+                    Sign in again to reload your data.
+                </p>
+            </main>
+        </div>
+    {:else if loadError}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/auth/logout" class="btn">Sign out</a>
+            </header>
+            <main class="content">
+                <p class="error-msg">{loadError}</p>
+            </main>
+        </div>
+    {:else if authed === false}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/auth/login" class="btn">Sign in with Google</a>
+            </header>
+            <main class="content">
+                <p class="error-msg">Please sign in to use the app.</p>
+            </main>
+        </div>
+    {:else}
+        <QueryClientProvider client={queryClient}>
+            <LogView />
+        </QueryClientProvider>
+        <footer class="app-footer">
+            <a href="/" onclick={(e) => go(e, '/')}>Home</a>
+            <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
+            <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
+        </footer>
+    {/if}
+{:else}
+    <!-- Home / Landing page -->
+    <div class="landing">
+        <header class="top-nav">
+            <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+            <nav class="nav-links">
+                <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
+                <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
+                <a href="/app" class="btn" onclick={goApp}>Sign in</a>
+            </nav>
+        </header>
+        <main class="content">
+            <section class="hero">
+                <h1>Track what you eat,<br />in plain English.</h1>
+                <p class="subtitle">
+                    Describe your meals however you want. AI handles the calories and macros.
+                    Your data lives in a Google Sheet you own — not our database.
+                </p>
+                <a href="/app" class="cta" onclick={goApp}>Get started with Google</a>
+            </section>
+            <section class="details">
+                <div class="detail">
+                    <h3>No food database to search</h3>
+                    <p>Type "scrambled eggs with toast and a coffee" and get structured entries back. Edit anything before you save.</p>
+                </div>
+                <div class="detail">
+                    <h3>Your spreadsheet, your data</h3>
+                    <p>Everything is stored in Google Sheets on your own Drive. Export it, delete it, do whatever you want with it.</p>
+                </div>
+                <div class="detail">
+                    <h3>Open source</h3>
+                    <p><a href="https://github.com/enmyj/foodini" class="link">Fork it</a> or self-host with your own API key. No lock-in.</p>
+                </div>
             </section>
         </main>
     </div>
-{:else}
-    <QueryClientProvider client={queryClient}>
-        <LogView />
-    </QueryClientProvider>
 {/if}
 
 <ToastHost />
@@ -176,12 +247,30 @@
         font-weight: 500;
         color: var(--ink);
         letter-spacing: -0.01em;
+        text-decoration: none;
+    }
+
+    .nav-links {
+        display: flex;
+        gap: 1.25rem;
+        align-items: center;
+    }
+
+    .nav-links a {
+        font-size: 0.85rem;
+        color: var(--mute);
+        text-decoration: none;
+    }
+
+    .nav-links a:hover {
+        color: var(--ink);
     }
 
     .content {
         flex: 1;
         display: flex;
-        justify-content: center;
+        flex-direction: column;
+        align-items: center;
         padding: 4rem 1.5rem;
     }
 
@@ -209,40 +298,64 @@
         color: var(--paper);
     }
 
-    .about {
-        max-width: 480px;
-        text-align: left;
+    .hero {
+        max-width: 520px;
+        text-align: center;
+        padding-top: 2rem;
     }
 
-    .about h2 {
-        font-size: var(--t-micro);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--mute-2);
+    .hero h1 {
+        font-size: 1.75rem;
         font-weight: 600;
-        margin-bottom: 0.75rem;
+        color: var(--ink);
+        letter-spacing: -0.03em;
+        line-height: 1.3;
+        margin-bottom: 1rem;
     }
 
-    .about p {
+    .hero .subtitle {
         font-size: var(--t-body-sm);
         color: var(--mute);
         line-height: 1.6;
-        margin: 0;
+        margin-bottom: 2rem;
     }
 
-    .about p + p {
-        margin-top: 0.75rem;
+    .cta {
+        display: inline-block;
+        padding: 0.65rem 1.5rem;
+        background: var(--ink);
+        color: var(--paper);
+        border-radius: var(--r-sm);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        letter-spacing: -0.01em;
     }
 
-    .about ol {
-        font-size: var(--t-body-sm);
-        color: var(--mute);
-        line-height: 1.6;
-        margin: 0.5rem 0 0.75rem 1.25rem;
-        padding: 0;
+    .cta:hover {
+        background: var(--ink-2);
+    }
+
+    .details {
         display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
+        gap: 2.5rem;
+        max-width: 680px;
+        margin-top: 4rem;
+        padding-top: 3rem;
+        border-top: 1px solid var(--rule);
+    }
+
+    .detail h3 {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--ink);
+        margin-bottom: 0.4rem;
+    }
+
+    .detail p {
+        font-size: 0.82rem;
+        color: var(--mute);
+        line-height: 1.55;
     }
 
     .link {
@@ -253,5 +366,35 @@
 
     .link:hover {
         color: var(--ink-mute);
+    }
+
+    .app-footer {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        padding: 2rem 1rem 1.5rem;
+        border-top: 1px solid var(--rule);
+        margin-top: 2rem;
+    }
+
+    .app-footer a {
+        font-size: 0.75rem;
+        color: var(--mute-2);
+        text-decoration: none;
+    }
+
+    .app-footer a:hover {
+        color: var(--mute);
+    }
+
+    @media (max-width: 600px) {
+        .details {
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .hero h1 {
+            font-size: 1.4rem;
+        }
     }
 </style>
