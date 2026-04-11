@@ -62,7 +62,7 @@
   .toast-message {
     flex: 1;
     min-width: 0;
-    font-size: 0.88rem;
+    font-size: var(--t-body-sm);
     line-height: 1.45;
   }
 
@@ -71,7 +71,7 @@
     border: none;
     color: inherit;
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: var(--t-body-sm);
     line-height: 1;
     padding: 0.1rem;
     opacity: 0.75;

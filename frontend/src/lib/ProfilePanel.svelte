@@ -239,24 +239,31 @@
     }
 
     label span {
-        font-size: 0.68rem;
+        font-size: var(--t-micro);
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.06em;
         color: var(--mute);
         font-weight: 600;
     }
 
     input,
     textarea {
-        border: none;
-        border-bottom: 2px solid var(--ink-2);
-        padding: 0.3rem 0;
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.5rem 0.6rem;
         font-size: var(--t-body);
         font-family: inherit;
-        background: transparent;
+        background: var(--paper);
         color: var(--ink);
         outline: none;
         resize: vertical;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    input:focus,
+    textarea:focus {
+        border-color: var(--ink-2);
     }
 
     .status {

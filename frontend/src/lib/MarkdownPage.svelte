@@ -57,7 +57,7 @@
     }
 
     .nav-links a {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         color: var(--mute);
         text-decoration: none;
     }
@@ -67,12 +67,12 @@
     }
 
     .btn {
-        padding: 0.5rem 1rem;
+        padding: 0.6rem 1rem;
         border: 1px solid var(--ink-2);
         color: var(--ink-2);
         border-radius: var(--r-sm);
         text-decoration: none;
-        font-size: 0.85rem;
+        font-size: var(--t-body-sm);
         letter-spacing: 0.01em;
         white-space: nowrap;
     }

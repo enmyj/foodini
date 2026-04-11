@@ -749,7 +749,7 @@
         border: 1px solid var(--rule-4);
         border-radius: var(--r-sm);
         padding: 0.3rem 0.6rem;
-        font-size: 0.8rem;
+        font-size: var(--t-meta);
         font-family: inherit;
         color: var(--ink-mute);
         font-weight: 500;
@@ -801,7 +801,7 @@
         border-radius: var(--r-pill);
         background: none;
         font-family: inherit;
-        font-size: 0.8rem;
+        font-size: var(--t-meta);
         color: var(--ink-mute);
         cursor: pointer;
         white-space: nowrap;
@@ -967,7 +967,7 @@
 
     /* --- Clarifying question --- */
     .clarifying {
-        font-size: 0.88rem;
+        font-size: var(--t-body-sm);
         color: var(--ink-mute);
         margin: 0 0 0.75rem;
         line-height: 1.45;
@@ -978,7 +978,7 @@
 
     /* --- Refine row --- */
     .refine-note {
-        font-size: 0.8rem;
+        font-size: var(--t-meta);
         color: var(--mute);
         margin: 0 0 0.4rem;
     }
@@ -994,7 +994,7 @@
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
         padding: 0.5rem 0.75rem;
-        font-size: 0.88rem;
+        font-size: var(--t-body-sm);
         font-family: inherit;
         background: var(--paper);
         color: var(--ink);
@@ -1006,22 +1006,22 @@
     }
 
     .save-btn {
-        padding: 0.5rem 1rem;
-        background: var(--accent);
+        padding: 0.6rem 1rem;
+        background: var(--ink-2);
         color: var(--paper);
         border: none;
         border-radius: var(--r-sm);
         cursor: pointer;
         font-size: var(--t-body-sm);
         font-family: inherit;
-        font-weight: 600;
+        font-weight: 500;
         white-space: nowrap;
         touch-action: manipulation;
     }
 
     @media (hover: hover) {
         .save-btn:not(:disabled):hover {
-            background: var(--accent-hover);
+            background: var(--ink);
         }
     }
 
@@ -1164,7 +1164,7 @@
     }
 
     button {
-        padding: 0.5rem 1rem;
+        padding: 0.6rem 1rem;
         background: var(--ink-2);
         color: var(--paper);
         border: none;
@@ -1229,7 +1229,7 @@
         border-radius: var(--r-pill);
         background: none;
         font-family: inherit;
-        font-size: 0.8rem;
+        font-size: var(--t-meta);
         color: var(--ink-mute);
         cursor: pointer;
         font-weight: 500;
@@ -1275,15 +1275,15 @@
 
     .save-activity-btn {
         width: 100%;
-        padding: 0.75rem 1rem;
+        padding: 0.6rem 1rem;
         background: var(--ink-2);
         color: var(--paper);
         border: none;
         border-radius: var(--r-sm);
         cursor: pointer;
-        font-size: 0.95rem;
+        font-size: var(--t-body-sm);
         font-family: inherit;
-        font-weight: 600;
+        font-weight: 500;
         touch-action: manipulation;
         margin-top: auto;
     }

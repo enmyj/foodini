@@ -201,7 +201,7 @@
   }
 
   .entry-desc {
-    font-size: 0.88rem;
+    font-size: var(--t-body-sm);
     color: var(--ink);
   }
 
@@ -223,12 +223,18 @@
     background: none;
     border: none;
     color: var(--mute-4);
-    font-size: var(--t-body-sm);
+    font-size: 1.1rem;
     cursor: pointer;
-    padding: 0 0.15rem;
+    padding: 0;
     margin-left: 0.5rem;
     flex-shrink: 0;
     line-height: 1;
+    min-width: 2.25rem;
+    min-height: 2.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
   }
 
   @media (hover: hover) {
@@ -247,13 +253,13 @@
   .add-food-btn {
     width: 100%;
     margin-top: 1rem;
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1rem;
     background: var(--paper);
     color: var(--ink-2);
     border: 1px solid var(--rule);
     border-radius: var(--r-sm);
     cursor: pointer;
-    font-size: 0.88rem;
+    font-size: var(--t-body-sm);
     font-family: inherit;
   }
 

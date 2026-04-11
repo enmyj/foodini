@@ -1825,7 +1825,7 @@
         font-family: inherit;
         text-align: left;
         color: var(--mute-4);
-        font-size: 0.82rem;
+        font-size: var(--t-meta);
         padding: 0.6rem 0;
         cursor: pointer;
         touch-action: manipulation;
@@ -1842,7 +1842,7 @@
         color: var(--mute-2);
         text-align: center;
         margin-top: 4rem;
-        font-size: 0.9rem;
+        font-size: var(--t-body-sm);
     }
 
     .state-block {
@@ -1862,7 +1862,7 @@
         color: var(--ink-2);
         text-decoration: underline;
         text-underline-offset: 2px;
-        font-size: 0.88rem;
+        font-size: var(--t-body-sm);
     }
 
     /* Weekly history — hairline ledger, not a box */
@@ -1889,7 +1889,7 @@
     }
 
     .week-range {
-        font-size: 0.88rem;
+        font-size: var(--t-body-sm);
         font-weight: 600;
         color: var(--ink);
     }
@@ -1972,7 +1972,7 @@
     }
 
     .dc-num {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         font-weight: 500;
         color: var(--ink);
         line-height: 1.2;
@@ -2074,12 +2074,12 @@
     }
 
     .insights-err {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         color: var(--danger);
     }
 
     .insights-text {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         color: var(--ink);
         line-height: 1.65;
         white-space: pre-line;

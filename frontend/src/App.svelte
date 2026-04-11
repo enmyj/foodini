@@ -259,7 +259,7 @@
     }
 
     .nav-links a {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         color: var(--mute);
         text-decoration: none;
     }
@@ -285,12 +285,12 @@
     }
 
     .btn {
-        padding: 0.5rem 1rem;
+        padding: 0.6rem 1rem;
         border: 1px solid var(--ink-2);
         color: var(--ink-2);
         border-radius: var(--r-sm);
         text-decoration: none;
-        font-size: 0.85rem;
+        font-size: var(--t-body-sm);
         letter-spacing: 0.01em;
         white-space: nowrap;
     }
@@ -324,12 +324,12 @@
 
     .cta {
         display: inline-block;
-        padding: 0.65rem 1.5rem;
+        padding: 0.6rem 1.5rem;
         background: var(--ink);
         color: var(--paper);
         border-radius: var(--r-sm);
         text-decoration: none;
-        font-size: 0.9rem;
+        font-size: var(--t-body-sm);
         font-weight: 500;
         letter-spacing: -0.01em;
     }
@@ -348,14 +348,14 @@
     }
 
     .detail h3 {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         font-weight: 600;
         color: var(--ink);
         margin-bottom: 0.4rem;
     }
 
     .detail p {
-        font-size: 0.82rem;
+        font-size: var(--t-meta);
         color: var(--mute);
         line-height: 1.55;
     }
@@ -380,7 +380,7 @@
     }
 
     .app-footer a {
-        font-size: 0.75rem;
+        font-size: var(--t-micro);
         color: var(--mute-2);
         text-decoration: none;
     }

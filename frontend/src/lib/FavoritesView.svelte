@@ -316,7 +316,7 @@
     }
 
     .modal-desc {
-        font-size: 0.85rem;
+        font-size: var(--t-meta);
         color: var(--mute);
         margin-bottom: 1.25rem;
         line-height: 1.4;
