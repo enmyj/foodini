@@ -183,7 +183,7 @@
             <nav class="nav-links">
                 <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
                 <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
-                <a href="/app" class="btn" onclick={goApp}>Sign in</a>
+                <a href="/app" class="btn" onclick={goApp}>Open app</a>
             </nav>
         </header>
         <main class="content">

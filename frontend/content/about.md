@@ -25,6 +25,7 @@ I needed to go on the FODMAP diet a few years ago. I downloaded a bunch of food 
 
 * The frontend uses `svelte`.
 * The backend uses `go` with `echo`.
+* Uses vanilla Google Oauth for auth for simplicity and also to facilitate working with Google Sheets.  
 * Currently deployed to Google Cloud Run
 
 The code is [open source on GitHub](https://github.com/enmyj/foodini). Feel free to make PRs or issues, fork it, or self-host with your own API key.
