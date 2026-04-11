@@ -3,6 +3,7 @@
     import { QueryClientProvider } from "@tanstack/svelte-query";
     import { queryClient } from "./lib/queryClient.js";
     import { navigate, init as initRouter, getCurrent } from "./lib/router.svelte.js";
+    import { initTheme } from "./lib/theme.svelte.js";
     import { marked } from "marked";
     import LogView from "./lib/LogView.svelte";
     import MarkdownPage from "./lib/MarkdownPage.svelte";
@@ -72,6 +73,7 @@
     }
 
     onMount(() => {
+        initTheme();
         initRouter();
         // Only check auth when navigating to /app
         if (path === "/app") {

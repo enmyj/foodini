@@ -41,6 +41,24 @@
     background: rgba(45, 45, 45, 0.97);
   }
 
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not(.light)) .toast {
+      background: rgba(240, 240, 238, 0.96);
+      color: #1c1c1c;
+    }
+    :global(:root:not(.light)) .toast.error {
+      background: rgba(220, 220, 218, 0.97);
+    }
+  }
+
+  :global(:root.dark) .toast {
+    background: rgba(240, 240, 238, 0.96);
+    color: #1c1c1c;
+  }
+  :global(:root.dark) .toast.error {
+    background: rgba(220, 220, 218, 0.97);
+  }
+
   .toast-message {
     flex: 1;
     min-width: 0;
