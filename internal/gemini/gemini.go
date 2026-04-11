@@ -249,6 +249,7 @@ func (s *Service) ClearConversation(userEmail, date string) {
 const insightsSystemPrompt = `You are a nutrition analyst reviewing a week of logged food and activity data.
 Output 3-5 bullet points. Report what the data actually shows — if most things are on track, say so; if most things are off, say so. Don't manufacture balance.
 Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
+For each bullet, briefly explain *why* it matters (e.g. "protein supports muscle recovery" or "fiber helps satiety between meals") — keep the reasoning to a short clause, not a lecture.
 One concrete change for next week.
 Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).
 
@@ -256,7 +257,7 @@ Nutrition benchmarks (general RDA): protein 1.2–2.0 g/kg depending on activity
 
 const dayInsightsSystemPrompt = `You are a nutrition analyst reviewing one day of logged food and activity data.
 First line: a single-sentence takeaway (the most important observation for this day). No bullet character on this line.
-Then 2-3 bullet points with supporting detail. Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
+Then 2-3 bullet points with supporting detail. For each bullet, briefly explain *why* it matters — keep the reasoning to a short clause, not a lecture. Be direct and clinical. No motivational language, no encouragement, no filler. State facts and numbers.
 Each bullet must start with the • character (not * or -). Use **bold** only for the key term at the start of each bullet (e.g. • **Protein:** ...).
 
 The summary will indicate whether the day is still in progress (today) or a completed past day.

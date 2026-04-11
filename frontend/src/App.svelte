@@ -7,6 +7,7 @@
     import { marked } from "marked";
     import LogView from "./lib/LogView.svelte";
     import MarkdownPage from "./lib/MarkdownPage.svelte";
+    import ThemeToggle from "./lib/ThemeToggle.svelte";
     import ToastHost from "./lib/ToastHost.svelte";
 
     import aboutMd from "../content/about.md?raw";
@@ -20,6 +21,7 @@
     let scopeError = $state(false);
     let sessionExpired = $state(false);
     let loadError = $state("");
+    let homeChecking = $state(false);
 
     let path = $derived(getCurrent());
 
@@ -72,12 +74,29 @@
         }
     }
 
+    async function checkSession() {
+        try {
+            const res = await fetch("/auth/check");
+            if (res.ok) {
+                authed = null; // will trigger loading state on /app
+                navigate("/app");
+                checkAuth();
+                return;
+            }
+        } catch {}
+        homeChecking = false;
+    }
+
     onMount(() => {
         initTheme();
         initRouter();
-        // Only check auth when navigating to /app
         if (path === "/app") {
             checkAuth();
+        } else if (path === "/") {
+            homeChecking = true;
+            checkSession();
+        } else {
+            homeChecking = false;
         }
     });
 
@@ -179,40 +198,45 @@
     {/if}
 {:else}
     <!-- Home / Landing page -->
-    <div class="landing">
-        <header class="top-nav">
-            <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
-            <nav class="nav-links">
-                <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
-                <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
-                <a href="/app" class="btn" onclick={goApp}>Open app</a>
-            </nav>
-        </header>
-        <main class="content">
-            <section class="hero">
-                <h1>Track what you eat,<br />in plain English.</h1>
-                <p class="subtitle">
-                    Describe your meals however you want. AI handles the calories and macros.
-                    Your data lives in a Google Sheet you own — not our database.
-                </p>
-                <a href="/app" class="cta" onclick={goApp}>Get started with Google</a>
-            </section>
-            <section class="details">
-                <div class="detail">
-                    <h3>No food database to search</h3>
-                    <p>Type "scrambled eggs with toast and a coffee" and get structured entries back. Edit anything before you save.</p>
-                </div>
-                <div class="detail">
-                    <h3>Your spreadsheet, your data</h3>
-                    <p>Everything is stored in Google Sheets on your own Drive. Export it, delete it, do whatever you want with it.</p>
-                </div>
-                <div class="detail">
-                    <h3>Open source</h3>
-                    <p><a href="https://github.com/enmyj/foodini" class="link">Fork it</a> or self-host with your own API key. No lock-in.</p>
-                </div>
-            </section>
-        </main>
-    </div>
+    {#if homeChecking}
+        <div class="center">Loading...</div>
+    {:else}
+        <div class="landing">
+            <header class="top-nav">
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <nav class="nav-links">
+                    <ThemeToggle />
+                    <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
+                    <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
+                    <a href="/app" class="btn" onclick={goApp}>Open app</a>
+                </nav>
+            </header>
+            <main class="content">
+                <section class="hero">
+                    <h1>Track what you eat,<br />in plain English.</h1>
+                    <p class="subtitle">
+                        Describe your meals however you want. AI handles the calories and macros.
+                        Your data lives in a Google Sheet you own — not our database.
+                    </p>
+                    <a href="/app" class="cta" onclick={goApp}>Get started with Google</a>
+                </section>
+                <section class="details">
+                    <div class="detail">
+                        <h3>No food database to search</h3>
+                        <p>Type "scrambled eggs with toast and a coffee" and get structured entries back. Edit anything before you save.</p>
+                    </div>
+                    <div class="detail">
+                        <h3>Your spreadsheet, your data</h3>
+                        <p>Everything is stored in Google Sheets on your own Drive. Export it, delete it, do whatever you want with it.</p>
+                    </div>
+                    <div class="detail">
+                        <h3>Open source</h3>
+                        <p><a href="https://github.com/enmyj/foodini" class="link">Fork it</a> or self-host with your own API key. No lock-in.</p>
+                    </div>
+                </section>
+            </main>
+        </div>
+    {/if}
 {/if}
 
 <ToastHost />
@@ -266,6 +290,11 @@
 
     .nav-links a:hover {
         color: var(--ink);
+    }
+
+    .nav-links :global(.theme-toggle) {
+        font-size: var(--t-meta);
+        color: var(--mute);
     }
 
     .content {
@@ -373,6 +402,7 @@
     .app-footer {
         display: flex;
         justify-content: center;
+        align-items: center;
         gap: 1.5rem;
         padding: 2rem 1rem 1.5rem;
         border-top: 1px solid var(--rule);

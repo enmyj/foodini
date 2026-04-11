@@ -35,8 +35,10 @@ Sign out and delete the "Food Tracker" spreadsheet from your Google Drive. You c
 
 By using Food Tracker, you agree to the following:
 
-1. **As-is service.** This app is provided as-is, without warranty. Nutrition estimates are LLM-generated and may be inaccurate.
-2. **Your responsibility.** You are responsible for your own data. We are not liable for data loss in your Google Drive.
-3. **No medical advice.** This app is not a substitute for professional dietary or medical advice.
-4. **Fair use.** Don't abuse the service. We reserve the right to block accounts that generate excessive API traffic.
-5. **Changes.** These terms may be updated. Continued use constitutes acceptance.
+1. **General wellness only.** Food Tracker is a general wellness tool intended to help you keep a personal record of what you eat. It is **not a medical device**, not a diagnostic tool, and not a substitute for professional healthcare. It does not claim to diagnose, treat, cure, or prevent any disease or medical condition.
+2. **Estimates, not clinical data.** All calorie counts, macronutrient breakdowns, insights, and meal suggestions are AI-generated approximations for personal awareness only. They are not verified by a dietitian, nutritionist, or any healthcare professional. Do not rely on them for managing any medical condition, allergy, or dietary restriction where accuracy is critical.
+3. **Not medical or dietary advice.** Nothing in this app constitutes medical advice, nutritional counseling, or a prescribed diet plan. If you have a health condition, eating disorder, food allergy, or other medical concern, consult a qualified healthcare provider before making dietary changes based on information from this app.
+4. **As-is service.** This app is provided as-is, without warranty of any kind. We make no guarantees about the accuracy, completeness, or reliability of any AI-generated content.
+5. **Your responsibility.** You are responsible for your own health decisions and your own data. We are not liable for data loss in your Google Drive or for any health outcomes related to your use of this app.
+6. **Fair use.** Don't abuse the service. We reserve the right to block accounts that generate excessive API traffic.
+7. **Changes.** These terms may be updated. Continued use constitutes acceptance.

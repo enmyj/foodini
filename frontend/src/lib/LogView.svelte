@@ -21,7 +21,7 @@
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
     import { showError } from "./toast.js";
-    import { initTheme, getTheme, cycleTheme } from "./theme.svelte.js";
+    import ThemeToggle from "./ThemeToggle.svelte";
 
     const queryClient = useQueryClient();
 
@@ -55,9 +55,6 @@
     let historyReady = false;
     let skipHistorySync = false;
     let favoritedDescs = $state(new Set());
-    let theme = $state(getTheme());
-
-    initTheme();
 
     // --- TanStack Queries ---
 
@@ -894,13 +891,7 @@
                         >
                     </a>
                 {/if}
-                <button
-                    class="theme-btn"
-                    onclick={() => (theme = cycleTheme())}
-                    aria-label="Toggle theme"
-                    title={theme === 'system' ? 'Theme: auto' : theme === 'dark' ? 'Theme: dark' : 'Theme: light'}
-                >{theme === 'system' ? '◑' : theme === 'dark' ? '●' : '○'}</button
-                >
+                <ThemeToggle />
                 <button
                     class="settings-btn"
                     onclick={() => (profileOpen = true)}
@@ -2227,24 +2218,6 @@
         }
     }
 
-    .theme-btn {
-        background: none;
-        border: none;
-        font-size: 1rem;
-        color: var(--mute);
-        cursor: pointer;
-        padding: 0.5rem 0.4rem;
-        line-height: 1;
-        touch-action: manipulation;
-        min-height: 2.75rem;
-    }
-
-    @media (hover: hover) {
-        .theme-btn:hover {
-            color: var(--ink-2);
-        }
-    }
-
     .settings-btn {
         background: none;
         border: none;
@@ -2261,6 +2234,13 @@
         .settings-btn:hover {
             color: var(--ink-2);
         }
+    }
+
+    .header-actions :global(.theme-toggle) {
+        font-size: 1rem;
+        color: var(--mute);
+        padding: 0.5rem 0.4rem;
+        min-height: 2.75rem;
     }
 
     .signout-btn {

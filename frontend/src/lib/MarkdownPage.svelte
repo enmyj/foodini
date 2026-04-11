@@ -1,5 +1,6 @@
 <script>
     import { navigate } from './router.svelte.js';
+    import ThemeToggle from './ThemeToggle.svelte';
     let { html } = $props();
 
     function go(e, href) {
@@ -12,6 +13,7 @@
     <header class="top-nav">
         <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
         <nav class="nav-links">
+            <ThemeToggle />
             <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
             <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
             <a href="/app" class="btn" onclick={(e) => go(e, '/app')}>Open app</a>
@@ -64,6 +66,11 @@
 
     .nav-links a:hover {
         color: var(--ink);
+    }
+
+    .nav-links :global(.theme-toggle) {
+        font-size: var(--t-meta);
+        color: var(--mute);
     }
 
     .btn {

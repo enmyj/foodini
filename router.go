@@ -88,6 +88,12 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	authGroup.GET("/login", authHandler.Login)
 	authGroup.GET("/callback", authHandler.Callback)
 	authGroup.GET("/logout", authHandler.Logout)
+	authGroup.GET("/check", func(c *echo.Context) error {
+		if _, err := authHandler.GetSession(c.Request()); err != nil {
+			return c.NoContent(http.StatusUnauthorized)
+		}
+		return c.NoContent(http.StatusOK)
+	})
 
 	// --- API routes (auth required + per-user rate limited) ---
 	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
