@@ -62,6 +62,10 @@
     function onKeyDown(e) {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }
+
+    function scrollIntoViewOnFocus(e) {
+        setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+    }
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
@@ -81,6 +85,7 @@
                     bind:value={gender}
                     placeholder="e.g. male, female, non-binary"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 />
             </label>
             <label>
@@ -92,6 +97,7 @@
                     bind:value={birthYear}
                     placeholder="e.g. 1990"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 />
             </label>
             <label>
@@ -102,6 +108,7 @@
                     bind:value={height}
                     placeholder="e.g. 5'10&quot; or 178cm"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 />
             </label>
             <label>
@@ -112,6 +119,7 @@
                     bind:value={weight}
                     placeholder="e.g. 170lbs or 77kg"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 />
             </label>
             <label>
@@ -123,6 +131,7 @@
                     placeholder="Dietary restrictions, allergies…"
                     rows="2"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 ></textarea>
             </label>
             <label>
@@ -134,6 +143,7 @@
                     placeholder="e.g. lose weight, build muscle, eat more protein…"
                     rows="2"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 ></textarea>
             </label>
             <label>
@@ -145,6 +155,7 @@
                     placeholder="e.g. vegetarian, no gluten, lactose intolerant…"
                     rows="2"
                     disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
                 ></textarea>
             </label>
         </div>
