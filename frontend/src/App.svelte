@@ -298,8 +298,9 @@
 
     .btn {
         padding: 0.6rem 1rem;
-        border: 1px solid var(--ink-2);
-        color: var(--ink-2);
+        background: var(--ink);
+        border: 1px solid var(--ink);
+        color: var(--paper);
         border-radius: var(--r-sm);
         text-decoration: none;
         font-size: var(--t-body-sm);
@@ -309,6 +310,7 @@
 
     .btn:hover {
         background: var(--ink-2);
+        border-color: var(--ink-2);
         color: var(--paper);
     }
 
