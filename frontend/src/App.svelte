@@ -265,13 +265,13 @@
         align-items: center;
     }
 
-    .nav-links a {
+    .nav-links a:not(.btn) {
         font-size: var(--t-meta);
         color: var(--mute);
         text-decoration: none;
     }
 
-    .nav-links a:hover {
+    .nav-links a:not(.btn):hover {
         color: var(--ink);
     }
 
