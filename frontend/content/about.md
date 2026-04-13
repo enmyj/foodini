@@ -25,7 +25,7 @@ I needed to go on the FODMAP diet a few years ago. I downloaded a bunch of food 
 ## What will this app not do
 
 * sell ads
-* track you across the far reaches of the internet
+* track you across the far reaches of the internet (or at all)
 * give you medical advice
 
 ## Technical details

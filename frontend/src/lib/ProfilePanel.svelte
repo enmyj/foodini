@@ -60,25 +60,13 @@
     let loaded = $derived(profileQuery.isSuccess);
 
     function onKeyDown(e) {
-        if (e.key === "Escape") onClose();
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }
 </script>
 
 <svelte:window onkeydown={onKeyDown} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<div class="overlay" aria-hidden="true" onclick={onClose}></div>
-<div
-    class="panel"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="profile-title"
->
-    <div class="panel-header">
-        <h2 id="profile-title">Profile</h2>
-        <button class="close" onclick={onClose}>✕</button>
-    </div>
+<div class="panel">
     <p class="hint-text">
         This information helps the AI estimate macros more accurately.
     </p>
@@ -133,7 +121,7 @@
                     use:autosize
                     bind:value={notes}
                     placeholder="Dietary restrictions, allergies…"
-                    rows="3"
+                    rows="2"
                     disabled={saving}
                 ></textarea>
             </label>
@@ -144,7 +132,7 @@
                     use:autosize
                     bind:value={goals}
                     placeholder="e.g. lose weight, build muscle, eat more protein…"
-                    rows="3"
+                    rows="2"
                     disabled={saving}
                 ></textarea>
             </label>
@@ -174,49 +162,9 @@
 </div>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.2);
-        z-index: 20;
-    }
-
     .panel {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: var(--paper);
-        border-radius: var(--r-md);
-        width: min(92vw, 420px);
-        max-height: 80vh;
-        overflow-y: auto;
-        z-index: 21;
-        padding: 1.5rem;
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-    }
-
-    .panel-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.5rem;
-    }
-
-    .panel-header h2 {
-        font-size: var(--t-title);
-        font-weight: 600;
-        color: var(--ink);
-    }
-
-    .close {
-        background: none;
-        border: none;
-        font-size: 1rem;
-        color: var(--mute);
-        cursor: pointer;
-        padding: 0.25rem;
-        line-height: 1;
+        max-width: 420px;
+        padding: 0.25rem 0;
     }
 
     .hint-text {
@@ -250,19 +198,19 @@
     textarea {
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
-        padding: 0.5rem 0.6rem;
+        padding: 0.5rem 0.75rem;
         font-size: var(--t-body);
         font-family: inherit;
         background: var(--paper);
         color: var(--ink);
-        outline: none;
-        resize: vertical;
+        resize: none;
         width: 100%;
         box-sizing: border-box;
     }
 
     input:focus,
     textarea:focus {
+        outline: none;
         border-color: var(--ink-2);
     }
 

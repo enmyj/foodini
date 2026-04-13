@@ -21,6 +21,7 @@
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
     import { showError } from "./toast.js";
+    import { navigate } from "./router.svelte.js";
     import ThemeToggle from "./ThemeToggle.svelte";
 
     const queryClient = useQueryClient();
@@ -31,7 +32,7 @@
 
     let view = $state("day");
     let currentDate = $state(todayStr());
-    let profileOpen = $state(false);
+    let menuOpen = $state(false);
     let drawerOpen = $state(false);
     let drawerTab = $state("food");
     let activityRefreshKey = $state(0);
@@ -46,6 +47,7 @@
     let longPressTimer = null;
     let dateInputEl = $state(null);
 
+    let dayAiExpanded = $state(false);
     let insightsByWeek = $state({});
     let suggestionsByWeek = $state({});
     let dayInsight = $state(null);
@@ -152,6 +154,7 @@
             void currentDate;
             collapsedMeals = new Set(MEAL_ORDER);
             repeatedMeals = new Set();
+            dayAiExpanded = false;
             dayInsight = null;
             daySuggestions = null;
         }
@@ -215,7 +218,6 @@
             view,
             currentDate,
             historyWeeks,
-            profileOpen,
             drawerOpen,
             drawerTab,
             drawerDate,
@@ -226,7 +228,7 @@
 
     function normalizeNavState(state) {
         const today = todayStr();
-        const nextView = state?.view === "history" ? "history" : state?.view === "favorites" ? "favorites" : "day";
+        const nextView = ["history", "favorites", "profile"].includes(state?.view) ? state.view : "day";
         const nextDate =
             typeof state?.currentDate === "string" && state.currentDate
                 ? state.currentDate
@@ -234,7 +236,6 @@
         const nextHistoryWeeks = [4, 8, 12, 26].includes(state?.historyWeeks)
             ? state.historyWeeks
             : 4;
-        const nextProfileOpen = state?.profileOpen === true;
         const nextDrawerOpen = state?.drawerOpen === true;
         const nextDrawerTab =
             state?.drawerTab === "activity" ? "activity" : "food";
@@ -243,7 +244,6 @@
             view: nextView,
             currentDate: nextDate > today ? today : nextDate,
             historyWeeks: nextHistoryWeeks,
-            profileOpen: nextProfileOpen,
             drawerOpen: nextDrawerOpen,
             drawerTab: nextDrawerTab,
             drawerDate: nextDrawerOpen ? state?.drawerDate || nextDate : null,
@@ -257,7 +257,6 @@
             a?.view === b?.view &&
             a?.currentDate === b?.currentDate &&
             a?.historyWeeks === b?.historyWeeks &&
-            a?.profileOpen === b?.profileOpen &&
             a?.drawerOpen === b?.drawerOpen &&
             a?.drawerTab === b?.drawerTab &&
             a?.drawerDate === b?.drawerDate &&
@@ -268,7 +267,6 @@
 
     function shouldPushHistory(prev, next) {
         if (!prev) return false;
-        if (!prev.profileOpen && next.profileOpen) return true;
         if (!prev.drawerOpen && next.drawerOpen) return true;
         if (prev.view !== next.view) return true;
         if (
@@ -289,7 +287,6 @@
         view = next.view;
         currentDate = next.currentDate;
         historyWeeks = next.historyWeeks;
-        profileOpen = next.profileOpen;
         drawerOpen = next.drawerOpen;
         drawerTab = next.drawerTab;
         drawerDate = next.drawerDate;
@@ -512,12 +509,7 @@
     }
 
     function closeProfile() {
-        const state = currentHistoryNavState();
-        if (historyReady && state?.profileOpen) {
-            window.history.back();
-            return;
-        }
-        profileOpen = false;
+        view = "day";
     }
 
     function onEntriesAdded(newEntries) {
@@ -843,23 +835,30 @@
 <div class="wrap">
     <header>
         <div class="header-top">
-            <div class="toggle">
+            <div class="nav-left">
                 <button
-                    class:active={view === "day"}
-                    onclick={() => {
-                        view = "day";
-                    }}>Day</button
+                    class="hamburger"
+                    onclick={() => (menuOpen = !menuOpen)}
+                    aria-label="Navigation menu"
+                    aria-expanded={menuOpen}
                 >
-                <button
-                    class:active={view === "history"}
-                    onclick={() => (view = "history")}>History</button
-                >
-                <button
-                    class:active={view === "favorites"}
-                    onclick={() => (view = "favorites")}>Favorites</button
-                >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+                </button>
+                <span class="view-label">{view === "day" ? "Day" : view === "history" ? "History" : view === "favorites" ? "Favorites" : view === "profile" ? "Profile" : ""}</span>
+                {#if menuOpen}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <div class="menu-backdrop" aria-hidden="true" onclick={() => (menuOpen = false)}></div>
+                    <nav class="nav-menu">
+                        <button class:active={view === "day"} onclick={() => { view = "day"; menuOpen = false; }}>Day</button>
+                        <button class:active={view === "history"} onclick={() => { view = "history"; menuOpen = false; }}>History</button>
+                        <button class:active={view === "favorites"} onclick={() => { view = "favorites"; menuOpen = false; }}>Favorites</button>
+                        <hr />
+                        <button class:active={view === "profile"} onclick={() => { view = "profile"; menuOpen = false; }}>Profile</button>
+                    </nav>
+                {/if}
             </div>
             <div class="header-actions">
+                <ThemeToggle />
                 {#if spreadsheetUrl}
                     <a
                         class="sheet-link"
@@ -891,13 +890,15 @@
                         >
                     </a>
                 {/if}
-                <ThemeToggle />
-                <button
-                    class="settings-btn"
-                    onclick={() => (profileOpen = true)}
-                    aria-label="Profile settings"
-                    title="Profile settings">⚙</button
+                <a
+                    class="home-btn"
+                    href="/"
+                    onclick={(e) => { e.preventDefault(); navigate("/"); }}
+                    aria-label="Home"
+                    title="Home"
                 >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
+                </a>
                 <a
                     class="signout-btn"
                     href="/auth/logout"
@@ -972,27 +973,56 @@
                     <span>{t.carbs}g C</span>
                     <span>{t.fat}g F</span>
                     <span>{t.fiber}g Fb</span>
-                    <div class="totals-btns">
+                    {#if showDayInsights || showDaySuggestions}
+                        <div class="totals-btns totals-btns-desktop">
+                            {#if showDayInsights}
+                                <button
+                                    class="insights-btn"
+                                    class:active={dayInsight?.open}
+                                    onclick={toggleDayInsights}
+                                    aria-label="AI insights"
+                                    title="AI insights">insights</button
+                                >
+                            {/if}
+                            {#if showDaySuggestions}
+                                <button
+                                    class="insights-btn suggestions-btn"
+                                    class:active={daySuggestions?.open}
+                                    onclick={toggleDaySuggestions}
+                                    aria-label="Meal suggestions"
+                                    title="Meal suggestions">suggestions</button
+                                >
+                            {/if}
+                        </div>
+                        <div class="totals-btns totals-btns-mobile">
+                            <button
+                                class="insights-btn"
+                                class:active={dayAiExpanded}
+                                onclick={() => (dayAiExpanded = !dayAiExpanded)}
+                                aria-label="AI tools"
+                                title="AI tools">AI ▾</button
+                            >
+                        </div>
+                    {/if}
+                </div>
+                {#if dayAiExpanded}
+                    <div class="ai-expand-row">
                         {#if showDayInsights}
                             <button
                                 class="insights-btn"
                                 class:active={dayInsight?.open}
-                                onclick={toggleDayInsights}
-                                aria-label="AI insights"
-                                title="AI insights">insights</button
+                                onclick={toggleDayInsights}>insights</button
                             >
                         {/if}
                         {#if showDaySuggestions}
                             <button
                                 class="insights-btn suggestions-btn"
                                 class:active={daySuggestions?.open}
-                                onclick={toggleDaySuggestions}
-                                aria-label="Meal suggestions"
-                                title="Meal suggestions">suggestions</button
+                                onclick={toggleDaySuggestions}>suggestions</button
                             >
                         {/if}
                     </div>
-                </div>
+                {/if}
             {/if}
         {/if}
     </header>
@@ -1234,6 +1264,8 @@
         />
     {:else if view === "favorites"}
         <FavoritesView onLoad={syncFavoritedDescs} />
+    {:else if view === "profile"}
+        <ProfilePanel onClose={closeProfile} />
     {:else}
         {#each weekGroupsData as week}
             <div class="week-block">
@@ -1430,9 +1462,6 @@
     initialTab={drawerTab}
     initialField={drawerField}
 />
-{#if profileOpen}
-    <ProfilePanel onClose={closeProfile} />
-{/if}
 
 <style>
     .wrap {
@@ -1458,26 +1487,84 @@
         margin-bottom: 0.5rem;
     }
 
-    .toggle {
+    .nav-left {
         display: flex;
-        gap: 1.25rem;
+        align-items: center;
+        gap: 0.5rem;
+        position: relative;
     }
 
-    .toggle button {
+    .hamburger {
         background: none;
         border: none;
-        border-bottom: 2px solid transparent;
-        padding: 0 0 0.2rem;
-        font-size: 0.95rem;
-        font-weight: 500;
-        color: var(--mute);
+        color: var(--ink);
         cursor: pointer;
-        font-family: inherit;
+        padding: 0.4rem;
+        display: flex;
+        align-items: center;
+        touch-action: manipulation;
+        border-radius: var(--r-sm);
     }
 
-    .toggle button.active {
+    @media (hover: hover) {
+        .hamburger:hover {
+            background: var(--paper-4);
+        }
+    }
+
+    .view-label {
+        font-size: 0.95rem;
+        font-weight: 500;
         color: var(--ink);
-        border-bottom-color: var(--ink-2);
+    }
+
+    .menu-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+    }
+
+    .nav-menu {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 0.35rem;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-md);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+        min-width: 160px;
+        padding: 0.35rem 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .nav-menu button {
+        background: none;
+        border: none;
+        text-align: left;
+        padding: 0.55rem 1rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        color: var(--mute);
+        cursor: pointer;
+        font-weight: 500;
+    }
+
+    .nav-menu button.active {
+        color: var(--ink);
+    }
+
+    .nav-menu button:hover {
+        background: var(--paper-4);
+        color: var(--ink);
+    }
+
+    .nav-menu hr {
+        border: none;
+        border-top: 1px solid var(--rule);
+        margin: 0.25rem 0;
     }
 
     /* Week picker */
@@ -1604,9 +1691,29 @@
         margin-left: auto;
     }
 
+    .totals-btns-mobile {
+        display: none;
+    }
+
     @media (max-width: 480px) {
-        .totals-btns {
-            margin-left: 0;
+        .totals-btns-desktop {
+            display: none;
+        }
+
+        .totals-btns-mobile {
+            display: flex;
+        }
+    }
+
+    .ai-expand-row {
+        display: none;
+        gap: 0.35rem;
+        padding-top: 0.3rem;
+    }
+
+    @media (max-width: 480px) {
+        .ai-expand-row {
+            display: flex;
         }
     }
 
@@ -2202,6 +2309,22 @@
         gap: 0.25rem;
     }
 
+    .home-btn {
+        display: flex;
+        align-items: center;
+        color: var(--mute);
+        padding: 0.5rem 0.4rem;
+        text-decoration: none;
+        touch-action: manipulation;
+        min-height: 2.75rem;
+    }
+
+    @media (hover: hover) {
+        .home-btn:hover {
+            color: var(--ink-2);
+        }
+    }
+
     .sheet-link {
         display: flex;
         align-items: center;
@@ -2218,25 +2341,7 @@
         }
     }
 
-    .settings-btn {
-        background: none;
-        border: none;
-        font-size: 1.1rem;
-        color: var(--mute);
-        cursor: pointer;
-        padding: 0.5rem 0.5rem;
-        line-height: 1;
-        touch-action: manipulation;
-        min-height: 2.75rem;
-    }
-
-    @media (hover: hover) {
-        .settings-btn:hover {
-            color: var(--ink-2);
-        }
-    }
-
-    .header-actions :global(.theme-toggle) {
+.header-actions :global(.theme-toggle) {
         font-size: 1rem;
         color: var(--mute);
         padding: 0.5rem 0.4rem;

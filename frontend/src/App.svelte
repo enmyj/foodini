@@ -182,11 +182,6 @@
         <QueryClientProvider client={queryClient}>
             <LogView />
         </QueryClientProvider>
-        <footer class="app-footer">
-            <a href="/" onclick={(e) => go(e, '/')}>Home</a>
-            <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
-            <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
-        </footer>
     {/if}
 {:else}
     <!-- Home / Landing page -->
@@ -387,27 +382,7 @@
         color: var(--ink-mute);
     }
 
-    .app-footer {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 1.5rem;
-        padding: 2rem 1rem 1.5rem;
-        border-top: 1px solid var(--rule);
-        margin-top: 2rem;
-    }
-
-    .app-footer a {
-        font-size: var(--t-micro);
-        color: var(--mute-2);
-        text-decoration: none;
-    }
-
-    .app-footer a:hover {
-        color: var(--mute);
-    }
-
-    @media (max-width: 600px) {
+@media (max-width: 600px) {
         .details {
             flex-direction: column;
             gap: 1.5rem;
