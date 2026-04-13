@@ -14,7 +14,11 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-const cookieName = "ft_session"
+const (
+	cookieName        = "ft_session"
+	sessionCookieAge  = 180 * 24 * 3600
+	missingRefreshMsg = "Google sign-in did not return offline access. Please try signing in again."
+)
 
 var scopes = []string{
 	"openid",
@@ -94,11 +98,13 @@ func (h *Handler) Login(c *echo.Context) error {
 		MaxAge:   300,
 		SameSite: http.SameSiteLaxMode,
 	})
-	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOffline}
+	prompt := "consent"
 	if c.QueryParam("consent") == "1" {
-		opts = append(opts, oauth2.ApprovalForce)
-	} else {
-		opts = append(opts, oauth2.SetAuthURLParam("prompt", "select_account"))
+		prompt = "consent select_account"
+	}
+	opts := []oauth2.AuthCodeOption{
+		oauth2.AccessTypeOffline,
+		oauth2.SetAuthURLParam("prompt", prompt),
 	}
 	opts = append(opts, oauth2.SetAuthURLParam("redirect_uri", redirectURL(r)))
 	url := h.oauthCfg.AuthCodeURL(state, opts...)
@@ -126,7 +132,7 @@ func (h *Handler) Callback(c *echo.Context) error {
 	}
 
 	if token.RefreshToken == "" {
-		return c.Redirect(http.StatusTemporaryRedirect, "/auth/login?consent=1")
+		return c.String(http.StatusBadRequest, missingRefreshMsg)
 	}
 
 	client := h.oauthCfg.Client(ctx, token)
@@ -181,7 +187,7 @@ func (h *Handler) SetSession(c *echo.Context, session *Session) error {
 		HttpOnly: true,
 		Secure:   h.secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   30 * 24 * 3600,
+		MaxAge:   sessionCookieAge,
 	})
 	return nil
 }

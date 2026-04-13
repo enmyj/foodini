@@ -699,7 +699,10 @@
         z-index: 11;
         display: flex;
         flex-direction: column;
-        height: min(72vh, 540px);
+        width: min(100%, 640px);
+        height: min(78vh, 620px);
+        height: min(78dvh, 620px);
+        max-height: calc(100dvh - 0.5rem);
         padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
         transition: transform 0.2s ease;
         will-change: transform;
@@ -837,6 +840,7 @@
     /* --- Content area --- */
     .content-area {
         flex: 1;
+        min-height: 0;
         overflow-y: auto;
         margin-bottom: 0.75rem;
         padding: 0.25rem 0;
@@ -1186,6 +1190,7 @@
         display: flex;
         flex-direction: column;
         gap: 1.5rem;
+        min-height: 0;
         overflow-y: auto;
         flex: 1;
     }
@@ -1296,5 +1301,25 @@
     .save-activity-btn:disabled {
         opacity: 0.35;
         cursor: default;
+    }
+
+    @media (max-width: 700px) {
+        .drawer {
+            width: 100%;
+            max-width: none;
+            height: min(88dvh, 760px);
+            max-height: calc(100dvh - 0.25rem);
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .date-input,
+        .macro-field input,
+        .refine-input,
+        .hydration-input,
+        .composer-input,
+        .activity-form .text-entry {
+            font-size: 16px;
+        }
     }
 </style>
