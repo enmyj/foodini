@@ -104,6 +104,20 @@
         navigate(href);
     }
 
+    async function startApp(e) {
+        e.preventDefault();
+        try {
+            const res = await fetch("/auth/check");
+            if (res.ok) {
+                authed = null;
+                navigate("/app");
+                checkAuth();
+                return;
+            }
+        } catch {}
+        window.location.href = "/auth/login";
+    }
+
 </script>
 
 {#if path === "/about"}
@@ -186,7 +200,7 @@
                 <ThemeToggle />
                 <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
                 <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
-                <a href="/auth/login" class="btn">Open app</a>
+                <a href="/auth/login" class="btn" onclick={startApp}>Open app</a>
             </nav>
         </header>
         <main class="content">
@@ -196,7 +210,7 @@
                     Describe your meals however you want. AI handles the calories and macros.
                     Your data lives in a Google Sheet you own — not our database.
                 </p>
-                <a href="/auth/login" class="cta">Get started with Google</a>
+                <a href="/auth/login" class="cta" onclick={startApp}>Get started with Google</a>
             </section>
             <section class="details">
                 <div class="detail">
