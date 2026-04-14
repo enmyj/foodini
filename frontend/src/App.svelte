@@ -104,12 +104,6 @@
         navigate(href);
     }
 
-    function goApp(e) {
-        e.preventDefault();
-        authed = null; // trigger loading state
-        navigate("/app");
-        checkAuth();
-    }
 </script>
 
 {#if path === "/about"}
@@ -192,7 +186,7 @@
                 <ThemeToggle />
                 <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
                 <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
-                <a href="/app" class="btn" onclick={goApp}>Open app</a>
+                <a href="/auth/login" class="btn">Open app</a>
             </nav>
         </header>
         <main class="content">
@@ -202,7 +196,7 @@
                     Describe your meals however you want. AI handles the calories and macros.
                     Your data lives in a Google Sheet you own — not our database.
                 </p>
-                <a href="/app" class="cta" onclick={goApp}>Get started with Google</a>
+                <a href="/auth/login" class="cta">Get started with Google</a>
             </section>
             <section class="details">
                 <div class="detail">
