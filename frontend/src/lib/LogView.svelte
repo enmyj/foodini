@@ -26,8 +26,6 @@
 
     const MEAL_ORDER = ["breakfast", "lunch", "snack", "dinner", "supplements"];
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-    const HISTORY_STATE_KEY = "foodiniNav";
-
     let view = $state("day");
     let currentDate = $state(todayStr());
     let menuOpen = $state(false);
@@ -48,8 +46,6 @@
     let suggestionsByWeek = $state({});
     let collapsedMeals = $state(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
-    let historyReady = false;
-    let skipHistorySync = false;
     let favoritedDescs = $state(new Set());
 
     // --- TanStack Queries ---
@@ -124,8 +120,6 @@
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
 
-    let isToday = $derived(currentDate === todayStr());
-
     // Sync favorited descriptions from query
     $effect(() => {
         const favs = favoritesQuery.data?.favorites;
@@ -198,97 +192,6 @@
         const em = e.toLocaleDateString("en-US", { month: "short" });
         if (sm === em) return `${sm} ${s.getDate()}–${e.getDate()}`;
         return `${sm} ${s.getDate()} – ${em} ${e.getDate()}`;
-    }
-
-    function snapshotNavState() {
-        return {
-            view,
-            currentDate,
-            historyWeeks,
-            drawerOpen,
-            drawerTab,
-            drawerDate,
-            drawerMeal,
-            drawerField,
-        };
-    }
-
-    function normalizeNavState(state) {
-        const today = todayStr();
-        const nextView = ["history", "favorites", "profile"].includes(state?.view) ? state.view : "day";
-        const nextDate =
-            typeof state?.currentDate === "string" && state.currentDate
-                ? state.currentDate
-                : today;
-        const nextHistoryWeeks = [4, 8, 12, 26].includes(state?.historyWeeks)
-            ? state.historyWeeks
-            : 4;
-        const nextDrawerOpen = state?.drawerOpen === true;
-        const nextDrawerTab =
-            state?.drawerTab === "activity" ? "activity" : "food";
-
-        return {
-            view: nextView,
-            currentDate: nextDate > today ? today : nextDate,
-            historyWeeks: nextHistoryWeeks,
-            drawerOpen: nextDrawerOpen,
-            drawerTab: nextDrawerTab,
-            drawerDate: nextDrawerOpen ? state?.drawerDate || nextDate : null,
-            drawerMeal: nextDrawerOpen ? (state?.drawerMeal ?? null) : null,
-            drawerField: nextDrawerOpen ? (state?.drawerField ?? null) : null,
-        };
-    }
-
-    function navStateEqual(a, b) {
-        return (
-            a?.view === b?.view &&
-            a?.currentDate === b?.currentDate &&
-            a?.historyWeeks === b?.historyWeeks &&
-            a?.drawerOpen === b?.drawerOpen &&
-            a?.drawerTab === b?.drawerTab &&
-            a?.drawerDate === b?.drawerDate &&
-            a?.drawerMeal === b?.drawerMeal &&
-            a?.drawerField === b?.drawerField
-        );
-    }
-
-    function shouldPushHistory(prev, next) {
-        if (!prev) return false;
-        if (!prev.drawerOpen && next.drawerOpen) return true;
-        if (prev.view !== next.view) return true;
-        if (
-            prev.currentDate !== next.currentDate &&
-            prev.view === "day" &&
-            next.view === "day"
-        )
-            return true;
-        return false;
-    }
-
-    function currentHistoryNavState() {
-        return normalizeNavState(window.history.state?.[HISTORY_STATE_KEY]);
-    }
-
-    function applyNavState(state) {
-        const next = normalizeNavState(state);
-        view = next.view;
-        currentDate = next.currentDate;
-        historyWeeks = next.historyWeeks;
-        drawerOpen = next.drawerOpen;
-        drawerTab = next.drawerTab;
-        drawerDate = next.drawerDate;
-        drawerMeal = next.drawerMeal;
-        drawerField = next.drawerField;
-    }
-
-    function pushOrReplaceHistory(state, mode = "replace") {
-        const next = normalizeNavState(state);
-        const payload = { [HISTORY_STATE_KEY]: next };
-        if (mode === "push") {
-            window.history.pushState(payload, "");
-        } else {
-            window.history.replaceState(payload, "");
-        }
     }
 
     function groupedByMeal(entries) {
@@ -442,11 +345,6 @@
 
     function closeDrawer() {
         if (drawerTab === "activity") activityRefreshKey++;
-        const state = currentHistoryNavState();
-        if (historyReady && state?.drawerOpen) {
-            window.history.back();
-            return;
-        }
         drawerOpen = false;
         drawerDate = null;
         drawerMeal = null;
@@ -1825,6 +1723,15 @@
         );
         background-size: 200% 100%;
         animation: shimmer 1.4s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+        0% {
+            background-position: 200% 0;
+        }
+        100% {
+            background-position: -200% 0;
+        }
     }
 
     .insights-err {
