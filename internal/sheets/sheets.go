@@ -128,7 +128,7 @@ func DayLogFromRow(row []interface{}) DayLog {
 }
 
 // UserProfile stores user context for improving Gemini macro estimates.
-// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | birth_year
+// Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | birth_year | nutrition_expertise
 type UserProfile struct {
 	Gender              string `json:"gender"`
 	Height              string `json:"height"`
@@ -137,10 +137,11 @@ type UserProfile struct {
 	Goals               string `json:"goals"`
 	DietaryRestrictions string `json:"dietary_restrictions"`
 	BirthYear           string `json:"birth_year"`
+	NutritionExpertise  string `json:"nutrition_expertise"`
 }
 
 func (p UserProfile) ToRow() []interface{} {
-	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions, p.BirthYear}
+	return []interface{}{p.Gender, p.Height, p.Weight, p.Notes, p.Goals, p.DietaryRestrictions, p.BirthYear, p.NutritionExpertise}
 }
 
 func UserProfileFromRow(row []interface{}) UserProfile {
@@ -158,6 +159,7 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 		Goals:               str(4),
 		DietaryRestrictions: str(5),
 		BirthYear:           str(6),
+		NutritionExpertise:  str(7),
 	}
 }
 
@@ -349,7 +351,7 @@ func (s *Service) GetInsight(ctx context.Context, insightType, startDate, endDat
 // GetProfile reads the user profile from the Profile sheet.
 // Returns an empty UserProfile if no data has been saved yet.
 func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:G2").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, profileSheet+"!A2:H2").Context(ctx).Do()
 	if err != nil {
 		return UserProfile{}, fmt.Errorf("get profile: %w", err)
 	}
@@ -363,7 +365,7 @@ func (s *Service) GetProfile(ctx context.Context) (UserProfile, error) {
 func (s *Service) SetProfile(ctx context.Context, p UserProfile) error {
 	vr := &googlesheets.ValueRange{Values: [][]interface{}{p.ToRow()}}
 	_, err := s.svc.Spreadsheets.Values.Update(
-		s.spreadsheetID, profileSheet+"!A2:G2", vr,
+		s.spreadsheetID, profileSheet+"!A2:H2", vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err
 }

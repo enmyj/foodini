@@ -19,7 +19,7 @@ run = "go build -o foodtracker ."
 
 [tasks.dev-backend]
 description = "Run Go backend in dev mode (reads .env)"
-run = "export $(grep -v '^#' .env | xargs) && go run main.go"
+run = "export $(grep -v '^#' .env | xargs) && go run ."
 
 [tasks.dev-frontend]
 description = "Run Svelte dev server with API proxy on :5173"

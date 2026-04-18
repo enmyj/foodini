@@ -2,18 +2,16 @@
     import { createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
-        confirmChat,
         addFavorite,
         getFavorites,
-        generateInsights,
-        generateDayInsights,
         fetchStoredInsight,
         fetchStoredDayInsight,
-        generateDaySuggestions,
-        fetchStoredDaySuggestions,
-        generateWeekSuggestions,
         fetchStoredWeekSuggestions,
-        patchEntry,
+        fetchMealSuggestion,
+        streamDayInsights,
+        streamInsights,
+        streamWeekSuggestions,
+        streamMealSuggestion,
     } from "./api.js";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
@@ -39,19 +37,15 @@
     let drawerDate = $state(null);
     let drawerMeal = $state(null);
     let drawerField = $state(null);
-    let repeating = $state(null);
-    let repeatedMeals = $state(new Set());
-    let repeatPicker = $state(null);
-    let scalePickerMeal = $state(null);
-    let scalingMeal = $state(null);
-    let longPressTimer = null;
+    let drawerEditEntries = $state(null);
+    let drawerEditMealType = $state(null);
     let dateInputEl = $state(null);
+    let mealSuggestions = $state({});
 
-    let dayAiExpanded = $state(false);
+    let dayInsight = $state(null);
+    let dayInsightExpanded = $state(false);
     let insightsByWeek = $state({});
     let suggestionsByWeek = $state({});
-    let dayInsight = $state(null);
-    let daySuggestions = $state(null);
     let collapsedMeals = $state(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
     let historyReady = false;
@@ -125,18 +119,12 @@
         for (const e of entries) {
             (g[e.meal_type] ??= []).push(e);
         }
-        for (const meal of repeatedMeals) {
-            g[meal] = [];
-        }
         return g;
     });
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
 
     let isToday = $derived(currentDate === todayStr());
-    let hasAnyEntry = $derived((dayData?.entries?.length ?? 0) > 0);
-    let showDayInsights = $derived(!isToday || hasAnyEntry);
-    let showDaySuggestions = $derived(isToday);
 
     // Sync favorited descriptions from query
     $effect(() => {
@@ -153,10 +141,9 @@
         if (view === "day") {
             void currentDate;
             collapsedMeals = new Set(MEAL_ORDER);
-            repeatedMeals = new Set();
-            dayAiExpanded = false;
             dayInsight = null;
-            daySuggestions = null;
+            dayInsightExpanded = false;
+            mealSuggestions = {};
         }
     });
 
@@ -368,54 +355,6 @@
         return weeks.reverse();
     }
 
-    async function repeatMeal(targetMeal, sourceMeal = targetMeal) {
-        if (repeating !== null) return;
-        repeating = targetMeal;
-        repeatPicker = null;
-        try {
-            const entries = yesterdayByMeal[sourceMeal].map((e) => ({
-                ...e,
-                meal_type: targetMeal,
-            }));
-            const res = await confirmChat(entries, currentDate ?? todayStr());
-            queryClient.setQueryData(["log", currentDate], (old) => ({
-                ...old,
-                entries: [...(old?.entries ?? []), ...res.entries],
-            }));
-            queryClient.invalidateQueries({ queryKey: ["log"] });
-            repeatedMeals = new Set([...repeatedMeals, targetMeal]);
-            collapsedMeals = new Set(
-                [...collapsedMeals].filter((m) => m !== targetMeal),
-            );
-        } catch (err) {
-            showError(err, "Failed to repeat meal.");
-        } finally {
-            repeating = null;
-        }
-    }
-
-    function startLongPress(meal) {
-        longPressTimer = setTimeout(() => {
-            longPressTimer = null;
-            repeatPicker = meal;
-        }, 500);
-    }
-
-    function endLongPress(meal) {
-        if (longPressTimer !== null) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-            repeatMeal(meal);
-        }
-    }
-
-    function cancelPress() {
-        if (longPressTimer !== null) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    }
-
     function handleUpdate(updated) {
         queryClient.setQueryData(["log", currentDate], (old) => ({
             ...old,
@@ -425,30 +364,37 @@
         }));
     }
 
-    async function scaleMeal(meal, group, factor) {
-        if (scalingMeal) return;
-        scalingMeal = meal;
-        scalePickerMeal = null;
-        try {
-            const r1 = (v) => Math.round(v * factor);
-            const r10 = (v) => Math.round(v * factor * 10) / 10;
-            const updates = group.map((e) => ({
-                ...e,
-                calories: r1(e.calories),
-                protein: r10(e.protein),
-                carbs: r10(e.carbs),
-                fat: r10(e.fat),
-                fiber: r10(e.fiber ?? 0),
-            }));
-            const saved = await Promise.all(
-                updates.map((u) => patchEntry(u.id, u)),
+    function openEditDrawer(meal, group) {
+        drawerEditEntries = group;
+        drawerEditMealType = meal;
+        drawerDate = currentDate;
+        drawerMeal = meal;
+        drawerField = null;
+        drawerTab = "food";
+        drawerOpen = true;
+    }
+
+    function onEntriesEdited(updatedEntries) {
+        queryClient.setQueryData(["log", currentDate], (old) => {
+            const editedIds = new Set(updatedEntries.map((e) => e.id));
+            const oldMealType = drawerEditMealType;
+            // Remove old entries for this meal that aren't in the updated set
+            const kept = (old?.entries ?? []).filter(
+                (e) => e.meal_type !== oldMealType || editedIds.has(e.id),
             );
-            for (const s of saved) handleUpdate(s);
-        } catch (err) {
-            showError(err, "Failed to scale meal.");
-        } finally {
-            scalingMeal = null;
-        }
+            // Update existing and add new
+            const existingIds = new Set(kept.map((e) => e.id));
+            const updated = kept.map((e) =>
+                editedIds.has(e.id)
+                    ? updatedEntries.find((u) => u.id === e.id)
+                    : e,
+            );
+            const newEntries = updatedEntries.filter(
+                (e) => !existingIds.has(e.id),
+            );
+            return { ...old, entries: [...updated, ...newEntries] };
+        });
+        queryClient.invalidateQueries({ queryKey: ["log"] });
     }
 
     function handleDelete(id) {
@@ -506,6 +452,8 @@
         drawerMeal = null;
         drawerTab = "food";
         drawerField = null;
+        drawerEditEntries = null;
+        drawerEditMealType = null;
     }
 
     function closeProfile() {
@@ -518,16 +466,116 @@
             entries: [...(old?.entries ?? []), ...newEntries],
         }));
         queryClient.invalidateQueries({ queryKey: ["log"] });
-        drawerOpen = false;
         if (newEntries.length > 0) {
             const addedMeal = newEntries[0].meal_type;
             collapsedMeals = new Set(
                 [...collapsedMeals].filter((m) => m !== addedMeal),
             );
+            // Kick off day-level insights (streamed, auto-opens).
+            fetchDayInsights(currentDate, true);
         }
     }
 
-    // --- Insights & suggestions (kept imperative — complex toggle/regenerate UI) ---
+    // --- Meal suggestions (for empty meals) ---
+
+    async function toggleMealSuggestion(meal, date) {
+        const key = `${date}|${meal}`;
+        const cur = mealSuggestions[key];
+        if (cur?.open && cur?.text) {
+            mealSuggestions = { ...mealSuggestions, [key]: { ...cur, open: false } };
+            return;
+        }
+        if (cur?.text) {
+            mealSuggestions = { ...mealSuggestions, [key]: { ...cur, open: true } };
+            return;
+        }
+        mealSuggestions = {
+            ...mealSuggestions,
+            [key]: { loading: false, text: "", error: null, open: true, generatedAt: null },
+        };
+        try {
+            const stored = await fetchMealSuggestion(date, meal);
+            if (stored.suggestion) {
+                mealSuggestions = {
+                    ...mealSuggestions,
+                    [key]: { loading: false, text: stored.suggestion, error: null, open: true, generatedAt: stored.generated_at },
+                };
+                return;
+            }
+            const res = await streamMealSuggestion(date, meal, (chunk) => {
+                mealSuggestions = {
+                    ...mealSuggestions,
+                    [key]: { ...mealSuggestions[key], text: (mealSuggestions[key]?.text ?? "") + chunk },
+                };
+            });
+            mealSuggestions = {
+                ...mealSuggestions,
+                [key]: { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at },
+            };
+        } catch {
+            mealSuggestions = {
+                ...mealSuggestions,
+                [key]: { loading: false, text: null, error: "Could not load suggestion", open: true, generatedAt: null },
+            };
+        }
+    }
+
+    async function regenMealSuggestion(meal, date) {
+        const key = `${date}|${meal}`;
+        mealSuggestions = {
+            ...mealSuggestions,
+            [key]: { loading: false, text: "", error: null, open: true, generatedAt: null },
+        };
+        try {
+            const res = await streamMealSuggestion(date, meal, (chunk) => {
+                mealSuggestions = {
+                    ...mealSuggestions,
+                    [key]: { ...mealSuggestions[key], text: (mealSuggestions[key]?.text ?? "") + chunk },
+                };
+            });
+            mealSuggestions = {
+                ...mealSuggestions,
+                [key]: { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at },
+            };
+        } catch {
+            mealSuggestions = {
+                ...mealSuggestions,
+                [key]: { loading: false, text: null, error: "Could not load suggestion", open: true, generatedAt: null },
+            };
+        }
+    }
+
+    // --- Day insights ---
+
+    async function fetchDayInsights(date, regenerate = false) {
+        dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null };
+        try {
+            if (!regenerate) {
+                const stored = await fetchStoredDayInsight(date);
+                if (stored.insight) {
+                    dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at };
+                    return;
+                }
+            }
+            dayInsight = { loading: false, text: "", error: null, open: true, generatedAt: null };
+            const res = await streamDayInsights(date, (chunk) => {
+                dayInsight = { ...dayInsight, text: (dayInsight.text ?? "") + chunk };
+            });
+            dayInsight = { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at };
+        } catch (e) {
+            dayInsight = { loading: false, text: null, error: e.message || "Could not load insights", open: true, generatedAt: null };
+        }
+    }
+
+    function toggleDayInsights() {
+        if (!dayInsight || (!dayInsight.loading && !dayInsight.text && !dayInsight.error)) {
+            fetchDayInsights(currentDate, false);
+        } else {
+            dayInsight = { ...dayInsight, open: !dayInsight.open };
+        }
+    }
+
+    // --- Weekly insights & suggestions ---
 
     async function fetchInsights(weekStart, weekEnd, regenerate = false) {
         insightsByWeek = {
@@ -559,13 +607,22 @@
                     return;
                 }
             }
-            const res = await generateInsights(weekStart, weekEnd);
+            insightsByWeek = {
+                ...insightsByWeek,
+                [weekStart]: { open: true, loading: false, text: "", error: null, generatedAt: null, loaded: false },
+            };
+            const res = await streamInsights(weekStart, weekEnd, (chunk) => {
+                insightsByWeek = {
+                    ...insightsByWeek,
+                    [weekStart]: { ...insightsByWeek[weekStart], text: (insightsByWeek[weekStart]?.text ?? "") + chunk },
+                };
+            });
             insightsByWeek = {
                 ...insightsByWeek,
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.insight,
+                    text: res.text,
                     error: null,
                     generatedAt: res.generated_at,
                     loaded: true,
@@ -631,130 +688,6 @@
         }
     }
 
-    function parseDayInsight(text) {
-        const lines = text
-            .split("\n")
-            .map((l) => l.trim())
-            .filter((l) => l.length > 0);
-        const summary = lines.find((l) => !l.startsWith("•")) || lines[0] || "";
-        const detail = lines.filter((l) => l.startsWith("•"));
-        return { summary, detail: detail.join("\n") };
-    }
-
-    async function fetchDayInsights(date, regenerate = false) {
-        dayInsight = {
-            loading: true,
-            text: null,
-            error: null,
-            open: true,
-            generatedAt: null,
-            detailOpen: false,
-        };
-        try {
-            if (!regenerate) {
-                const stored = await fetchStoredDayInsight(date);
-                if (stored.insight) {
-                    dayInsight = {
-                        loading: false,
-                        text: stored.insight,
-                        error: null,
-                        open: true,
-                        generatedAt: stored.generated_at,
-                        detailOpen: false,
-                    };
-                    return;
-                }
-            }
-            const res = await generateDayInsights(date);
-            dayInsight = {
-                loading: false,
-                text: res.insight,
-                error: null,
-                open: true,
-                generatedAt: res.generated_at,
-                detailOpen: false,
-            };
-        } catch (e) {
-            dayInsight = {
-                loading: false,
-                text: null,
-                error: e.message || "Could not load insights",
-                open: true,
-                generatedAt: null,
-                detailOpen: false,
-            };
-        }
-    }
-
-    function toggleDayInsights() {
-        if (
-            !dayInsight ||
-            (!dayInsight.loading && !dayInsight.text && !dayInsight.error)
-        ) {
-            fetchDayInsights(currentDate, false);
-        } else {
-            dayInsight = { ...dayInsight, open: !dayInsight.open };
-        }
-    }
-
-    async function fetchDaySuggestions(date, regenerate = false) {
-        daySuggestions = {
-            loading: true,
-            text: null,
-            error: null,
-            open: true,
-            generatedAt: null,
-            type: null,
-        };
-        try {
-            if (!regenerate) {
-                const stored = await fetchStoredDaySuggestions(date);
-                if (stored.suggestions) {
-                    daySuggestions = {
-                        loading: false,
-                        text: stored.suggestions,
-                        error: null,
-                        open: true,
-                        generatedAt: stored.generated_at,
-                        type: stored.type,
-                    };
-                    return;
-                }
-            }
-            const res = await generateDaySuggestions(date);
-            daySuggestions = {
-                loading: false,
-                text: res.suggestions,
-                error: null,
-                open: true,
-                generatedAt: res.generated_at,
-                type: res.type,
-            };
-        } catch (e) {
-            daySuggestions = {
-                loading: false,
-                text: null,
-                error: e.message || "Could not load suggestions",
-                open: true,
-                generatedAt: null,
-                type: null,
-            };
-        }
-    }
-
-    function toggleDaySuggestions() {
-        if (
-            !daySuggestions ||
-            (!daySuggestions.loading &&
-                !daySuggestions.text &&
-                !daySuggestions.error)
-        ) {
-            fetchDaySuggestions(currentDate, false);
-        } else {
-            daySuggestions = { ...daySuggestions, open: !daySuggestions.open };
-        }
-    }
-
     async function fetchWeekSuggestions(
         weekStart,
         weekEnd,
@@ -792,13 +725,22 @@
                     return;
                 }
             }
-            const res = await generateWeekSuggestions(weekStart, weekEnd);
+            suggestionsByWeek = {
+                ...suggestionsByWeek,
+                [weekStart]: { open: true, loading: false, text: "", error: null, generatedAt: null, loaded: false },
+            };
+            const res = await streamWeekSuggestions(weekStart, weekEnd, (chunk) => {
+                suggestionsByWeek = {
+                    ...suggestionsByWeek,
+                    [weekStart]: { ...suggestionsByWeek[weekStart], text: (suggestionsByWeek[weekStart]?.text ?? "") + chunk },
+                };
+            });
             suggestionsByWeek = {
                 ...suggestionsByWeek,
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.suggestions,
+                    text: res.text,
                     error: null,
                     generatedAt: res.generated_at,
                     loaded: true,
@@ -973,56 +915,16 @@
                     <span>{t.carbs}g C</span>
                     <span>{t.fat}g F</span>
                     <span>{t.fiber}g Fb</span>
-                    {#if showDayInsights || showDaySuggestions}
-                        <div class="totals-btns totals-btns-desktop">
-                            {#if showDayInsights}
-                                <button
-                                    class="insights-btn"
-                                    class:active={dayInsight?.open}
-                                    onclick={toggleDayInsights}
-                                    aria-label="AI insights"
-                                    title="AI insights">insights</button
-                                >
-                            {/if}
-                            {#if showDaySuggestions}
-                                <button
-                                    class="insights-btn suggestions-btn"
-                                    class:active={daySuggestions?.open}
-                                    onclick={toggleDaySuggestions}
-                                    aria-label="Meal suggestions"
-                                    title="Meal suggestions">suggestions</button
-                                >
-                            {/if}
-                        </div>
-                        <div class="totals-btns totals-btns-mobile">
-                            <button
-                                class="insights-btn"
-                                class:active={dayAiExpanded}
-                                onclick={() => (dayAiExpanded = !dayAiExpanded)}
-                                aria-label="AI tools"
-                                title="AI tools">AI ▾</button
-                            >
-                        </div>
+                    {#if t.calories > 0}
+                        <button
+                            class="insights-btn"
+                            class:active={dayInsight?.open}
+                            onclick={toggleDayInsights}
+                            aria-label="AI insights"
+                            title="AI insights">insights</button
+                        >
                     {/if}
                 </div>
-                {#if dayAiExpanded}
-                    <div class="ai-expand-row">
-                        {#if showDayInsights}
-                            <button
-                                class="insights-btn"
-                                class:active={dayInsight?.open}
-                                onclick={toggleDayInsights}>insights</button
-                            >
-                        {/if}
-                        {#if showDaySuggestions}
-                            <button
-                                class="insights-btn suggestions-btn"
-                                class:active={daySuggestions?.open}
-                                onclick={toggleDaySuggestions}>suggestions</button
-                            >
-                        {/if}
-                    </div>
-                {/if}
             {/if}
         {/if}
     </header>
@@ -1040,14 +942,10 @@
         </div>
     {:else if view === "day"}
         {#if dayInsight?.open}
-            {@const parsed = dayInsight.text
-                ? parseDayInsight(dayInsight.text)
-                : null}
             <div class="insights-panel day-insights-panel">
                 <button
                     class="insight-close"
-                    onclick={() =>
-                        (dayInsight = { ...dayInsight, open: false })}
+                    onclick={() => (dayInsight = { ...dayInsight, open: false })}
                     aria-label="Close insights">✕</button
                 >
                 {#if dayInsight.loading}
@@ -1058,89 +956,26 @@
                     </div>
                 {:else if dayInsight.error}
                     <span class="insights-err">{dayInsight.error}</span>
-                {:else if parsed}
+                {:else if dayInsight.text != null}
                     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    <p class="insights-text insight-summary">
-                        {@html renderInsight(parsed.summary)}
-                    </p>
-                    {#if parsed.detail}
-                        <button
-                            class="detail-toggle"
-                            onclick={() =>
-                                (dayInsight = {
-                                    ...dayInsight,
-                                    detailOpen: !dayInsight.detailOpen,
-                                })}
-                        >
-                            {dayInsight.detailOpen ? "▾ less" : "▸ more"}
-                        </button>
-                        {#if dayInsight.detailOpen}
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                            <p class="insights-text insight-detail">
-                                {@html renderInsight(parsed.detail)}
-                            </p>
-                        {/if}
+                    <p class="insights-text" class:collapsed-text={!dayInsightExpanded}>{@html renderInsight(dayInsight.text)}</p>
+                    {#if !dayInsightExpanded && dayInsight.generatedAt}
+                        <button class="insight-more" onclick={() => (dayInsightExpanded = true)}>more</button>
                     {/if}
-                    <div class="insight-footer">
-                        {#if dayInsight.generatedAt}<span class="insight-ts"
-                                >{formatGeneratedAt(
-                                    dayInsight.generatedAt,
-                                )}</span
-                            >{/if}
-                        <button
-                            class="insight-regen"
-                            onclick={() => fetchDayInsights(currentDate, true)}
-                            >regenerate</button
-                        >
-                    </div>
-                {/if}
-            </div>
-        {/if}
-        {#if daySuggestions?.open}
-            <div class="insights-panel day-insights-panel suggestions-panel">
-                <button
-                    class="insight-close"
-                    onclick={() =>
-                        (daySuggestions = { ...daySuggestions, open: false })}
-                    aria-label="Close suggestions">✕</button
-                >
-                {#if daySuggestions.loading}
-                    <div class="insight-skeleton">
-                        <div class="isk-line" style="width: 88%"></div>
-                        <div class="isk-line" style="width: 72%"></div>
-                        <div class="isk-line" style="width: 80%"></div>
-                    </div>
-                {:else if daySuggestions.error}
-                    <span class="insights-err">{daySuggestions.error}</span>
-                {:else if daySuggestions.text}
-                    <span class="suggestions-label"
-                        >{daySuggestions.type === "next-day"
-                            ? "Tomorrow"
-                            : "Remaining meals"}</span
-                    >
-                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    <p class="insights-text">
-                        {@html renderInsight(daySuggestions.text)}
-                    </p>
-                    <div class="insight-footer">
-                        {#if daySuggestions.generatedAt}<span class="insight-ts"
-                                >{formatGeneratedAt(
-                                    daySuggestions.generatedAt,
-                                )}</span
-                            >{/if}
-                        <button
-                            class="insight-regen"
-                            onclick={() =>
-                                fetchDaySuggestions(currentDate, true)}
-                            >regenerate</button
-                        >
-                    </div>
+                    {#if dayInsight.generatedAt && dayInsightExpanded}
+                        <div class="insight-footer">
+                            <span class="insight-ts">{formatGeneratedAt(dayInsight.generatedAt)}</span>
+                            <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>regenerate</button>
+                        </div>
+                    {/if}
                 {/if}
             </div>
         {/if}
         {#each MEAL_ORDER as meal}
             {@const group = groupedByMeal(dayData?.entries)[meal] ?? []}
             {@const collapsed = collapsedMeals.has(meal)}
+            {@const miKey = `${currentDate}|${meal}`}
+            {@const ms = mealSuggestions[miKey]}
             <section>
                 <div class="meal-header">
                     <button
@@ -1164,74 +999,38 @@
                             >{collapsed ? "▸" : "▾"}</span
                         >
                         {meal}
-                        {#if group.length > 0}<span class="meal-summary"
-                                >· {group.reduce((s, e) => s + e.calories, 0)} cal</span
-                            >{/if}
                     </button>
                     {#if group.length > 0}
-                        {#if scalePickerMeal === meal}
-                            <div class="scale-picker">
-                                <button
-                                    class="scale-opt"
-                                    onclick={() => scaleMeal(meal, group, 1.5)}
-                                    disabled={scalingMeal !== null}
-                                    >×1.5</button
-                                >
-                                <button
-                                    class="scale-opt"
-                                    onclick={() => scaleMeal(meal, group, 2)}
-                                    disabled={scalingMeal !== null}
-                                    >×2</button
-                                >
-                                <button
-                                    class="pick-cancel"
-                                    onclick={() => (scalePickerMeal = null)}
-                                    aria-label="Cancel scale">✕</button
-                                >
-                            </div>
-                        {:else}
-                            <button
-                                class="scale-meal-btn"
-                                class:spinning={scalingMeal === meal}
-                                onclick={() => (scalePickerMeal = meal)}
-                                disabled={scalingMeal !== null}
-                                aria-label="Scale {meal} portion"
-                                title="Scale {meal} portion">⊕</button
-                            >
-                        {/if}
-                    {/if}
-                    {#if yesterdayByMeal[meal]?.length && !group.length}
-                        {#if repeatPicker === meal}
-                            <div class="repeat-picker">
-                                {#each MEAL_ORDER.filter((m) => yesterdayByMeal[m]?.length) as src}
-                                    <button
-                                        class="pick-btn"
-                                        onclick={() => repeatMeal(meal, src)}
-                                        >{src}</button
-                                    >
-                                {/each}
-                                <button
-                                    class="pick-cancel"
-                                    onclick={() => (repeatPicker = null)}
-                                    >✕</button
-                                >
-                            </div>
-                        {:else}
-                            <button
-                                class="repeat-btn"
-                                class:spinning={repeating === meal}
-                                onpointerdown={() => startLongPress(meal)}
-                                onpointerup={() => endLongPress(meal)}
-                                onpointercancel={cancelPress}
-                                oncontextmenu={(e) => e.preventDefault()}
-                                disabled={repeating !== null}
-                                aria-label="Repeat yesterday's {meal}"
-                                title="Repeat yesterday's {meal} — hold for options"
-                                >↻</button
-                            >
-                        {/if}
+                        <button
+                            class="meal-action-btn"
+                            onclick={() => openEditDrawer(meal, group)}
+                            >Edit</button
+                        >
+                    {:else if meal !== "supplements"}
+                        <button
+                            class="meal-action-btn"
+                            class:active={ms?.open}
+                            onclick={() => toggleMealSuggestion(meal, currentDate)}
+                            >Suggest</button
+                        >
                     {/if}
                 </div>
+                {#if ms?.open}
+                    <div class="insights-panel suggestions-panel">
+                        {#if ms.error}
+                            <span class="insights-err">{ms.error}</span>
+                        {:else if ms.text != null}
+                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                            <p class="insights-text">{@html renderInsight(ms.text)}</p>
+                            {#if ms.generatedAt}
+                                <div class="insight-footer">
+                                    <span class="insight-ts">{formatGeneratedAt(ms.generatedAt)}</span>
+                                    <button class="insight-regen" onclick={() => regenMealSuggestion(meal, currentDate)}>regenerate</button>
+                                </div>
+                            {/if}
+                        {/if}
+                    </div>
+                {/if}
                 {#if !collapsed}
                     {#each group as entry (entry.id)}
                         <EntryRow
@@ -1359,27 +1158,29 @@
                             </div>
                         {:else if wi.error}
                             <span class="insights-err">{wi.error}</span>
-                        {:else if wi.text}
+                        {:else if wi.text != null}
                             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                             <p class="insights-text">
                                 {@html renderInsight(wi.text)}
                             </p>
-                            <div class="insight-footer">
-                                {#if wi.generatedAt}<span class="insight-ts"
+                            {#if wi.generatedAt}
+                                <div class="insight-footer">
+                                    <span class="insight-ts"
                                         >{formatGeneratedAt(
                                             wi.generatedAt,
                                         )}</span
-                                    >{/if}
-                                <button
-                                    class="insight-regen"
-                                    onclick={() =>
-                                        fetchInsights(
-                                            week.weekStart,
-                                            week.weekEnd,
-                                            true,
-                                        )}>regenerate</button
-                                >
-                            </div>
+                                    >
+                                    <button
+                                        class="insight-regen"
+                                        onclick={() =>
+                                            fetchInsights(
+                                                week.weekStart,
+                                                week.weekEnd,
+                                                true,
+                                            )}>regenerate</button
+                                    >
+                                </div>
+                            {/if}
                         {/if}
                     </div>
                 {/if}
@@ -1394,7 +1195,7 @@
                             </div>
                         {:else if ws.error}
                             <span class="insights-err">{ws.error}</span>
-                        {:else if ws.text}
+                        {:else if ws.text != null}
                             <span class="suggestions-label"
                                 >Meal ideas for next week</span
                             >
@@ -1402,22 +1203,24 @@
                             <p class="insights-text">
                                 {@html renderInsight(ws.text)}
                             </p>
-                            <div class="insight-footer">
-                                {#if ws.generatedAt}<span class="insight-ts"
+                            {#if ws.generatedAt}
+                                <div class="insight-footer">
+                                    <span class="insight-ts"
                                         >{formatGeneratedAt(
                                             ws.generatedAt,
                                         )}</span
-                                    >{/if}
-                                <button
-                                    class="insight-regen"
-                                    onclick={() =>
-                                        fetchWeekSuggestions(
-                                            week.weekStart,
-                                            week.weekEnd,
-                                            true,
-                                        )}>regenerate</button
-                                >
-                            </div>
+                                    >
+                                    <button
+                                        class="insight-regen"
+                                        onclick={() =>
+                                            fetchWeekSuggestions(
+                                                week.weekStart,
+                                                week.weekEnd,
+                                                true,
+                                            )}>regenerate</button
+                                    >
+                                </div>
+                            {/if}
                         {/if}
                     </div>
                 {/if}
@@ -1457,10 +1260,15 @@
     open={drawerOpen}
     onClose={closeDrawer}
     {onEntriesAdded}
+    {onEntriesEdited}
     date={drawerDate}
     meal={drawerMeal}
     initialTab={drawerTab}
     initialField={drawerField}
+    editEntries={drawerEditEntries}
+    editMealType={drawerEditMealType}
+    yesterdayEntries={(drawerEditMealType || drawerMeal) ? (yesterdayByMeal[drawerEditMealType || drawerMeal] ?? []) : []}
+    mealIsEmpty={drawerMeal ? (groupedByMeal(dayData?.entries)[drawerMeal] ?? []).length === 0 : true}
 />
 
 <style>
@@ -1676,7 +1484,7 @@
     .totals {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.4rem 1rem;
+        gap: 0.4rem 0.75rem;
         align-items: center;
         font-size: 0.78rem;
         color: var(--mute);
@@ -1685,35 +1493,10 @@
         font-variant-numeric: tabular-nums;
     }
 
-    .totals-btns {
-        display: flex;
-        gap: 0.35rem;
-        margin-left: auto;
-    }
-
-    .totals-btns-mobile {
-        display: none;
-    }
-
-    @media (max-width: 480px) {
-        .totals-btns-desktop {
-            display: none;
-        }
-
-        .totals-btns-mobile {
-            display: flex;
-        }
-    }
-
-    .ai-expand-row {
-        display: none;
-        gap: 0.35rem;
-        padding-top: 0.3rem;
-    }
-
-    @media (max-width: 480px) {
-        .ai-expand-row {
-            display: flex;
+    @media (max-width: 380px) {
+        .totals {
+            gap: 0.3rem 0.5rem;
+            font-size: 0.72rem;
         }
     }
 
@@ -1756,14 +1539,6 @@
         }
     }
 
-    .meal-summary {
-        font-weight: 400;
-        color: var(--mute-3);
-        letter-spacing: 0;
-        text-transform: none;
-        font-size: 0.72rem;
-    }
-
     .meal-header {
         display: flex;
         align-items: center;
@@ -1771,141 +1546,32 @@
         margin-bottom: 0.5rem;
     }
 
-    .repeat-btn {
+    .meal-action-btn {
         background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 1rem;
-        line-height: 1;
-        cursor: pointer;
-        padding: 0.2rem 0.3rem;
-        touch-action: manipulation;
-        display: flex;
-        align-items: center;
-    }
-
-    @media (hover: hover) {
-        .repeat-btn:hover:not(:disabled) {
-            color: var(--ink-mute);
-        }
-    }
-
-    .repeat-btn:disabled {
-        cursor: default;
-    }
-
-    .repeat-picker {
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-    }
-
-    .pick-btn {
-        background: none;
-        border: 1px solid var(--rule-4);
+        border: 1px solid var(--rule-3);
         border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.68rem;
         padding: 0.15rem 0.55rem;
-        font-size: 0.7rem;
-        color: var(--ink-mute);
         cursor: pointer;
+        touch-action: manipulation;
         font-family: inherit;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
         font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        touch-action: manipulation;
+        transition: border-color 0.12s, color 0.12s;
+    }
+
+    .meal-action-btn.active {
+        border-color: var(--ink-2);
+        color: var(--ink-2);
     }
 
     @media (hover: hover) {
-        .pick-btn:hover {
+        .meal-action-btn:hover {
             border-color: var(--ink-2);
             color: var(--ink-2);
         }
-    }
-
-    .pick-cancel {
-        background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 0.75rem;
-        cursor: pointer;
-        padding: 0.15rem 0.2rem;
-        line-height: 1;
-        font-family: inherit;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .pick-cancel:hover {
-            color: var(--mute);
-        }
-    }
-
-    .scale-meal-btn {
-        background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 1rem;
-        line-height: 1;
-        cursor: pointer;
-        padding: 0.2rem 0.3rem;
-        touch-action: manipulation;
-        display: flex;
-        align-items: center;
-    }
-
-    @media (hover: hover) {
-        .scale-meal-btn:hover:not(:disabled) {
-            color: var(--ink-mute);
-        }
-    }
-
-    .scale-meal-btn:disabled {
-        cursor: default;
-        opacity: 0.4;
-    }
-
-    .scale-meal-btn.spinning {
-        animation: spin 0.7s linear infinite;
-        color: var(--mute);
-    }
-
-    .scale-picker {
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-    }
-
-    .scale-picker .scale-opt {
-        background: none;
-        border: 1px solid var(--rule-4);
-        border-radius: var(--r-pill);
-        padding: 0.15rem 0.55rem;
-        font-size: 0.7rem;
-        color: var(--ink-mute);
-        cursor: pointer;
-        font-family: inherit;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .scale-picker .scale-opt:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .scale-picker .scale-opt:disabled {
-        opacity: 0.4;
-        cursor: default;
-    }
-
-    .repeat-btn.spinning {
-        animation: spin 0.7s linear infinite;
-        color: var(--mute);
     }
 
     @keyframes spin {
@@ -2114,7 +1780,6 @@
 
     .day-insights-panel {
         margin-bottom: 1.25rem;
-        min-width: 0;
     }
 
     .insight-close {
@@ -2140,15 +1805,6 @@
         .insight-close:hover {
             color: var(--ink-mute);
             background: var(--paper-4);
-        }
-    }
-
-    @keyframes shimmer {
-        0% {
-            background-position: -200% 0;
-        }
-        100% {
-            background-position: 200% 0;
         }
     }
 
@@ -2186,6 +1842,30 @@
         margin: 0;
     }
 
+    .insights-text.collapsed-text {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .insight-more {
+        background: none;
+        border: none;
+        font-family: inherit;
+        font-size: 0.72rem;
+        color: var(--mute-2);
+        cursor: pointer;
+        padding: 0.25rem 0 0;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .insight-more:hover {
+            color: var(--ink-mute);
+        }
+    }
+
     .insights-text :global(strong) {
         font-weight: 600;
         color: var(--ink);
@@ -2219,31 +1899,6 @@
         .insight-regen:hover {
             color: var(--ink-mute);
         }
-    }
-
-    .detail-toggle {
-        background: none;
-        border: none;
-        font-family: inherit;
-        font-size: 0.72rem;
-        color: var(--mute-2);
-        cursor: pointer;
-        padding: 0.25rem 0 0.15rem;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .detail-toggle:hover {
-            color: var(--ink-mute);
-        }
-    }
-
-    .insight-summary {
-        font-weight: 500;
-    }
-
-    .insight-detail {
-        margin-top: 0.4rem;
     }
 
     .suggestions-panel {

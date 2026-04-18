@@ -75,10 +75,39 @@ func (h *Handler) Chat(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"done": false, "message": responseText})
 	}
 
+	// Auto-save: persist entries immediately instead of requiring a confirm step.
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+
+	now := LocalNow(r)
+	var saved []sheets.FoodEntry
+	for _, e := range entries {
+		fe := sheets.FoodEntry{
+			ID:          uuid.NewString(),
+			Date:        targetDate,
+			Time:        sheets.TimeString(now),
+			MealType:    e.MealType,
+			Description: e.Description,
+			Calories:    e.Calories,
+			Protein:     e.Protein,
+			Carbs:       e.Carbs,
+			Fat:         e.Fat,
+			Fiber:       e.Fiber,
+		}
+		if err := svc.AppendFood(ctx, fe); err != nil {
+			return h.writeAPIErr(c, fmt.Errorf("sheet write: %w", err))
+		}
+		saved = append(saved, fe)
+	}
+
+	h.gemini.ClearConversation(session.UserEmail, targetDate)
+	h.cacheInvalidate(session.SpreadsheetID)
+
 	return c.JSON(http.StatusOK, map[string]any{
-		"done":    false,
-		"pending": true,
-		"entries": entries,
+		"done":    true,
+		"entries": saved,
 		"message": responseText,
 	})
 }
@@ -210,4 +239,126 @@ func (h *Handler) ConfirmChat(c *echo.Context) error {
 	h.gemini.ClearConversation(session.UserEmail, targetDate)
 	h.cacheInvalidate(session.SpreadsheetID)
 	return c.JSON(http.StatusOK, map[string]any{"done": true, "entries": saved})
+}
+
+// POST /api/chat/edit — edit existing meal entries via natural language.
+func (h *Handler) EditChat(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+
+	r := c.Request()
+	ctx := r.Context()
+	var req struct {
+		Message  string             `json:"message"`
+		Entries  []sheets.FoodEntry `json:"entries"`
+		Date     string             `json:"date"`
+		MealType string             `json:"meal_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Entries) == 0 || req.Message == "" {
+		return writeErr(c, http.StatusBadRequest, "message and entries required")
+	}
+
+	targetDate := req.Date
+	if targetDate == "" {
+		targetDate = sheets.DateString(LocalNow(r))
+	}
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		svc, err := h.sheetsSvc(c, session)
+		if err != nil {
+			return h.writeAPIErr(c, err)
+		}
+		profile, _ := svc.GetProfile(ctx)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	// Convert sheets entries to gemini entries for the LLM.
+	var geminiEntries []gemini.Entry
+	for _, e := range req.Entries {
+		geminiEntries = append(geminiEntries, gemini.Entry{
+			MealType:    e.MealType,
+			Description: e.Description,
+			Calories:    e.Calories,
+			Protein:     e.Protein,
+			Carbs:       e.Carbs,
+			Fat:         e.Fat,
+			Fiber:       e.Fiber,
+		})
+	}
+
+	responseText, updatedEntries, err := h.gemini.EditEntries(ctx, geminiEntries, req.Message, profileCtx)
+	if err != nil {
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
+	}
+
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+
+	// Build a map of old entries by description for matching.
+	oldByDesc := map[string]sheets.FoodEntry{}
+	for _, e := range req.Entries {
+		oldByDesc[e.Description] = e
+	}
+
+	// Track which old IDs are still present.
+	usedIDs := map[string]bool{}
+	now := LocalNow(r)
+	var saved []sheets.FoodEntry
+	for _, e := range updatedEntries {
+		// Try to match to an existing entry by description.
+		if old, ok := oldByDesc[e.Description]; ok && !usedIDs[old.ID] {
+			// Update existing entry.
+			fe := old
+			fe.MealType = e.MealType
+			fe.Description = e.Description
+			fe.Calories = e.Calories
+			fe.Protein = e.Protein
+			fe.Carbs = e.Carbs
+			fe.Fat = e.Fat
+			fe.Fiber = e.Fiber
+			if err := svc.UpdateFood(ctx, fe.ID, fe); err != nil {
+				return h.writeAPIErr(c, fmt.Errorf("sheet update: %w", err))
+			}
+			usedIDs[fe.ID] = true
+			saved = append(saved, fe)
+		} else {
+			// New entry — append.
+			fe := sheets.FoodEntry{
+				ID:          uuid.NewString(),
+				Date:        targetDate,
+				Time:        sheets.TimeString(now),
+				MealType:    e.MealType,
+				Description: e.Description,
+				Calories:    e.Calories,
+				Protein:     e.Protein,
+				Carbs:       e.Carbs,
+				Fat:         e.Fat,
+				Fiber:       e.Fiber,
+			}
+			if err := svc.AppendFood(ctx, fe); err != nil {
+				return h.writeAPIErr(c, fmt.Errorf("sheet write: %w", err))
+			}
+			saved = append(saved, fe)
+		}
+	}
+
+	// Delete entries that Gemini removed.
+	for _, e := range req.Entries {
+		if !usedIDs[e.ID] {
+			_ = svc.DeleteFood(ctx, e.ID)
+		}
+	}
+
+	h.cacheInvalidate(session.SpreadsheetID)
+	return c.JSON(http.StatusOK, map[string]any{
+		"done":    true,
+		"entries": saved,
+		"message": responseText,
+	})
 }

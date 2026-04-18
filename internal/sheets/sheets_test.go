@@ -176,10 +176,10 @@ func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 }
 
 func TestUserProfileRoundTrip(t *testing.T) {
-	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian", Goals: "lose weight", DietaryRestrictions: "no gluten", BirthYear: "1990"}
+	p := sheets.UserProfile{Gender: "male", Height: "5'10\"", Weight: "170lbs", Notes: "vegetarian", Goals: "lose weight", DietaryRestrictions: "no gluten", BirthYear: "1990", NutritionExpertise: "intermediate"}
 	row := p.ToRow()
-	if len(row) != 7 {
-		t.Fatalf("want 7 cols, got %d", len(row))
+	if len(row) != 8 {
+		t.Fatalf("want 8 cols, got %d", len(row))
 	}
 	if row[0] != "male" {
 		t.Errorf("gender: got %v", row[0])
@@ -196,6 +196,9 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	if row[6] != "1990" {
 		t.Errorf("birth_year: got %v", row[6])
 	}
+	if row[7] != "intermediate" {
+		t.Errorf("nutrition_expertise: got %v", row[7])
+	}
 	got := sheets.UserProfileFromRow(row)
 	if got.Height != "5'10\"" {
 		t.Errorf("height round-trip: got %q", got.Height)
@@ -208,6 +211,9 @@ func TestUserProfileRoundTrip(t *testing.T) {
 	}
 	if got.BirthYear != "1990" {
 		t.Errorf("birth_year round-trip: got %q", got.BirthYear)
+	}
+	if got.NutritionExpertise != "intermediate" {
+		t.Errorf("nutrition_expertise round-trip: got %q", got.NutritionExpertise)
 	}
 }
 

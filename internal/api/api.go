@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -206,7 +207,57 @@ func formatProfileContext(p sheets.UserProfile, currentYear int) string {
 	if p.DietaryRestrictions != "" {
 		ctx += ". Dietary restrictions: " + p.DietaryRestrictions
 	}
+	if p.NutritionExpertise != "" {
+		ctx += ". Nutrition knowledge level: " + p.NutritionExpertise
+	}
 	return ctx
+}
+
+// streamSSE sets up an SSE response and returns a flush function for sending events.
+func setupSSE(c *echo.Context) (write func(data string), flush func()) {
+	w := c.Response()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	write = func(data string) {
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	flush = func() {
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	return
+}
+
+func wantsStream(c *echo.Context) bool {
+	return c.QueryParam("stream") == "1"
+}
+
+// streamInsight sets up SSE, streams Gemini chunks, and sends a final done event.
+// Returns the full text and generated_at timestamp. The HTTP response is already committed.
+func (h *Handler) streamInsight(c *echo.Context, summary, profileCtx, sysPrompt string) (string, string, error) {
+	write, _ := setupSSE(c)
+
+	fullText, err := h.gemini.InsightsStream(c.Request().Context(), summary, profileCtx, sysPrompt, func(chunk string) {
+		b, _ := json.Marshal(map[string]string{"chunk": chunk})
+		write(string(b))
+	})
+	if err != nil {
+		b, _ := json.Marshal(map[string]string{"error": err.Error()})
+		write(string(b))
+		return "", "", err
+	}
+
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	b, _ := json.Marshal(map[string]any{"done": true, "text": fullText, "generated_at": generatedAt})
+	write(string(b))
+	return fullText, generatedAt, nil
 }
 
 func (h *Handler) sheetsSvc(c *echo.Context, session *auth.Session) (*sheets.Service, error) {

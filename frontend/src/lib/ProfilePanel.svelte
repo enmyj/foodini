@@ -29,6 +29,7 @@
     let notes = $state("");
     let goals = $state("");
     let dietaryRestrictions = $state("");
+    let nutritionExpertise = $state("");
 
     // Populate fields when profile data loads
     $effect(() => {
@@ -41,6 +42,7 @@
             notes = p.notes ?? "";
             goals = p.goals ?? "";
             dietaryRestrictions = p.dietary_restrictions ?? "";
+            nutritionExpertise = p.nutrition_expertise ?? "";
         }
     });
 
@@ -53,6 +55,7 @@
             notes,
             goals,
             dietary_restrictions: dietaryRestrictions,
+            nutrition_expertise: nutritionExpertise,
         });
     }
 
@@ -158,6 +161,19 @@
                     onfocus={scrollIntoViewOnFocus}
                 ></textarea>
             </label>
+            <label>
+                <span>Nutrition Knowledge</span>
+                <select
+                    class="text-entry"
+                    bind:value={nutritionExpertise}
+                    disabled={saving}
+                    onfocus={scrollIntoViewOnFocus}
+                >
+                    <option value="">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                </select>
+            </label>
         </div>
         <div class="actions">
             <button class="save-btn" onclick={save} disabled={saving}
@@ -206,7 +222,8 @@
     }
 
     input,
-    textarea {
+    textarea,
+    select {
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
         padding: 0.5rem 0.75rem;
@@ -220,7 +237,8 @@
     }
 
     input:focus,
-    textarea:focus {
+    textarea:focus,
+    select:focus {
         outline: none;
         border-color: var(--ink-2);
     }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -64,6 +65,15 @@ func (h *Handler) Insights(c *echo.Context) error {
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
+	if wantsStream(c) {
+		insight, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.InsightsPrompt())
+		if err != nil {
+			return nil // response already committed
+		}
+		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "week", StartDate: req.Start, EndDate: req.End, GeneratedAt: generatedAt, Insight: insight})
+		return nil
+	}
+
 	insight, err := h.gemini.Insights(ctx, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
@@ -124,6 +134,15 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	if wantsStream(c) {
+		insight, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.DayInsightsPrompt())
+		if err != nil {
+			return nil
+		}
+		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "day", StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: insight})
+		return nil
 	}
 
 	insight, err := h.gemini.DayInsights(ctx, summary, profileCtx)
@@ -238,14 +257,23 @@ func (h *Handler) DaySuggestions(c *echo.Context) error {
 
 	summary := buildMealSuggestionSummary(req.Date, entries, prevEntries, complete, insightText)
 
-	suggestions, err := h.gemini.MealSuggestions(ctx, summary, profileCtx)
-	if err != nil {
-		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
-	}
-
 	sugType := "remaining"
 	if complete {
 		sugType = "next-day"
+	}
+
+	if wantsStream(c) {
+		suggestions, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.MealSuggestionsPrompt())
+		if err != nil {
+			return nil
+		}
+		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "day-suggestions", StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: sugType + "\n" + suggestions})
+		return nil
+	}
+
+	suggestions, err := h.gemini.MealSuggestions(ctx, summary, profileCtx)
+	if err != nil {
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
 	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
@@ -336,6 +364,15 @@ func (h *Handler) WeekSuggestions(c *echo.Context) error {
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
+	if wantsStream(c) {
+		suggestions, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.WeekSuggestionsPrompt())
+		if err != nil {
+			return nil
+		}
+		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "week-suggestions", StartDate: req.Start, EndDate: req.End, GeneratedAt: generatedAt, Insight: suggestions})
+		return nil
+	}
+
 	suggestions, err := h.gemini.WeekMealSuggestions(ctx, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
@@ -372,6 +409,139 @@ func (h *Handler) GetStoredWeekSuggestions(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"suggestions": nil, "generated_at": nil})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"suggestions": rec.Insight, "generated_at": rec.GeneratedAt})
+}
+
+// POST /api/insights/meal
+// POST /api/suggestions/meal
+func (h *Handler) MealSuggestion(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+
+	r := c.Request()
+	ctx := r.Context()
+	var req struct {
+		Date string `json:"date"`
+		Meal string `json:"meal"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Date == "" || req.Meal == "" {
+		return writeErr(c, http.StatusBadRequest, "date and meal required")
+	}
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		return writeErr(c, http.StatusBadRequest, "invalid date")
+	}
+
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+
+	profileCacheKey := session.SpreadsheetID + "|profile"
+	var profileCtx string
+	if cached, ok := h.cacheGet(profileCacheKey); ok {
+		profileCtx = string(cached)
+	} else {
+		profile, _ := svc.GetProfile(ctx)
+		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
+		h.cacheSet(profileCacheKey, []byte(profileCtx))
+	}
+
+	summary, err := h.buildSingleMealSuggestionSummary(ctx, svc, req.Date, req.Meal)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+
+	insightType := "meal-suggestion:" + req.Meal
+
+	if wantsStream(c) {
+		suggestion, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.SingleMealSuggestionPrompt())
+		if err != nil {
+			return nil
+		}
+		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: insightType, StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: suggestion})
+		return nil
+	}
+
+	suggestion, err := h.gemini.SingleMealSuggestion(ctx, summary, profileCtx)
+	if err != nil {
+		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
+	}
+	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
+		Type:        insightType,
+		StartDate:   req.Date,
+		EndDate:     req.Date,
+		GeneratedAt: generatedAt,
+		Insight:     suggestion,
+	})
+	return c.JSON(http.StatusOK, map[string]any{"suggestion": suggestion, "generated_at": generatedAt})
+}
+
+// GET /api/suggestions/meal?date=...&meal=...
+func (h *Handler) GetStoredMealSuggestion(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+
+	date := c.QueryParam("date")
+	meal := c.QueryParam("meal")
+	if date == "" || meal == "" {
+		return writeErr(c, http.StatusBadRequest, "date and meal required")
+	}
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	insightType := "meal-suggestion:" + meal
+	rec, err := svc.GetInsight(c.Request().Context(), insightType, date, date)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if rec == nil {
+		return c.JSON(http.StatusOK, map[string]any{"suggestion": nil, "generated_at": nil})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"suggestion": rec.Insight, "generated_at": rec.GeneratedAt})
+}
+
+func (h *Handler) buildSingleMealSuggestionSummary(ctx context.Context, svc *sheets.Service, date, mealType string) (string, error) {
+	entries, err := svc.GetFoodByDateRange(ctx, date, date)
+	if err != nil {
+		return "", err
+	}
+
+	prevDate := addDaysStr(date, -1)
+	prevEntries, _ := svc.GetFoodByDateRange(ctx, prevDate, prevDate)
+
+	// Try to get today's day insight for context; fall back to yesterday's.
+	var insightText string
+	if rec, _ := svc.GetInsight(ctx, "day", date, date); rec != nil {
+		insightText = rec.Insight
+	} else if rec, _ := svc.GetInsight(ctx, "day", prevDate, prevDate); rec != nil {
+		insightText = rec.Insight
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Suggest one meal for: %s\n\n", mealType)
+
+	if insightText != "" {
+		fmt.Fprintf(&b, "Nutrition insights (factor into suggestion):\n%s\n\n", insightText)
+	}
+
+	if len(entries) > 0 {
+		fmt.Fprintf(&b, "Already eaten today:\n")
+		totalCal, totalProt := 0, 0
+		for _, e := range entries {
+			fmt.Fprintf(&b, "  - [%s] %s: %d cal, %dg protein, %dg fiber\n", e.MealType, e.Description, e.Calories, e.Protein, e.Fiber)
+			totalCal += e.Calories
+			totalProt += e.Protein
+		}
+		fmt.Fprintf(&b, "  Today's totals so far: %d cal, %dg protein\n\n", totalCal, totalProt)
+	}
+
+	if len(prevEntries) > 0 {
+		fmt.Fprintf(&b, "Yesterday's meals (avoid repeating):\n")
+		for _, e := range prevEntries {
+			fmt.Fprintf(&b, "  - [%s] %s\n", e.MealType, e.Description)
+		}
+	}
+
+	return b.String(), nil
 }
 
 func addDaysStr(dateStr string, n int) string {

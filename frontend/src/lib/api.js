@@ -79,6 +79,25 @@ export async function confirmChat(entries, date = null) {
   })).json()
 }
 
+export async function editChat(message, entries, date = null, mealType = null) {
+  const body = { message, entries }
+  if (date) body.date = date
+  if (mealType) body.meal_type = mealType
+  return (await apiFetch('/api/chat/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })).json()
+}
+
+export async function fetchMealSuggestion(date, meal) {
+  return (await apiFetch(`/api/suggestions/meal?date=${date}&meal=${meal}`)).json()
+}
+
+export async function streamMealSuggestion(date, meal, onChunk) {
+  return streamInsight('/api/suggestions/meal?stream=1', { date, meal }, onChunk)
+}
+
 export async function patchEntry(id, entry) {
   return (await apiFetch(`/api/entries/${id}`, {
     method: 'PATCH',
@@ -115,6 +134,10 @@ export async function generateDayInsights(date) {
   })).json()
 }
 
+export async function streamDayInsights(date, onChunk) {
+  return streamInsight('/api/insights/day?stream=1', { date }, onChunk)
+}
+
 export async function fetchStoredInsight(start, end) {
   return (await apiFetch(`/api/insights?start=${start}&end=${end}`)).json()
 }
@@ -125,6 +148,10 @@ export async function generateInsights(start, end) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ start, end }),
   })).json()
+}
+
+export async function streamInsights(start, end, onChunk) {
+  return streamInsight('/api/insights?stream=1', { start, end }, onChunk)
 }
 
 export async function fetchStoredDaySuggestions(date) {
@@ -149,6 +176,10 @@ export async function generateWeekSuggestions(start, end) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ start, end }),
   })).json()
+}
+
+export async function streamWeekSuggestions(start, end, onChunk) {
+  return streamInsight('/api/suggestions/week?stream=1', { start, end }, onChunk)
 }
 
 export async function getFavorites() {
@@ -185,4 +216,49 @@ export async function putProfile(profile) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
   })).json()
+}
+
+/**
+ * Generic SSE streaming helper for insight/suggestion endpoints.
+ * Sends a POST, reads SSE events, calls onChunk(text) for each chunk,
+ * and resolves with { text, generated_at } when done.
+ */
+async function streamInsight(url, body, onChunk) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Timezone': TZ },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) await throwResponseError(res)
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  let result = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop()
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const json = line.slice(6)
+      try {
+        const evt = JSON.parse(json)
+        if (evt.error) throw new Error(evt.error)
+        if (evt.done) {
+          result = { text: evt.text, generated_at: evt.generated_at }
+        } else if (evt.chunk) {
+          onChunk(evt.chunk)
+        }
+      } catch (e) {
+        if (e.message && !e.message.startsWith('Unexpected')) throw e
+      }
+    }
+  }
+
+  if (!result) throw new Error('Stream ended without completion')
+  return result
 }
