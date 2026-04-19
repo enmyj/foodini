@@ -52,6 +52,9 @@
     let editSending = $state(false);
     let editMessage = $state("");
     let scalingAll = $state(false);
+    let scaleAllOpen = $state(false);
+    let scalingEntry = $state(-1);
+    let scaleEntryOpen = $state(-1);
     let favorites = $state(null);
     let favSearch = $state("");
     let showFavPicker = $state(false);
@@ -153,6 +156,9 @@
                 editSending = false;
                 editMessage = "";
                 scalingAll = false;
+                scaleAllOpen = false;
+                scalingEntry = -1;
+                scaleEntryOpen = -1;
                 showFavPicker = false;
                 favSearch = "";
                 if (!favorites) {
@@ -181,6 +187,9 @@
                 editSending = false;
                 editMessage = "";
                 scalingAll = false;
+                scaleAllOpen = false;
+                scalingEntry = -1;
+                scaleEntryOpen = -1;
                 showFavPicker = false;
                 favSearch = "";
                 activityText = "";
@@ -345,6 +354,33 @@
             showError(err, "Failed to scale meal.");
         } finally {
             scalingAll = false;
+        }
+    }
+
+    async function scaleOneEntry(index, factor) {
+        if (scalingEntry >= 0) return;
+        scalingEntry = index;
+        scaleEntryOpen = -1;
+        try {
+            const entry = editModeEntries[index];
+            if (!entry) return;
+            const r1 = (v) => Math.round(v * factor);
+            const r10 = (v) => Math.round(v * factor * 10) / 10;
+            const updated = {
+                ...entry,
+                calories: r1(entry.calories),
+                protein: r10(entry.protein),
+                carbs: r10(entry.carbs),
+                fat: r10(entry.fat),
+                fiber: r10(entry.fiber ?? 0),
+            };
+            const saved = await patchEntry(updated.id, updated);
+            editModeEntries = editModeEntries.map((e) => e.id === saved.id ? saved : e);
+            if (onEntriesEdited) onEntriesEdited(editModeEntries);
+        } catch (err) {
+            showError(err, "Failed to scale entry.");
+        } finally {
+            scalingEntry = -1;
         }
     }
 
@@ -533,14 +569,25 @@
                 <div class="meta-locked">
                     <span class="meta-chip">{activeEditMealType}</span>
                     <div class="scale-btns">
-                        {#each [0.75, 1.25, 1.5] as factor}
-                            <button
-                                class="scale-pill"
-                                onclick={() => scaleAllEntries(factor)}
-                                disabled={scalingAll}
-                                >&times;{factor}</button
-                            >
-                        {/each}
+                        <button
+                            class="scale-toggle"
+                            class:open={scaleAllOpen}
+                            onclick={() => (scaleAllOpen = !scaleAllOpen)}
+                            disabled={scalingAll}
+                            aria-label="Scale entire meal"
+                            title="Scale entire meal"
+                            >⊕</button
+                        >
+                        {#if scaleAllOpen}
+                            {#each [0.75, 1.25, 1.5, 2] as factor}
+                                <button
+                                    class="scale-pill"
+                                    onclick={() => { scaleAllOpen = false; scaleAllEntries(factor); }}
+                                    disabled={scalingAll}
+                                    >&times;{factor}</button
+                                >
+                            {/each}
+                        {/if}
                         <button
                             class="scale-pill fav-pill"
                             onclick={() => (showFavPicker = !showFavPicker)}
@@ -584,12 +631,35 @@
                             <div class="card-entry">
                                 <div class="card-entry-head">
                                     <div class="card-desc">{entry.description}</div>
-                                    <button
-                                        class="entry-delete"
-                                        onclick={() => deleteEditEntry(i)}
-                                        aria-label="Delete entry">✕</button
-                                    >
+                                    <div class="entry-actions">
+                                        <button
+                                            class="entry-scale-toggle"
+                                            class:open={scaleEntryOpen === i}
+                                            onclick={() => (scaleEntryOpen = scaleEntryOpen === i ? -1 : i)}
+                                            disabled={scalingEntry >= 0}
+                                            aria-label="Scale portion"
+                                            title="Scale portion"
+                                            >⊕</button
+                                        >
+                                        <button
+                                            class="entry-delete"
+                                            onclick={() => deleteEditEntry(i)}
+                                            aria-label="Delete entry">✕</button
+                                        >
+                                    </div>
                                 </div>
+                                {#if scaleEntryOpen === i}
+                                    <div class="entry-scale-opts">
+                                        {#each [0.75, 1.5, 2] as factor}
+                                            <button
+                                                class="scale-pill"
+                                                onclick={() => scaleOneEntry(i, factor)}
+                                                disabled={scalingEntry >= 0}
+                                                >&times;{factor}</button
+                                            >
+                                        {/each}
+                                    </div>
+                                {/if}
                                 <div class="card-macros">
                                     <span class="macro-field">
                                         <input type="number" value={entry.calories}
@@ -1568,6 +1638,35 @@
         display: flex;
         gap: 0.3rem;
         margin-top: 0.35rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .scale-toggle {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.15rem 0.25rem;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    .scale-toggle.open {
+        color: var(--ink-2);
+    }
+
+    .scale-toggle:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .scale-toggle:not(:disabled):hover {
+            color: var(--ink-2);
+        }
     }
 
     .scale-pill {
@@ -1606,6 +1705,46 @@
         gap: 0.5rem;
     }
 
+    .entry-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.15rem;
+        flex-shrink: 0;
+    }
+
+    .entry-scale-toggle {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 0.9rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0.15rem 0.25rem;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    .entry-scale-toggle.open {
+        color: var(--ink-2);
+    }
+
+    .entry-scale-toggle:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .entry-scale-toggle:not(:disabled):hover {
+            color: var(--ink-2);
+        }
+    }
+
+    .entry-scale-opts {
+        display: flex;
+        gap: 0.3rem;
+        padding: 0.25rem 0 0.15rem;
+    }
+
     .entry-delete {
         background: none;
         border: none;
@@ -1615,6 +1754,8 @@
         padding: 0.1rem 0.2rem;
         line-height: 1;
         flex-shrink: 0;
+        min-width: 0;
+        min-height: 0;
     }
 
     @media (hover: hover) {
