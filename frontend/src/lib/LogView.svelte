@@ -68,6 +68,7 @@
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
     let logReconcileTimer: ReturnType<typeof setTimeout> | null = null;
+    let dayInsightFresh = $state(false);
     let dayInsightRegenTimer: ReturnType<typeof setTimeout> | null = null;
     let dayInsightRequestId = 0;
 
@@ -195,6 +196,7 @@
             collapsedMeals = new Set(MEAL_ORDER);
             dayInsight = null;
             dayInsightExpanded = false;
+            dayInsightFresh = false;
             mealSuggestions = {};
         }
     });
@@ -445,6 +447,10 @@
             if (view !== "day" || currentDate !== date) return;
             void fetchDayInsights(date, true, {
                 open: dayInsight?.open ?? false,
+            }).then(() => {
+                if (!dayInsight?.open && dayInsight?.text) {
+                    dayInsightFresh = true;
+                }
             });
         }, DAY_INSIGHT_REGEN_DELAY_MS);
     }
@@ -500,6 +506,7 @@
     }
 
     function toggleDayInsights() {
+        dayInsightFresh = false;
         if (!dayInsight || (!dayInsight.loading && !dayInsight.text && !dayInsight.error)) {
             fetchDayInsights(currentDate, false);
         } else {
@@ -807,9 +814,10 @@
                         <button
                             class="insights-btn"
                             class:active={dayInsight?.open}
+                            class:fresh={dayInsightFresh}
                             onclick={toggleDayInsights}
                             aria-label="AI insights"
-                            title="AI insights">insights</button
+                            title="AI insights">insights{#if dayInsightFresh}<span class="insight-dot"></span>{/if}</button
                         >
                     {/if}
                 </div>
@@ -1375,6 +1383,27 @@
         border-color: var(--ink-2);
         color: var(--ink-2);
         background: var(--paper-2);
+    }
+
+    .insights-btn.fresh {
+        border-color: var(--accent, var(--ink-2));
+        color: var(--accent, var(--ink-2));
+    }
+
+    .insight-dot {
+        display: inline-block;
+        width: 0.38rem;
+        height: 0.38rem;
+        background: var(--accent, var(--ink-2));
+        border-radius: 50%;
+        margin-left: 0.3rem;
+        vertical-align: middle;
+        animation: dot-pulse 1.8s ease-in-out 3;
+    }
+
+    @keyframes dot-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.35; }
     }
 
     @media (hover: hover) {
