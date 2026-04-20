@@ -78,6 +78,7 @@
     let favSearch = $state("");
     let showFavPicker = $state(false);
     let cameFromConfirm = $state(false);
+    let deletingEntryIds = $state<Set<string>>(new Set());
 
     let isEditMode = $derived(editModeEntries !== null && editModeEntries.length > 0);
     let started = $derived(sending || savedEntries !== null || clarifyingQuestion !== null);
@@ -242,6 +243,7 @@
                 showFavPicker = false;
                 favSearch = "";
                 cameFromConfirm = false;
+                deletingEntryIds = new Set();
                 if (!favorites) {
                     getFavorites().then((res) => { favorites = res.favorites ?? []; }).catch(() => {});
                 }
@@ -264,6 +266,7 @@
                 showFavPicker = false;
                 favSearch = "";
                 cameFromConfirm = false;
+                deletingEntryIds = new Set();
                 activityText = "";
                 feelingNotes = "";
                 poop = false;
@@ -515,16 +518,23 @@
     async function deleteEditEntry(index: number): Promise<void> {
         if (!editModeEntries) return;
         const entry = editModeEntries[index];
-        if (!entry) return;
-        // Optimistically remove from UI immediately.
+        if (!entry || deletingEntryIds.has(entry.id)) return;
+        const previousEntries = [...editModeEntries];
         const nextEntries = editModeEntries.filter((_, i) => i !== index);
+        deletingEntryIds = new Set([...deletingEntryIds, entry.id]);
         editModeEntries = nextEntries;
         if (onEntriesEdited) onEntriesEdited(nextEntries);
-        if (nextEntries.length === 0) onClose();
         try {
             await deleteEntryMutation.mutateAsync(entry.id);
+            if (nextEntries.length === 0) onClose();
         } catch (err) {
+            editModeEntries = previousEntries;
+            if (onEntriesEdited) onEntriesEdited(previousEntries);
             showError(err, "Failed to delete entry.");
+        } finally {
+            deletingEntryIds = new Set(
+                [...deletingEntryIds].filter((id) => id !== entry.id),
+            );
         }
     }
 
@@ -768,7 +778,7 @@
                 <div class="content-area">
                     <div class="result-card" class:dimmed={editSending}>
                         {#each editModeEntries as entry, i}
-                            <div class="card-entry">
+                            <div class="card-entry" class:dimmed={deletingEntryIds.has(entry.id)}>
                                 <div class="card-entry-head">
                                     <div class="card-desc">{entry.description}</div>
                                     <div class="entry-actions">
@@ -776,7 +786,7 @@
                                             class="entry-scale-toggle"
                                             class:open={scaleEntryOpen === i}
                                             onclick={() => (scaleEntryOpen = scaleEntryOpen === i ? -1 : i)}
-                                            disabled={scalingEntry >= 0}
+                                            disabled={scalingEntry >= 0 || deletingEntryIds.has(entry.id)}
                                             aria-label="Scale portion"
                                             title="Scale portion"
                                             >⊕</button
@@ -784,6 +794,7 @@
                                         <button
                                             class="entry-delete"
                                             onclick={() => deleteEditEntry(i)}
+                                            disabled={deletingEntryIds.has(entry.id)}
                                             aria-label="Delete entry">✕</button
                                         >
                                     </div>
@@ -804,35 +815,35 @@
                                     <span class="macro-field">
                                         <input type="number" value={entry.calories}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "calories", numberValueFromEvent(e))}
-                                            disabled={editSending} />
+                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">cal</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.protein}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "protein", numberValueFromEvent(e))}
-                                            disabled={editSending} />
+                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">P</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.carbs}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "carbs", numberValueFromEvent(e))}
-                                            disabled={editSending} />
+                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">C</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fat}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "fat", numberValueFromEvent(e))}
-                                            disabled={editSending} />
+                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">F</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fiber ?? 0}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "fiber", numberValueFromEvent(e))}
-                                            disabled={editSending} />
+                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">Fb</span>
                                     </span>
                                 </div>
@@ -1293,6 +1304,10 @@
         display: flex;
         flex-direction: column;
         gap: 0.3rem;
+    }
+
+    .card-entry.dimmed {
+        opacity: 0.45;
     }
 
     .card-entry:last-child {

@@ -41,6 +41,8 @@
     } from "./types.ts";
 
     const queryClient = useQueryClient();
+    const LOG_RECONCILE_DELAY_MS = 1200;
+    const DAY_INSIGHT_REGEN_DELAY_MS = 900;
 
     type ViewMode = "day" | "favorites" | "history" | "profile";
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -65,6 +67,9 @@
     let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
+    let logReconcileTimer: ReturnType<typeof setTimeout> | null = null;
+    let dayInsightRegenTimer: ReturnType<typeof setTimeout> | null = null;
+    let dayInsightRequestId = 0;
 
     const addFavoriteMutation = createMutation(() => ({
         mutationFn: (entry: Entry) => addFavorite(entry),
@@ -182,11 +187,23 @@
     $effect(() => {
         if (view === "day") {
             void currentDate;
+            dayInsightRequestId++;
+            if (dayInsightRegenTimer) {
+                clearTimeout(dayInsightRegenTimer);
+                dayInsightRegenTimer = null;
+            }
             collapsedMeals = new Set(MEAL_ORDER);
             dayInsight = null;
             dayInsightExpanded = false;
             mealSuggestions = {};
         }
+    });
+
+    $effect(() => {
+        return () => {
+            if (logReconcileTimer) clearTimeout(logReconcileTimer);
+            if (dayInsightRegenTimer) clearTimeout(dayInsightRegenTimer);
+        };
     });
 
     function openDatePicker(): void {
@@ -263,10 +280,8 @@
     }
 
     function handleUpdate(updated: Entry) {
-        queryClient.setQueryData(
-            queryKeys.logDay(currentDate),
-            (old: LogResponse | undefined) =>
-                updateEntryInLogCache(old, updated),
+        applyDayLogMutation(updated.date, (old: LogResponse | undefined) =>
+            updateEntryInLogCache(old, updated),
         );
     }
 
@@ -281,24 +296,15 @@
     }
 
     function onEntriesEdited(updatedEntries: Entry[]) {
-        queryClient.setQueryData(
-            queryKeys.logDay(currentDate),
-            (old: LogResponse | undefined) =>
-                replaceMealEntriesInLogCache(
-                    old,
-                    drawerEditMealType,
-                    updatedEntries,
-                ),
+        applyDayLogMutation(updatedEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
+            replaceMealEntriesInLogCache(old, drawerEditMealType, updatedEntries),
         );
-        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
     }
 
     function handleDelete(id: string) {
-        queryClient.setQueryData(
-            queryKeys.logDay(currentDate),
-            (old: LogResponse | undefined) => removeEntryFromLogCache(old, id),
+        applyDayLogMutation(currentDate, (old: LogResponse | undefined) =>
+            removeEntryFromLogCache(old, id),
         );
-        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
     }
 
     function normalizeFavoriteKey(desc: string | null | undefined): string {
@@ -344,21 +350,9 @@
     }
 
     function onEntriesAdded(newEntries: Entry[]) {
-        queryClient.setQueryData(
-            queryKeys.logDay(currentDate),
-            (old: LogResponse | undefined) =>
-                appendEntriesToLogCache(old, newEntries),
+        applyDayLogMutation(newEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
+            appendEntriesToLogCache(old, newEntries),
         );
-        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
-        const addedEntry = newEntries[0];
-        if (addedEntry) {
-            const addedMeal = addedEntry.meal_type;
-            collapsedMeals = new Set(
-                [...collapsedMeals].filter((m) => m !== addedMeal),
-            );
-            // Kick off day-level insights (streamed, auto-opens).
-            fetchDayInsights(currentDate, true);
-        }
     }
 
     // --- Meal suggestions (for empty meals) ---
@@ -422,20 +416,86 @@
 
     // --- Day insights ---
 
-    async function fetchDayInsights(date: string, regenerate = false) {
-        dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null };
+    function applyDayLogMutation(
+        date: string,
+        updater: (old: LogResponse | undefined) => LogResponse | undefined,
+    ): void {
+        void queryClient.cancelQueries({ queryKey: queryKeys.logBase });
+        if (date === currentDate) {
+            queryClient.setQueryData(queryKeys.logDay(currentDate), updater);
+        }
+        scheduleLogReconcile();
+        if (date === currentDate) {
+            scheduleDayInsightRegeneration(currentDate);
+        }
+    }
+
+    function scheduleLogReconcile(): void {
+        if (logReconcileTimer) clearTimeout(logReconcileTimer);
+        logReconcileTimer = setTimeout(() => {
+            logReconcileTimer = null;
+            void queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
+        }, LOG_RECONCILE_DELAY_MS);
+    }
+
+    function scheduleDayInsightRegeneration(date: string): void {
+        if (dayInsightRegenTimer) clearTimeout(dayInsightRegenTimer);
+        dayInsightRegenTimer = setTimeout(() => {
+            dayInsightRegenTimer = null;
+            if (view !== "day" || currentDate !== date) return;
+            void fetchDayInsights(date, true, {
+                open: dayInsight?.open ?? false,
+            });
+        }, DAY_INSIGHT_REGEN_DELAY_MS);
+    }
+
+    async function fetchDayInsights(
+        date: string,
+        regenerate = false,
+        options: { open?: boolean } = {},
+    ) {
+        const requestId = ++dayInsightRequestId;
+        const open = options.open ?? true;
+        dayInsight = {
+            loading: true,
+            text: dayInsight?.text ?? null,
+            error: null,
+            open,
+            generatedAt: dayInsight?.generatedAt ?? null,
+        };
         try {
             if (!regenerate) {
                 const stored = await fetchStoredDayInsight(date);
+                if (requestId !== dayInsightRequestId) return;
                 if (stored.insight) {
-                    dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at ?? null };
+                    dayInsight = {
+                        loading: false,
+                        text: stored.insight,
+                        error: null,
+                        open,
+                        generatedAt: stored.generated_at ?? null,
+                    };
                     return;
                 }
             }
             const res = await generateDayInsights(date);
-            dayInsight = { loading: false, text: res.insight ?? null, error: null, open: true, generatedAt: res.generated_at ?? null };
+            if (requestId !== dayInsightRequestId) return;
+            dayInsight = {
+                loading: false,
+                text: res.insight ?? null,
+                error: null,
+                open,
+                generatedAt: res.generated_at ?? null,
+            };
         } catch (e: unknown) {
-            dayInsight = { loading: false, text: null, error: e instanceof Error ? e.message : "Could not load insights", open: true, generatedAt: null };
+            if (requestId !== dayInsightRequestId) return;
+            dayInsight = {
+                loading: false,
+                text: dayInsight?.text ?? null,
+                error: e instanceof Error ? e.message : "Could not load insights",
+                open,
+                generatedAt: dayInsight?.generatedAt ?? null,
+            };
         }
     }
 
