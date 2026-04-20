@@ -253,6 +253,8 @@ func (h *Handler) DaySuggestions(c *echo.Context) error {
 	var insightText string
 	if rec, _ := svc.GetInsight(ctx, "day", req.Date, req.Date); rec != nil {
 		insightText = rec.Insight
+	} else if rec, _ := svc.GetInsight(ctx, "day", prevDate, prevDate); rec != nil {
+		insightText = rec.Insight
 	}
 
 	summary := buildMealSuggestionSummary(req.Date, entries, prevEntries, complete, insightText)

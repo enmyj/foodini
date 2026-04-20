@@ -794,13 +794,10 @@
                             if (e.target.value) currentDate = e.target.value;
                         }}
                         bind:this={dateInputEl}
-                        max={todayStr()}
                     />
                 </button>
                 <button
                     class="nav-arrow"
-                    class:dimmed={currentDate >= todayStr()}
-                    disabled={currentDate >= todayStr()}
                     onclick={() => (currentDate = addDays(currentDate, 1))}
                     aria-label="Next day">›</button
                 >
@@ -841,11 +838,13 @@
     {:else if view === "day"}
         {#if dayInsight?.open}
             <div class="insights-panel day-insights-panel">
-                <button
-                    class="insight-close"
-                    onclick={() => (dayInsight = { ...dayInsight, open: false })}
-                    aria-label="Close insights">✕</button
-                >
+                {#if !dayInsight.loading}
+                    <button
+                        class="insight-close"
+                        onclick={() => (dayInsight = { ...dayInsight, open: false })}
+                        aria-label="Close insights">✕</button
+                    >
+                {/if}
                 {#if dayInsight.loading}
                     <div class="insight-skeleton">
                         <div class="isk-line" style="width: 88%"></div>
@@ -857,8 +856,8 @@
                 {:else if dayInsight.text != null}
                     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                     <p class="insights-text" class:collapsed-text={!dayInsightExpanded}>{@html renderInsight(dayInsight.text)}</p>
-                    {#if !dayInsightExpanded && dayInsight.generatedAt}
-                        <button class="insight-more" onclick={() => (dayInsightExpanded = true)}>more</button>
+                    {#if dayInsight.generatedAt}
+                        <button class="insight-more" onclick={() => (dayInsightExpanded = !dayInsightExpanded)}>{dayInsightExpanded ? "less" : "more"}</button>
                     {/if}
                     {#if dayInsight.generatedAt && dayInsightExpanded}
                         <div class="insight-footer">
