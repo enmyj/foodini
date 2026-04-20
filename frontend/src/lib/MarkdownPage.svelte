@@ -1,9 +1,11 @@
-<script>
+<script lang="ts">
     import { navigate } from './router.svelte.ts';
     import ThemeToggle from './ThemeToggle.svelte';
-    let { html } = $props();
+    import type { RoutePath } from './types.ts';
 
-    function go(e, href) {
+    let { html }: { html: string } = $props();
+
+    function go(e: MouseEvent, href: RoutePath) {
         e.preventDefault();
         navigate(href);
     }

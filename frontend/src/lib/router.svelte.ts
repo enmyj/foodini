@@ -1,9 +1,10 @@
 /** Minimal pushState router for a handful of static routes. */
+import type { RoutePath } from "./types.ts";
 
 let _listener: (() => void) | null = null;
-let _current = $state(window.location.pathname);
+let _current = $state<RoutePath>(window.location.pathname as RoutePath);
 
-function navigate(path: string) {
+function navigate(path: RoutePath) {
     if (path === _current) return;
     history.pushState(null, "", path);
     _current = path;
@@ -11,11 +12,11 @@ function navigate(path: string) {
 
 function init() {
     if (_listener) return;
-    _listener = () => { _current = window.location.pathname; };
+    _listener = () => { _current = window.location.pathname as RoutePath; };
     window.addEventListener("popstate", _listener);
 }
 
-function getCurrent() {
+function getCurrent(): RoutePath {
     return _current;
 }
 

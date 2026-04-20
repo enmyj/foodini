@@ -1,22 +1,39 @@
-<script>
-  let { day, onClose, onDelete = null, onAddFood = null } = $props()
+<script lang="ts">
+  import { MEAL_ORDER } from './types.ts'
+  import type { DailyLog, Entry, MealEntriesMap } from './types.ts'
 
-  const MEAL_ORDER = ['breakfast', 'lunch', 'snack', 'dinner', 'supplements']
+  interface DayModalDay {
+    date: string
+    entries: Entry[]
+    dayLog?: DailyLog | null
+  }
 
-  function groupedByMeal(entries) {
-    const g = {}
+  let {
+    day,
+    onClose,
+    onDelete = null,
+    onAddFood = null,
+  }: {
+    day: DayModalDay
+    onClose: () => void
+    onDelete?: ((id: string) => void) | null
+    onAddFood?: ((date: string) => void) | null
+  } = $props()
+
+  function groupedByMeal(entries: Entry[] | null | undefined): MealEntriesMap {
+    const g: MealEntriesMap = {}
     for (const e of entries ?? []) { (g[e.meal_type] ??= []).push(e) }
     return g
   }
 
-  function totals(entries) {
+  function totals(entries: Entry[] | null | undefined) {
     return (entries ?? []).reduce(
       (a, e) => ({ calories: a.calories + e.calories, protein: a.protein + e.protein, carbs: a.carbs + e.carbs, fat: a.fat + e.fat, fiber: a.fiber + (e.fiber ?? 0) }),
       { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 }
     )
   }
 
-  function onWindowKeyDown(e) {
+  function onWindowKeyDown(e: KeyboardEvent) {
     if (e.key === 'Escape') onClose()
   }
 </script>
@@ -178,10 +195,6 @@
     font-size: var(--t-body-sm);
     color: var(--ink);
     line-height: 1.5;
-  }
-
-  .score {
-    font-weight: 500;
   }
 
   .entry-row {

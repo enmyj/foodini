@@ -1,22 +1,24 @@
-<script>
+<script lang="ts">
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
     import { getProfile, putProfile } from "./api.ts";
     import { autosize } from "./autosize.ts";
+    import { queryKeys } from "./queryKeys.ts";
     import { showError } from "./toast.ts";
+    import type { Profile } from "./types.ts";
 
-    let { onClose } = $props();
+    let { onClose }: { onClose: () => void } = $props();
 
     const queryClient = useQueryClient();
 
     const profileQuery = createQuery(() => ({
-        queryKey: ["profile"],
+        queryKey: queryKeys.profile,
         queryFn: getProfile,
     }));
 
     const saveMutation = createMutation(() => ({
-        mutationFn: (data) => putProfile(data),
-        onSuccess: (data) => {
-            queryClient.setQueryData(["profile"], data);
+        mutationFn: (data: Profile) => putProfile(data),
+        onSuccess: (data: Profile) => {
+            queryClient.setQueryData(queryKeys.profile, data);
             onClose();
         },
         onError: (err) => showError(err, "Failed to save profile."),
@@ -62,12 +64,14 @@
     let saving = $derived(saveMutation.isPending);
     let loaded = $derived(profileQuery.isSuccess);
 
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }
 
-    function scrollIntoViewOnFocus(e) {
-        setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
+    function scrollIntoViewOnFocus(e: FocusEvent) {
+        const target = e.currentTarget;
+        if (!(target instanceof HTMLElement)) return;
+        setTimeout(() => target.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
     }
 </script>
 

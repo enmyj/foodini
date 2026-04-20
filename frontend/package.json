@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check": "svelte-check --fail-on-warnings && tsc -p tsconfig.json --noEmit",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -1,26 +1,37 @@
-<script>
+<script lang="ts">
   import { createQuery } from '@tanstack/svelte-query'
   import { getActivity } from './api.ts'
+  import { queryKeys } from './queryKeys.ts'
+  import type { ActivityField, ActivityResponse } from './types.ts'
 
-  let { date, onOpen, refreshKey = 0 } = $props()
+  let {
+    date,
+    onOpen,
+    refreshKey = 0,
+  }: {
+    date: string
+    onOpen: (field: ActivityField) => void
+    refreshKey?: number
+  } = $props()
 
   const query = createQuery(() => ({
-    queryKey: ['activity', date, refreshKey],
+    queryKey: queryKeys.activity(date, refreshKey),
     queryFn: () => getActivity(date),
     enabled: !!date,
   }))
 
-  let data = $derived(query.data ?? null)
+  let data = $derived<ActivityResponse | null>(query.data ?? null)
+  let sections = $derived<{ label: string; value: string | null; field: ActivityField }[]>([
+    { label: 'Activity', value: data?.activity ?? null, field: 'activity' },
+    { label: 'Feeling', value: data?.feeling_notes || (data?.feeling_score ? `${data.feeling_score}/10` : null), field: 'feeling' },
+    { label: 'Stool', value: data?.poop ? (data.poop_notes ? `Yes — ${data.poop_notes}` : 'Yes') : data?.poop_notes ? `No — ${data.poop_notes}` : null, field: 'poop' },
+    { label: 'Water', value: data?.hydration ? `${data.hydration} L` : null, field: 'hydration' },
+  ])
 </script>
 
 <div class="activity-row">
   <div class="section-header">Other</div>
-  {#each [
-    { label: 'Activity', value: data?.activity, field: 'activity' },
-    { label: 'Feeling', value: data?.feeling_notes || (data?.feeling_score ? `${data.feeling_score}/10` : null), field: 'feeling' },
-    { label: 'Stool', value: data?.poop ? (data.poop_notes ? `Yes — ${data.poop_notes}` : 'Yes') : data?.poop_notes ? `No — ${data.poop_notes}` : null, field: 'poop' },
-    { label: 'Water', value: data?.hydration ? `${data.hydration} L` : null, field: 'hydration' },
-  ] as section}
+  {#each sections as section}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="section" role="button" tabindex="0" onclick={() => onOpen(section.field)}>
       <span class="section-label">{section.label}</span>

@@ -1,5 +1,5 @@
-<script>
-    import { createQuery, useQueryClient } from "@tanstack/svelte-query";
+<script lang="ts">
+    import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
         addFavorite,
@@ -13,70 +13,115 @@
         generateWeekSuggestions,
         generateMealSuggestion,
     } from "./api.ts";
+    import type { ApiError } from "./api.ts";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
     import ActivityNote from "./ActivityNote.svelte";
+    import { appendEntriesToLogCache, removeEntryFromLogCache, replaceMealEntriesInLogCache, updateEntryInLogCache } from "./cache.ts";
+    import { addDays, formatDateNav, getMonday, todayStr } from "./date.ts";
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
+    import HistoryWeekBlock from "./HistoryWeekBlock.svelte";
+    import InsightPanel from "./InsightPanel.svelte";
+    import { queryKeys } from "./queryKeys.ts";
     import { showError } from "./toast.ts";
     import { navigate } from "./router.svelte.ts";
     import ThemeToggle from "./ThemeToggle.svelte";
+    import { MEAL_ORDER } from "./types.ts";
+    import type {
+        ActivityField,
+        Entry,
+        Favorite,
+        InsightPanelState,
+        LogResponse,
+        MealEntriesMap,
+        MealType,
+        WeekGroup,
+        WeekInsightPanelState,
+    } from "./types.ts";
 
     const queryClient = useQueryClient();
 
-    const MEAL_ORDER = ["breakfast", "lunch", "snack", "dinner", "supplements"];
+    type ViewMode = "day" | "favorites" | "history" | "profile";
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-    let view = $state("day");
+    let view = $state<ViewMode>("day");
     let currentDate = $state(todayStr());
     let menuOpen = $state(false);
     let drawerOpen = $state(false);
-    let drawerTab = $state("food");
+    let drawerTab = $state<"food" | "activity">("food");
     let activityRefreshKey = $state(0);
-    let drawerDate = $state(null);
-    let drawerMeal = $state(null);
-    let drawerField = $state(null);
-    let drawerEditEntries = $state(null);
-    let drawerEditMealType = $state(null);
-    let dateInputEl = $state(null);
-    let mealSuggestions = $state({});
+    let drawerDate = $state<string | null>(null);
+    let drawerMeal = $state<MealType | null>(null);
+    let drawerField = $state<ActivityField | null>(null);
+    let drawerEditEntries = $state<Entry[] | null>(null);
+    let drawerEditMealType = $state<MealType | null>(null);
+    let dateInputEl = $state<HTMLInputElement | null>(null);
+    let mealSuggestions = $state<Record<string, InsightPanelState>>({});
 
-    let dayInsight = $state(null);
+    let dayInsight = $state<InsightPanelState | null>(null);
     let dayInsightExpanded = $state(false);
-    let insightsByWeek = $state({});
-    let suggestionsByWeek = $state({});
-    let collapsedMeals = $state(new Set(MEAL_ORDER));
+    let insightsByWeek = $state<Record<string, WeekInsightPanelState>>({});
+    let suggestionsByWeek = $state<Record<string, WeekInsightPanelState>>({});
+    let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
-    let favoritedDescs = $state(new Set());
+    let favoritedDescs = $state<Set<string>>(new Set());
+
+    const addFavoriteMutation = createMutation(() => ({
+        mutationFn: (entry: Entry) => addFavorite(entry),
+        onSuccess: (_data, entry) => {
+            favoritedDescs = new Set([
+                ...favoritedDescs,
+                normalizeFavoriteKey(entry.description),
+            ]);
+            queryClient.invalidateQueries({ queryKey: queryKeys.favorites });
+        },
+        onError: (e: unknown, entry) => {
+            if (
+                typeof e === "object" &&
+                e !== null &&
+                (("status" in e && e.status === 409) ||
+                    ("code" in e && e.code === "favorite_exists"))
+            ) {
+                favoritedDescs = new Set([
+                    ...favoritedDescs,
+                    normalizeFavoriteKey(entry.description),
+                ]);
+                return;
+            }
+            console.error("addFavorite failed:", e);
+            showError(e, "Failed to add to favorites.");
+        },
+    }));
 
     // --- TanStack Queries ---
 
     const dayQuery = createQuery(() => ({
-        queryKey: ["log", currentDate],
+        queryKey: queryKeys.logDay(currentDate),
         queryFn: () => getLog({ date: currentDate }),
         enabled: view === "day",
     }));
 
     const yesterdayQuery = createQuery(() => ({
-        queryKey: ["log", addDays(currentDate, -1)],
+        queryKey: queryKeys.logDay(addDays(currentDate, -1)),
         queryFn: () => getLog({ date: addDays(currentDate, -1) }),
         enabled: view === "day",
     }));
 
     const historyQuery = createQuery(() => ({
-        queryKey: ["log", "history", historyWeeks],
+        queryKey: queryKeys.logHistory(historyWeeks),
         queryFn: () => getLog({ days: historyWeeks * 7 }),
         enabled: view === "history",
     }));
 
     const favoritesQuery = createQuery(() => ({
-        queryKey: ["favorites"],
+        queryKey: queryKeys.favorites,
         queryFn: getFavorites,
     }));
 
     // --- Derived state from queries (same variable names as before) ---
 
-    let dayData = $derived(dayQuery.data ?? null);
-    let historyData = $derived(historyQuery.data ?? null);
+    let dayData = $derived<LogResponse | null>(dayQuery.data ?? null);
+    let historyData = $derived<LogResponse | null>(historyQuery.data ?? null);
     let loading = $derived(
         (view === "day" && dayQuery.isPending) ||
         (view === "history" && historyQuery.isPending),
@@ -89,7 +134,7 @@
 
     // Derive load error from active query
     let loadError = $derived.by(() => {
-        const err = view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null;
+        const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
         if (!err) return "";
         if (err?.status === 401 || err?.code === "session_expired")
             return "Your session expired. Sign in again.";
@@ -99,8 +144,8 @@
             ? "Could not load this day. Try reloading, or sign in again."
             : "Could not load history. Try reloading, or sign in again.";
     });
-    let loadErrorAction = $derived.by(() => {
-        const err = view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null;
+    let loadErrorAction = $derived.by<{ href: string; label: string } | null>(() => {
+        const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
         if (!err) return null;
         if (err?.status === 401 || err?.code === "session_expired")
             return { href: "/auth/login", label: "Sign in" };
@@ -109,9 +154,9 @@
         return null;
     });
 
-    let yesterdayByMeal = $derived.by(() => {
+    let yesterdayByMeal = $derived.by<MealEntriesMap>(() => {
         const entries = yesterdayQuery.data?.entries ?? [];
-        const g = {};
+        const g: MealEntriesMap = {};
         for (const e of entries) {
             (g[e.meal_type] ??= []).push(e);
         }
@@ -119,6 +164,9 @@
     });
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
+    let drawerHistoryMeal = $derived<MealType | null>(
+        drawerEditMealType ?? drawerMeal,
+    );
 
     // Sync favorited descriptions from query
     $effect(() => {
@@ -141,16 +189,7 @@
         }
     });
 
-    function todayStr() {
-        const d = new Date();
-        return [
-            d.getFullYear(),
-            String(d.getMonth() + 1).padStart(2, "0"),
-            String(d.getDate()).padStart(2, "0"),
-        ].join("-");
-    }
-
-    function openDatePicker() {
+    function openDatePicker(): void {
         if (!dateInputEl) return;
         if (typeof dateInputEl.showPicker === "function") {
             try {
@@ -159,50 +198,15 @@
         }
     }
 
-    function addDays(dateStr, n) {
-        const d = new Date(dateStr + "T12:00:00");
-        d.setDate(d.getDate() + n);
-        return d.toISOString().slice(0, 10);
-    }
-
-    function formatDateNav(dateStr) {
-        const today = todayStr();
-        if (dateStr === today) return "Today";
-        if (dateStr === addDays(today, -1)) return "Yesterday";
-        const d = new Date(dateStr + "T12:00:00");
-        return d.toLocaleDateString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-        });
-    }
-
-    function getMonday(dateStr) {
-        const d = new Date(dateStr + "T12:00:00");
-        const day = d.getDay();
-        const diff = day === 0 ? -6 : 1 - day;
-        d.setDate(d.getDate() + diff);
-        return d.toISOString().slice(0, 10);
-    }
-
-    function formatWeekRange(start, end) {
-        const s = new Date(start + "T12:00:00");
-        const e = new Date(end + "T12:00:00");
-        const sm = s.toLocaleDateString("en-US", { month: "short" });
-        const em = e.toLocaleDateString("en-US", { month: "short" });
-        if (sm === em) return `${sm} ${s.getDate()}–${e.getDate()}`;
-        return `${sm} ${s.getDate()} – ${em} ${e.getDate()}`;
-    }
-
-    function groupedByMeal(entries) {
-        const g = {};
+    function groupedByMeal(entries: Entry[] | null | undefined): MealEntriesMap {
+        const g: MealEntriesMap = {};
         for (const e of entries ?? []) {
             (g[e.meal_type] ??= []).push(e);
         }
         return g;
     }
 
-    function totals(entries) {
+    function totals(entries: Entry[] | null | undefined) {
         return (entries ?? []).reduce(
             (a, e) => ({
                 calories: a.calories + e.calories,
@@ -215,10 +219,10 @@
         );
     }
 
-    function weekGroups(data, numWeeks = 8) {
+    function weekGroups(data: LogResponse | null, numWeeks = 8): WeekGroup[] {
         if (!data) return [];
         const { entries = [], daily_logs = [] } = data;
-        const byDate = {};
+        const byDate: Record<string, { entries: Entry[]; dayLog: LogResponse["daily_logs"][number] | null }> = {};
         for (const e of entries) {
             (byDate[e.date] ??= { entries: [], dayLog: null }).entries.push(e);
         }
@@ -229,7 +233,7 @@
         const today = todayStr();
         let monday = getMonday(addDays(today, -(numWeeks * 7 - 1)));
         const todayMonday = getMonday(today);
-        const weeks = [];
+        const weeks: WeekGroup[] = [];
         while (monday <= todayMonday) {
             const days = Array.from({ length: 7 }, (_, i) => {
                 const date = addDays(monday, i);
@@ -258,16 +262,15 @@
         return weeks.reverse();
     }
 
-    function handleUpdate(updated) {
-        queryClient.setQueryData(["log", currentDate], (old) => ({
-            ...old,
-            entries: (old?.entries ?? []).map((e) =>
-                e.id === updated.id ? updated : e,
-            ),
-        }));
+    function handleUpdate(updated: Entry) {
+        queryClient.setQueryData(
+            queryKeys.logDay(currentDate),
+            (old: LogResponse | undefined) =>
+                updateEntryInLogCache(old, updated),
+        );
     }
 
-    function openEditDrawer(meal, group) {
+    function openEditDrawer(meal: MealType, group: Entry[]) {
         drawerEditEntries = group;
         drawerEditMealType = meal;
         drawerDate = currentDate;
@@ -277,65 +280,47 @@
         drawerOpen = true;
     }
 
-    function onEntriesEdited(updatedEntries) {
-        queryClient.setQueryData(["log", currentDate], (old) => {
-            const editedIds = new Set(updatedEntries.map((e) => e.id));
-            const oldMealType = drawerEditMealType;
-            // Remove old entries for this meal that aren't in the updated set
-            const kept = (old?.entries ?? []).filter(
-                (e) => e.meal_type !== oldMealType || editedIds.has(e.id),
-            );
-            // Update existing and add new
-            const existingIds = new Set(kept.map((e) => e.id));
-            const updated = kept.map((e) =>
-                editedIds.has(e.id)
-                    ? updatedEntries.find((u) => u.id === e.id)
-                    : e,
-            );
-            const newEntries = updatedEntries.filter(
-                (e) => !existingIds.has(e.id),
-            );
-            return { ...old, entries: [...updated, ...newEntries] };
-        });
-        queryClient.invalidateQueries({ queryKey: ["log"] });
+    function onEntriesEdited(updatedEntries: Entry[]) {
+        queryClient.setQueryData(
+            queryKeys.logDay(currentDate),
+            (old: LogResponse | undefined) =>
+                replaceMealEntriesInLogCache(
+                    old,
+                    drawerEditMealType,
+                    updatedEntries,
+                ),
+        );
+        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
     }
 
-    function handleDelete(id) {
-        queryClient.setQueryData(["log", currentDate], (old) => ({
-            ...old,
-            entries: (old?.entries ?? []).filter((e) => e.id !== id),
-        }));
-        queryClient.invalidateQueries({ queryKey: ["log"] });
+    function handleDelete(id: string) {
+        queryClient.setQueryData(
+            queryKeys.logDay(currentDate),
+            (old: LogResponse | undefined) => removeEntryFromLogCache(old, id),
+        );
+        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
     }
 
-    function normalizeFavoriteKey(desc) {
+    function normalizeFavoriteKey(desc: string | null | undefined): string {
         return (desc ?? "").toLowerCase().trim().replace(/\s+/g, " ");
     }
 
-    async function handleFavoriteEntry(entry) {
+    async function handleFavoriteEntry(entry: Entry): Promise<void> {
         const key = normalizeFavoriteKey(entry.description);
         if (favoritedDescs.has(key)) return;
         try {
-            await addFavorite(entry);
-            favoritedDescs = new Set([...favoritedDescs, key]);
-            queryClient.invalidateQueries({ queryKey: ["favorites"] });
-        } catch (e) {
-            if (e?.status === 409 || e?.code === "favorite_exists") {
-                favoritedDescs = new Set([...favoritedDescs, key]);
-                return;
-            }
-            console.error("addFavorite failed:", e);
-            showError(e, "Failed to add to favorites.");
+            await addFavoriteMutation.mutateAsync(entry);
+        } catch {
         }
     }
 
-    function syncFavoritedDescs(favorites) {
+    function syncFavoritedDescs(favorites: Favorite[]) {
         favoritedDescs = new Set(
             favorites.map((f) => normalizeFavoriteKey(f.description)),
         );
     }
 
-    function openActivityDrawer(field = null) {
+    function openActivityDrawer(field: ActivityField | null = null) {
         drawerField = field;
         drawerTab = "activity";
         drawerDate = currentDate;
@@ -358,14 +343,16 @@
         view = "day";
     }
 
-    function onEntriesAdded(newEntries) {
-        queryClient.setQueryData(["log", currentDate], (old) => ({
-            ...old,
-            entries: [...(old?.entries ?? []), ...newEntries],
-        }));
-        queryClient.invalidateQueries({ queryKey: ["log"] });
-        if (newEntries.length > 0) {
-            const addedMeal = newEntries[0].meal_type;
+    function onEntriesAdded(newEntries: Entry[]) {
+        queryClient.setQueryData(
+            queryKeys.logDay(currentDate),
+            (old: LogResponse | undefined) =>
+                appendEntriesToLogCache(old, newEntries),
+        );
+        queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
+        const addedEntry = newEntries[0];
+        if (addedEntry) {
+            const addedMeal = addedEntry.meal_type;
             collapsedMeals = new Set(
                 [...collapsedMeals].filter((m) => m !== addedMeal),
             );
@@ -376,7 +363,7 @@
 
     // --- Meal suggestions (for empty meals) ---
 
-    async function toggleMealSuggestion(meal, date) {
+    async function toggleMealSuggestion(meal: MealType, date: string) {
         const key = `${date}|${meal}`;
         const cur = mealSuggestions[key];
         if (cur?.open && cur?.text) {
@@ -396,14 +383,14 @@
             if (stored.suggestion) {
                 mealSuggestions = {
                     ...mealSuggestions,
-                    [key]: { loading: false, text: stored.suggestion, error: null, open: true, generatedAt: stored.generated_at },
+                    [key]: { loading: false, text: stored.suggestion, error: null, open: true, generatedAt: stored.generated_at ?? null },
                 };
                 return;
             }
             const res = await generateMealSuggestion(date, meal);
             mealSuggestions = {
                 ...mealSuggestions,
-                [key]: { loading: false, text: res.suggestion, error: null, open: true, generatedAt: res.generated_at },
+                [key]: { loading: false, text: res.suggestion ?? null, error: null, open: true, generatedAt: res.generated_at ?? null },
             };
         } catch {
             mealSuggestions = {
@@ -413,7 +400,7 @@
         }
     }
 
-    async function regenMealSuggestion(meal, date) {
+    async function regenMealSuggestion(meal: MealType, date: string) {
         const key = `${date}|${meal}`;
         mealSuggestions = {
             ...mealSuggestions,
@@ -423,7 +410,7 @@
             const res = await generateMealSuggestion(date, meal);
             mealSuggestions = {
                 ...mealSuggestions,
-                [key]: { loading: false, text: res.suggestion, error: null, open: true, generatedAt: res.generated_at },
+                [key]: { loading: false, text: res.suggestion ?? null, error: null, open: true, generatedAt: res.generated_at ?? null },
             };
         } catch {
             mealSuggestions = {
@@ -435,20 +422,20 @@
 
     // --- Day insights ---
 
-    async function fetchDayInsights(date, regenerate = false) {
+    async function fetchDayInsights(date: string, regenerate = false) {
         dayInsight = { loading: true, text: null, error: null, open: true, generatedAt: null };
         try {
             if (!regenerate) {
                 const stored = await fetchStoredDayInsight(date);
                 if (stored.insight) {
-                    dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at };
+                    dayInsight = { loading: false, text: stored.insight, error: null, open: true, generatedAt: stored.generated_at ?? null };
                     return;
                 }
             }
             const res = await generateDayInsights(date);
-            dayInsight = { loading: false, text: res.insight, error: null, open: true, generatedAt: res.generated_at };
-        } catch (e) {
-            dayInsight = { loading: false, text: null, error: e.message || "Could not load insights", open: true, generatedAt: null };
+            dayInsight = { loading: false, text: res.insight ?? null, error: null, open: true, generatedAt: res.generated_at ?? null };
+        } catch (e: unknown) {
+            dayInsight = { loading: false, text: null, error: e instanceof Error ? e.message : "Could not load insights", open: true, generatedAt: null };
         }
     }
 
@@ -462,7 +449,7 @@
 
     // --- Weekly insights & suggestions ---
 
-    async function fetchInsights(weekStart, weekEnd, regenerate = false) {
+    async function fetchInsights(weekStart: string, weekEnd: string, regenerate = false) {
         insightsByWeek = {
             ...insightsByWeek,
             [weekStart]: {
@@ -485,7 +472,7 @@
                             loading: false,
                             text: stored.insight,
                             error: null,
-                            generatedAt: stored.generated_at,
+                            generatedAt: stored.generated_at ?? null,
                             loaded: true,
                         },
                     };
@@ -498,9 +485,9 @@
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.insight,
+                    text: res.insight ?? null,
                     error: null,
-                    generatedAt: res.generated_at,
+                    generatedAt: res.generated_at ?? null,
                     loaded: true,
                 },
             };
@@ -519,40 +506,16 @@
         }
     }
 
-    function escapeHtml(str) {
-        return str
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
+    function canCloseDayInsight(insight: InsightPanelState | null): boolean {
+        return Boolean(insight && !insight.loading && (insight.error || insight.text != null));
     }
 
-    function renderInsight(text) {
-        return text
-            .split("\n")
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0)
-            .map((line) =>
-                escapeHtml(line).replace(
-                    /\*\*(.+?)\*\*/g,
-                    "<strong>$1</strong>",
-                ),
-            )
-            .join("\n");
+    function closeDayInsight(): void {
+        if (!dayInsight) return;
+        dayInsight = { ...dayInsight, open: false };
     }
 
-    function formatGeneratedAt(isoStr) {
-        if (!isoStr) return "";
-        const d = new Date(isoStr);
-        return d.toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-        });
-    }
-
-    function toggleInsights(weekStart, weekEnd) {
+    function toggleInsights(weekStart: string, weekEnd: string) {
         const cur = insightsByWeek[weekStart];
         if (!cur || !cur.loaded) {
             fetchInsights(weekStart, weekEnd, false);
@@ -565,10 +528,10 @@
     }
 
     async function fetchWeekSuggestions(
-        weekStart,
-        weekEnd,
+        weekStart: string,
+        weekEnd: string,
         regenerate = false,
-    ) {
+    ): Promise<void> {
         suggestionsByWeek = {
             ...suggestionsByWeek,
             [weekStart]: {
@@ -594,7 +557,7 @@
                             loading: false,
                             text: stored.suggestions,
                             error: null,
-                            generatedAt: stored.generated_at,
+                            generatedAt: stored.generated_at ?? null,
                             loaded: true,
                         },
                     };
@@ -607,9 +570,9 @@
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.suggestions,
+                    text: res.suggestions ?? null,
                     error: null,
-                    generatedAt: res.generated_at,
+                    generatedAt: res.generated_at ?? null,
                     loaded: true,
                 },
             };
@@ -628,7 +591,7 @@
         }
     }
 
-    function toggleWeekSuggestions(weekStart, weekEnd) {
+    function toggleWeekSuggestions(weekStart: string, weekEnd: string) {
         const cur = suggestionsByWeek[weekStart];
         if (!cur || !cur.loaded) {
             fetchWeekSuggestions(weekStart, weekEnd, false);
@@ -702,7 +665,7 @@
                 <a
                     class="home-btn"
                     href="/"
-                    onclick={(e) => { e.preventDefault(); navigate("/"); }}
+                    onclick={(e: MouseEvent) => { e.preventDefault(); navigate("/"); }}
                     aria-label="Home"
                     title="Home"
                 >
@@ -759,8 +722,9 @@
                         type="date"
                         class="date-input-hidden"
                         value={currentDate}
-                        onchange={(e) => {
-                            if (e.target.value) currentDate = e.target.value;
+                        onchange={(e: Event) => {
+                            const target = e.currentTarget as HTMLInputElement;
+                            if (target.value) currentDate = target.value;
                         }}
                         bind:this={dateInputEl}
                     />
@@ -806,35 +770,21 @@
         </div>
     {:else if view === "day"}
         {#if dayInsight?.open}
-            <div class="insights-panel day-insights-panel">
-                {#if !dayInsight.loading}
-                    <button
-                        class="insight-close"
-                        onclick={() => (dayInsight = { ...dayInsight, open: false })}
-                        aria-label="Close insights">✕</button
-                    >
-                {/if}
-                {#if dayInsight.loading}
-                    <div class="insight-skeleton">
-                        <div class="isk-line" style="width: 88%"></div>
-                        <div class="isk-line" style="width: 72%"></div>
-                        <div class="isk-line" style="width: 80%"></div>
-                    </div>
-                {:else if dayInsight.error}
-                    <span class="insights-err">{dayInsight.error}</span>
-                {:else if dayInsight.text != null}
-                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    <p class="insights-text" class:collapsed-text={!dayInsightExpanded}>{@html renderInsight(dayInsight.text)}</p>
-                    {#if dayInsight.generatedAt}
-                        <button class="insight-more" onclick={() => (dayInsightExpanded = !dayInsightExpanded)}>{dayInsightExpanded ? "less" : "more"}</button>
-                    {/if}
-                    {#if dayInsight.generatedAt && dayInsightExpanded}
-                        <div class="insight-footer">
-                            <span class="insight-ts">{formatGeneratedAt(dayInsight.generatedAt)}</span>
-                            <button class="insight-regen" onclick={() => fetchDayInsights(currentDate, true)}>regenerate</button>
-                        </div>
-                    {/if}
-                {/if}
+            <div class="day-insights-panel">
+                <InsightPanel
+                    loading={dayInsight.loading}
+                    error={dayInsight.error}
+                    text={dayInsight.text}
+                    generatedAt={dayInsight.generatedAt}
+                    closeable={canCloseDayInsight(dayInsight)}
+                    collapsed={!dayInsightExpanded}
+                    showMoreToggle={Boolean(dayInsight.generatedAt)}
+                    expanded={dayInsightExpanded}
+                    onClose={closeDayInsight}
+                    onToggleExpanded={() =>
+                        (dayInsightExpanded = !dayInsightExpanded)}
+                    onRegenerate={() => fetchDayInsights(currentDate, true)}
+                />
             </div>
         {/if}
         {#each MEAL_ORDER as meal}
@@ -882,26 +832,14 @@
                     {/if}
                 </div>
                 {#if ms?.open}
-                    <div class="insights-panel suggestions-panel">
-                        {#if ms.loading}
-                            <div class="insight-skeleton">
-                                <div class="isk-line" style="width: 88%"></div>
-                                <div class="isk-line" style="width: 72%"></div>
-                                <div class="isk-line" style="width: 80%"></div>
-                            </div>
-                        {:else if ms.error}
-                            <span class="insights-err">{ms.error}</span>
-                        {:else if ms.text != null}
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                            <p class="insights-text">{@html renderInsight(ms.text)}</p>
-                            {#if ms.generatedAt}
-                                <div class="insight-footer">
-                                    <span class="insight-ts">{formatGeneratedAt(ms.generatedAt)}</span>
-                                    <button class="insight-regen" onclick={() => regenMealSuggestion(meal, currentDate)}>regenerate</button>
-                                </div>
-                            {/if}
-                        {/if}
-                    </div>
+                    <InsightPanel
+                        loading={ms.loading}
+                        error={ms.error}
+                        text={ms.text}
+                        generatedAt={ms.generatedAt}
+                        variant="suggestion"
+                        onRegenerate={() => regenMealSuggestion(meal, currentDate)}
+                    />
                 {/if}
                 {#if !collapsed}
                     {#each group as entry (entry.id)}
@@ -939,164 +877,24 @@
         <ProfilePanel onClose={closeProfile} />
     {:else}
         {#each weekGroupsData as week}
-            <div class="week-block">
-                <div class="week-head">
-                    <div class="week-meta">
-                        <span class="week-range"
-                            >{formatWeekRange(
-                                week.weekStart,
-                                week.weekEnd,
-                            )}</span
-                        >
-                        {#if week.weekTotal > 0}
-                            <span class="week-cal"
-                                >{week.weekTotal.toLocaleString()} cal</span
-                            >
-                        {/if}
-                    </div>
-                    {#if week.weekTotal > 0 || week.days.some((d) => d.dayLog)}
-                        <div class="week-btns">
-                            <button
-                                class="insights-btn"
-                                class:active={insightsByWeek[week.weekStart]
-                                    ?.open}
-                                onclick={() =>
-                                    toggleInsights(
-                                        week.weekStart,
-                                        week.weekEnd,
-                                    )}
-                                aria-label="AI insights for this week"
-                                title="AI insights">insights</button
-                            >
-                            <button
-                                class="insights-btn suggestions-btn"
-                                class:active={suggestionsByWeek[week.weekStart]
-                                    ?.open}
-                                onclick={() =>
-                                    toggleWeekSuggestions(
-                                        week.weekStart,
-                                        week.weekEnd,
-                                    )}
-                                aria-label="Meal suggestions for this week"
-                                title="Meal suggestions">suggestions</button
-                            >
-                        </div>
-                    {/if}
-                </div>
-                <div class="week-grid">
-                    {#each week.days as day}
-                        <button
-                            class="day-cell"
-                            class:future={day.future}
-                            class:has-food={day.entries.length > 0}
-                            onclick={() => {
-                                if (!day.future) {
-                                    currentDate = day.date;
-                                    view = "day";
-                                }
-                            }}
-                            disabled={day.future}
-                            aria-label={day.date}
-                        >
-                            <span class="dc-abbrev"
-                                >{DAY_ABBREV[
-                                    new Date(day.date + "T12:00:00").getDay()
-                                ]}</span
-                            >
-                            <span class="dc-num"
-                                >{new Date(
-                                    day.date + "T12:00:00",
-                                ).getDate()}</span
-                            >
-                            <span class="dc-indicators">
-                                {#if day.entries.length > 0}<span
-                                        class="dc-food">●</span
-                                    >{:else}<span class="dc-empty">○</span>{/if}
-                                {#if day.dayLog?.poop}<span class="dc-poop"
-                                        >💩</span
-                                    >{/if}
-                            </span>
-                        </button>
-                    {/each}
-                </div>
-                {#if insightsByWeek[week.weekStart]?.open}
-                    {@const wi = insightsByWeek[week.weekStart]}
-                    <div class="insights-panel">
-                        {#if wi.loading}
-                            <div class="insight-skeleton">
-                                <div class="isk-line" style="width: 88%"></div>
-                                <div class="isk-line" style="width: 72%"></div>
-                                <div class="isk-line" style="width: 80%"></div>
-                            </div>
-                        {:else if wi.error}
-                            <span class="insights-err">{wi.error}</span>
-                        {:else if wi.text != null}
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                            <p class="insights-text">
-                                {@html renderInsight(wi.text)}
-                            </p>
-                            {#if wi.generatedAt}
-                                <div class="insight-footer">
-                                    <span class="insight-ts"
-                                        >{formatGeneratedAt(
-                                            wi.generatedAt,
-                                        )}</span
-                                    >
-                                    <button
-                                        class="insight-regen"
-                                        onclick={() =>
-                                            fetchInsights(
-                                                week.weekStart,
-                                                week.weekEnd,
-                                                true,
-                                            )}>regenerate</button
-                                    >
-                                </div>
-                            {/if}
-                        {/if}
-                    </div>
-                {/if}
-                {#if suggestionsByWeek[week.weekStart]?.open}
-                    {@const ws = suggestionsByWeek[week.weekStart]}
-                    <div class="insights-panel suggestions-panel">
-                        {#if ws.loading}
-                            <div class="insight-skeleton">
-                                <div class="isk-line" style="width: 88%"></div>
-                                <div class="isk-line" style="width: 72%"></div>
-                                <div class="isk-line" style="width: 80%"></div>
-                            </div>
-                        {:else if ws.error}
-                            <span class="insights-err">{ws.error}</span>
-                        {:else if ws.text != null}
-                            <span class="suggestions-label"
-                                >Meal ideas for next week</span
-                            >
-                            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                            <p class="insights-text">
-                                {@html renderInsight(ws.text)}
-                            </p>
-                            {#if ws.generatedAt}
-                                <div class="insight-footer">
-                                    <span class="insight-ts"
-                                        >{formatGeneratedAt(
-                                            ws.generatedAt,
-                                        )}</span
-                                    >
-                                    <button
-                                        class="insight-regen"
-                                        onclick={() =>
-                                            fetchWeekSuggestions(
-                                                week.weekStart,
-                                                week.weekEnd,
-                                                true,
-                                            )}>regenerate</button
-                                    >
-                                </div>
-                            {/if}
-                        {/if}
-                    </div>
-                {/if}
-            </div>
+            <HistoryWeekBlock
+                {week}
+                dayAbbrev={DAY_ABBREV}
+                insightState={insightsByWeek[week.weekStart] ?? null}
+                suggestionState={suggestionsByWeek[week.weekStart] ?? null}
+                onOpenDay={(date) => {
+                    currentDate = date;
+                    view = "day";
+                }}
+                onToggleInsights={() =>
+                    toggleInsights(week.weekStart, week.weekEnd)}
+                onToggleSuggestions={() =>
+                    toggleWeekSuggestions(week.weekStart, week.weekEnd)}
+                onRegenerateInsights={() =>
+                    fetchInsights(week.weekStart, week.weekEnd, true)}
+                onRegenerateSuggestions={() =>
+                    fetchWeekSuggestions(week.weekStart, week.weekEnd, true)}
+            />
         {/each}
     {/if}
 </div>
@@ -1139,7 +937,7 @@
     initialField={drawerField}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
-    yesterdayEntries={(drawerEditMealType || drawerMeal) ? (yesterdayByMeal[drawerEditMealType || drawerMeal] ?? []) : []}
+    yesterdayEntries={drawerHistoryMeal ? (yesterdayByMeal[drawerHistoryMeal] ?? []) : []}
     mealIsEmpty={drawerMeal ? (groupedByMeal(dayData?.entries)[drawerMeal] ?? []).length === 0 : true}
 />
 
@@ -1308,7 +1106,6 @@
         align-items: center;
     }
 
-    .nav-arrow.dimmed,
     .nav-arrow:disabled {
         color: var(--mute-4);
         cursor: default;
@@ -1377,11 +1174,6 @@
         width: 0.7rem;
         color: var(--mute-3);
         font-size: 0.7rem;
-    }
-
-    .week-btns {
-        display: flex;
-        gap: 0.35rem;
     }
 
     section {
@@ -1501,40 +1293,6 @@
         font-size: var(--t-body-sm);
     }
 
-    /* Weekly history — hairline ledger, not a box */
-    .week-block {
-        border-top: 1px solid var(--rule);
-        margin-bottom: 1.25rem;
-    }
-
-    .week-block:last-of-type {
-        border-bottom: 1px solid var(--rule);
-    }
-
-    .week-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.65rem 0;
-    }
-
-    .week-meta {
-        display: flex;
-        flex-direction: column;
-        gap: 0.05rem;
-    }
-
-    .week-range {
-        font-size: var(--t-body-sm);
-        font-weight: 600;
-        color: var(--ink);
-    }
-
-    .week-cal {
-        font-size: 0.72rem;
-        color: var(--mute-2);
-    }
-
     .insights-btn {
         background: none;
         border: 1px solid var(--rule-3);
@@ -1566,252 +1324,8 @@
         }
     }
 
-    .week-grid {
-        display: grid;
-        grid-template-columns: repeat(7, 1fr);
-        padding: 0.4rem 0 0.5rem;
-        gap: 0;
-    }
-
-    .day-cell {
-        background: none;
-        border: none;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.1rem;
-        padding: 0.4rem 0.1rem;
-        cursor: pointer;
-        border-radius: var(--r-sm);
-        touch-action: manipulation;
-        font-family: inherit;
-    }
-
-    @media (hover: hover) {
-        .day-cell:not(.future):hover {
-            background: var(--paper-4);
-        }
-    }
-
-    .day-cell.future {
-        opacity: 0.2;
-        cursor: default;
-    }
-
-    .dc-abbrev {
-        font-size: 0.62rem;
-        color: var(--mute-2);
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        font-weight: 500;
-        line-height: 1;
-    }
-
-    .dc-num {
-        font-size: var(--t-meta);
-        font-weight: 500;
-        color: var(--ink);
-        line-height: 1.2;
-    }
-
-    .day-cell.has-food .dc-num {
-        color: var(--ink);
-    }
-
-    .dc-indicators {
-        display: flex;
-        gap: 0.1rem;
-        align-items: center;
-        min-height: 0.9rem;
-    }
-
-    .dc-food {
-        font-size: 0.4rem;
-        color: var(--ink-2);
-        line-height: 1;
-    }
-
-    .dc-empty {
-        font-size: 0.4rem;
-        color: var(--mute-4);
-        line-height: 1;
-    }
-
-    .dc-poop {
-        font-size: 0.5rem;
-        line-height: 1;
-    }
-
-    .insights-panel {
-        position: relative;
-        padding: 0.9rem 2.2rem 0.95rem 0.95rem;
-        background: var(--paper-2);
-        border-radius: var(--r-sm);
-        margin-top: 0.5rem;
-    }
-
     .day-insights-panel {
         margin-bottom: 1.25rem;
-    }
-
-    .insight-close {
-        position: absolute;
-        top: 0.55rem;
-        right: 0.55rem;
-        width: 1.5rem;
-        height: 1.5rem;
-        background: none;
-        border: none;
-        border-radius: 50%;
-        font-size: 0.75rem;
-        color: var(--mute-3);
-        cursor: pointer;
-        padding: 0;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    @media (hover: hover) {
-        .insight-close:hover {
-            color: var(--ink-mute);
-            background: var(--paper-4);
-        }
-    }
-
-    .insight-skeleton {
-        display: flex;
-        flex-direction: column;
-        gap: 0.6rem;
-    }
-
-    .isk-line {
-        height: 0.78rem;
-        border-radius: 4px;
-        background: linear-gradient(
-            90deg,
-            var(--rule) 25%,
-            var(--paper-3) 50%,
-            var(--rule) 75%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 1.4s ease-in-out infinite;
-    }
-
-    @keyframes shimmer {
-        0% {
-            background-position: 200% 0;
-        }
-        100% {
-            background-position: -200% 0;
-        }
-    }
-
-    .insights-err {
-        font-size: var(--t-meta);
-        color: var(--danger);
-    }
-
-    .insights-text {
-        font-size: var(--t-meta);
-        color: var(--ink);
-        line-height: 1.65;
-        white-space: pre-line;
-        overflow-wrap: break-word;
-        word-break: break-word;
-        margin: 0;
-    }
-
-    .insights-text.collapsed-text {
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-
-    .insight-more {
-        background: none;
-        border: none;
-        font-family: inherit;
-        font-size: 0.72rem;
-        color: var(--mute-2);
-        cursor: pointer;
-        padding: 0.25rem 0 0;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .insight-more:hover {
-            color: var(--ink-mute);
-        }
-    }
-
-    .insights-text :global(strong) {
-        font-weight: 600;
-        color: var(--ink);
-    }
-
-    .insight-footer {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        margin-top: 0.7rem;
-    }
-
-    .insight-ts {
-        font-size: 0.72rem;
-        color: var(--mute-3);
-    }
-
-    .insight-regen {
-        background: none;
-        border: none;
-        font-family: inherit;
-        font-size: 0.72rem;
-        color: var(--mute-2);
-        cursor: pointer;
-        padding: 0;
-        touch-action: manipulation;
-        margin-left: auto;
-    }
-
-    @media (hover: hover) {
-        .insight-regen:hover {
-            color: var(--ink-mute);
-        }
-    }
-
-    .suggestions-panel {
-        background: var(--sugg-paper);
-    }
-
-    .suggestions-label {
-        display: block;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--sugg-mute);
-        margin-bottom: 0.4rem;
-    }
-
-    .suggestions-btn {
-        border-color: var(--sugg-rule);
-        color: var(--sugg-mute);
-    }
-
-    .suggestions-btn.active {
-        border-color: var(--sugg-mute);
-        color: var(--sugg-ink);
-        background: var(--sugg-paper);
-    }
-
-    @media (hover: hover) {
-        .suggestions-btn:hover {
-            border-color: var(--sugg-mute);
-            color: var(--sugg-ink);
-        }
     }
 
     /* FAB + shared actions */

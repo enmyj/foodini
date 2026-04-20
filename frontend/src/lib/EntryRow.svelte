@@ -1,15 +1,30 @@
-<script>
+<script lang="ts">
+    import { createMutation } from "@tanstack/svelte-query";
     import { patchEntry, deleteEntry } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import { showError } from "./toast.ts";
+    import { MEAL_ORDER } from "./types.ts";
+    import type { Entry, Favorite, MealType } from "./types.ts";
 
-    let { entry, onUpdate, onDelete, onFavorite = null, isFavorited = false } = $props();
+    let {
+        entry,
+        onUpdate,
+        onDelete,
+        onFavorite = null,
+        isFavorited = false,
+    }: {
+        entry: Entry;
+        onUpdate: (entry: Entry) => void;
+        onDelete: (id: string) => void;
+        onFavorite?: ((entry: Entry) => Promise<Favorite | void>) | null;
+        isFavorited?: boolean;
+    } = $props();
 
-    const MEALS = ["breakfast", "lunch", "snack", "dinner", "supplements"];
+    const MEALS = [...MEAL_ORDER];
 
     let modalOpen = $state(false);
     let editDesc = $state("");
-    let editMeal = $state("");
+    let editMeal = $state<MealType>("breakfast");
     let editCal = $state(0);
     let editProtein = $state(0);
     let editCarbs = $state(0);
@@ -19,7 +34,17 @@
     let deleting = $state(false);
     let favoriting = $state(false);
     let pendingDelete = $state(false);
-    let deleteTimer = null;
+    let deleteTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+
+    const saveMutation = createMutation(() => ({
+        mutationFn: (updated: Entry) => patchEntry(updated.id, updated),
+        onError: (err) => showError(err, "Failed to save entry."),
+    }));
+
+    const deleteMutation = createMutation(() => ({
+        mutationFn: (id: string) => deleteEntry(id),
+        onError: (err) => showError(err, "Failed to delete entry."),
+    }));
 
     function openModal() {
         editDesc = entry.description;
@@ -33,7 +58,7 @@
     }
 
     async function save() {
-        if (saving) return;
+        if (saving || saveMutation.isPending) return;
         saving = true;
         try {
             const updated = {
@@ -46,11 +71,10 @@
                 fat: editFat,
                 fiber: editFiber,
             };
-            const saved = await patchEntry(entry.id, updated);
+            const saved = await saveMutation.mutateAsync(updated);
             onUpdate(saved);
             modalOpen = false;
-        } catch (e) {
-            showError(e, "Failed to save entry.");
+        } catch {
         } finally {
             saving = false;
         }
@@ -65,7 +89,7 @@
             }, 2500);
             return;
         }
-        clearTimeout(deleteTimer);
+        if (deleteTimer) clearTimeout(deleteTimer);
         pendingDelete = false;
         doDelete();
     }
@@ -73,15 +97,14 @@
     async function doDelete() {
         deleting = true;
         try {
-            await deleteEntry(entry.id);
+            await deleteMutation.mutateAsync(entry.id);
             onDelete(entry.id);
-        } catch (e) {
-            showError(e, "Failed to delete entry.");
+        } catch {
             deleting = false;
         }
     }
 
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Escape") modalOpen = false;
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) save();
     }

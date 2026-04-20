@@ -1,10 +1,12 @@
 import { writable } from 'svelte/store'
 import type { ApiError } from './api.ts'
 
-interface Toast {
+export type ToastTone = 'error' | 'info'
+
+export interface Toast {
   id: number
   message: string
-  tone: string
+  tone: ToastTone
 }
 
 export const toasts = writable<Toast[]>([])
@@ -25,7 +27,7 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong.'
   return fallback
 }
 
-export function showToast(message: string, { tone = 'error', duration = 5000 } = {}) {
+export function showToast(message: string, { tone = 'error', duration = 5000 }: { tone?: ToastTone; duration?: number } = {}) {
   const id = nextToastID++
   toasts.update(items => [...items, { id, message, tone }])
   if (duration > 0) {

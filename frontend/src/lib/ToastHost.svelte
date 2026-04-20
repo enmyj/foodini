@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { dismissToast, toasts } from './toast.ts'
 </script>
 

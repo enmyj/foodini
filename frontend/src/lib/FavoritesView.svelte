@@ -1,28 +1,64 @@
-<script>
+<script lang="ts">
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
     import { getFavorites, deleteFavorite, confirmChat } from "./api.ts";
+    import { appendEntriesToLogCache, removeFavoriteFromCache } from "./cache.ts";
+    import { todayStr } from "./date.ts";
+    import { queryKeys } from "./queryKeys.ts";
     import { showError } from "./toast.ts";
+    import { MEAL_ORDER } from "./types.ts";
+    import type { EntryInput, Favorite, LogResponse, MealType } from "./types.ts";
 
-    const MEALS = ["breakfast", "lunch", "snack", "dinner", "supplements"];
+    const MEALS = [...MEAL_ORDER];
 
-    let { onLoad = null } = $props();
+    let { onLoad = null }: {
+        onLoad?: ((favorites: Favorite[]) => void) | null;
+    } = $props();
 
     const queryClient = useQueryClient();
 
     const favoritesQuery = createQuery(() => ({
-        queryKey: ["favorites"],
+        queryKey: queryKeys.favorites,
         queryFn: getFavorites,
     }));
 
     const deleteMutation = createMutation(() => ({
-        mutationFn: (id) => deleteFavorite(id),
+        mutationFn: (id: string) => deleteFavorite(id),
         onSuccess: (_data, id) => {
-            queryClient.setQueryData(["favorites"], (old) => ({
-                ...old,
-                favorites: (old?.favorites ?? []).filter((f) => f.id !== id),
-            }));
+            queryClient.setQueryData(
+                queryKeys.favorites,
+                (old: { favorites?: Favorite[] } | undefined) =>
+                    old
+                        ? removeFavoriteFromCache(
+                              { favorites: old.favorites ?? [] },
+                              id,
+                          )
+                        : old,
+            );
         },
         onError: (err) => showError(err, "Failed to delete favorite."),
+    }));
+
+    const addToLogMutation = createMutation(() => ({
+        mutationFn: ({
+            entries,
+            date,
+        }: {
+            entries: EntryInput[];
+            date: string;
+        }) => confirmChat(entries, date),
+        onSuccess: (data, variables) => {
+            queryClient.setQueryData(
+                queryKeys.logDay(variables.date),
+                (old: LogResponse | undefined) =>
+                    old ? appendEntriesToLogCache(old, data.entries) : old,
+            );
+            queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
+            addModal = null;
+        },
+        onError: (err) => {
+            console.error("confirmChat (from favorites) failed:", err);
+            showError(err, "Failed to add to log.");
+        },
     }));
 
     let favorites = $derived(favoritesQuery.data?.favorites ?? []);
@@ -38,9 +74,9 @@
     let search = $state("");
 
     // Modal state for adding a favorite to a day
-    let addModal = $state(null); // { fav }
+    let addModal = $state<{ fav: Favorite } | null>(null);
     let addDate = $state(todayStr());
-    let addMeal = $state("breakfast");
+    let addMeal = $state<MealType>("breakfast");
     let adding = $state(false);
 
     let filtered = $derived(
@@ -53,20 +89,11 @@
             : favorites,
     );
 
-    function todayStr() {
-        const d = new Date();
-        return [
-            d.getFullYear(),
-            String(d.getMonth() + 1).padStart(2, "0"),
-            String(d.getDate()).padStart(2, "0"),
-        ].join("-");
-    }
-
-    function handleDelete(fav) {
+    function handleDelete(fav: Favorite) {
         deleteMutation.mutate(fav.id);
     }
 
-    function openAddModal(fav) {
+    function openAddModal(fav: Favorite) {
         addModal = { fav };
         addDate = todayStr();
         addMeal = fav.meal_type || "breakfast";
@@ -76,22 +103,18 @@
         if (adding || !addModal) return;
         adding = true;
         try {
-            const entry = {
+            const entry: EntryInput = {
                 ...addModal.fav,
                 meal_type: addMeal,
             };
-            await confirmChat([entry], addDate);
-            queryClient.invalidateQueries({ queryKey: ["log"] });
-            addModal = null;
-        } catch (e) {
-            console.error("confirmChat (from favorites) failed:", e);
-            showError(e, "Failed to add to log.");
+            await addToLogMutation.mutateAsync({ entries: [entry], date: addDate });
+        } catch {
         } finally {
             adding = false;
         }
     }
 
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Escape") addModal = null;
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) confirmAdd();
     }

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
     import { onMount } from "svelte";
     import { QueryClientProvider } from "@tanstack/svelte-query";
     import { queryClient } from "./lib/queryClient.ts";
@@ -9,26 +9,27 @@
     import MarkdownPage from "./lib/MarkdownPage.svelte";
     import ThemeToggle from "./lib/ThemeToggle.svelte";
     import ToastHost from "./lib/ToastHost.svelte";
+    import type { RoutePath } from "./lib/types.ts";
 
     import aboutMd from "../content/about.md?raw";
     import legalMd from "../content/legal.md?raw";
 
-    const aboutHtml = marked.parse(aboutMd);
-    const legalHtml = marked.parse(legalMd);
+    const aboutHtml = marked.parse(aboutMd) as string;
+    const legalHtml = marked.parse(legalMd) as string;
 
-    let authed = $state(null); // null=loading, false=logged out, true=logged in
+    let authed = $state<boolean | null>(null); // null=loading, false=logged out, true=logged in
     let schemaError = $state(false);
     let scopeError = $state(false);
     let sessionExpired = $state(false);
     let loadError = $state("");
 
-    let path = $derived(getCurrent());
+    let path = $derived<RoutePath>(getCurrent());
 
-    async function readError(res) {
+    async function readError(res: Response): Promise<string> {
         const contentType = res.headers.get("content-type") || "";
         if (contentType.includes("application/json")) {
-            const body = await res.json();
-            return body?.error || `Could not load the app (${res.status})`;
+            const body = await res.json() as { error?: string };
+            return body.error || `Could not load the app (${res.status})`;
         }
         const text = await res.text();
         return text || `Could not load the app (${res.status})`;
@@ -99,12 +100,12 @@
         }
     });
 
-    function go(e, href) {
+    function go(e: MouseEvent, href: RoutePath) {
         e.preventDefault();
         navigate(href);
     }
 
-    async function startApp(e) {
+    async function startApp(e: MouseEvent) {
         e.preventDefault();
         try {
             const res = await fetch("/auth/check");

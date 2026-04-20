@@ -1,7 +1,8 @@
-<script>
+<script lang="ts">
     import { getTheme, cycleTheme } from "./theme.svelte.ts";
+    import type { ThemePreference } from "./types.ts";
 
-    let theme = $state(getTheme());
+    let theme = $state<ThemePreference>(getTheme());
 </script>
 
 <button

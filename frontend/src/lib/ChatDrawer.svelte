@@ -1,8 +1,23 @@
-<script>
+<script lang="ts">
+    import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
     import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
     import { autosize } from "./autosize.ts";
+    import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
+    import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
+    import { MEAL_ORDER } from "./types.ts";
+    import type {
+        ActivityField,
+        DrawerTab,
+        Entry,
+        EntryInput,
+        Favorite,
+        MealType,
+        PendingImage,
+    } from "./types.ts";
+
+    type EditableEntryField = "calories" | "protein" | "carbs" | "fat" | "fiber";
 
     let {
         open,
@@ -17,45 +32,49 @@
         editMealType = null,
         yesterdayEntries = [],
         mealIsEmpty = true,
+    }: {
+        open: boolean;
+        onClose: () => void;
+        onEntriesAdded: (entries: Entry[]) => void;
+        onEntriesEdited?: ((entries: Entry[]) => void) | null;
+        date?: string | null;
+        meal?: MealType | null;
+        initialTab?: DrawerTab;
+        initialField?: ActivityField | null;
+        editEntries?: Entry[] | null;
+        editMealType?: MealType | null;
+        yesterdayEntries?: Entry[];
+        mealIsEmpty?: boolean;
     } = $props();
 
-    const MEALS = ["breakfast", "lunch", "snack", "dinner", "supplements"];
-
-    function todayStr() {
-        const d = new Date();
-        return [
-            d.getFullYear(),
-            String(d.getMonth() + 1).padStart(2, "0"),
-            String(d.getDate()).padStart(2, "0"),
-        ].join("-");
-    }
+    const MEALS = [...MEAL_ORDER];
 
     // Shared
-    let tab = $state("food");
+    let tab = $state<DrawerTab>("food");
     let selectedDate = $state("");
-    let drawerEl = $state(null);
+    let drawerEl = $state<HTMLDivElement | null>(null);
 
     // Food
     let input = $state("");
     let sending = $state(false);
-    let clarifyingQuestion = $state(null);
-    let pendingImages = $state([]);
-    let selectedMeal = $state(null);
-    let inputEl = $state(null);
-    let fileInputEl = $state(null);
+    let clarifyingQuestion = $state<string | null>(null);
+    let pendingImages = $state<PendingImage[]>([]);
+    let selectedMeal = $state<MealType | null>(null);
+    let inputEl = $state<HTMLTextAreaElement | null>(null);
+    let fileInputEl = $state<HTMLInputElement | null>(null);
     let mealError = $state(false);
-    let savedEntries = $state(null); // entries just saved, awaiting confirmation
+    let savedEntries = $state<Entry[] | null>(null); // entries just saved, awaiting confirmation
 
     // Edit mode state
-    let editModeEntries = $state(null);
-    let activeEditMealType = $state(null);
+    let editModeEntries = $state<Entry[] | null>(null);
+    let activeEditMealType = $state<MealType | null>(null);
     let editSending = $state(false);
     let editMessage = $state("");
     let scalingAll = $state(false);
     let scaleAllOpen = $state(false);
     let scalingEntry = $state(-1);
     let scaleEntryOpen = $state(-1);
-    let favorites = $state(null);
+    let favorites = $state<Favorite[] | null>(null);
     let favSearch = $state("");
     let showFavPicker = $state(false);
     let cameFromConfirm = $state(false);
@@ -68,26 +87,83 @@
         return favorites.filter((f) => f.description.toLowerCase().includes(q));
     });
 
-    // Activity
-    let activityTextareaEl = $state(null);
-    let feelingNotesEl = $state(null);
-    let poopNotesEl = $state(null);
-    let hydrationEl = $state(null);
-
     let activityText = $state("");
     let feelingNotes = $state("");
     let poop = $state(false);
     let poopNotes = $state("");
     let hydration = $state("");
     let activitySaving = $state(false);
-    let activityLoadedFor = $state(null);
+    let activityLoadedFor = $state<string | null>(null);
 
     // Drag-to-dismiss
-    let dragStartY = null;
+    let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
 
-    function onDragStart(e) {
-        const tag = e.target.tagName;
+    const saveActivityMutation = createMutation(() => ({
+        mutationFn: ({
+            date,
+            payload,
+        }: {
+            date: string;
+            payload: Parameters<typeof putActivity>[1];
+        }) => putActivity(date, payload),
+        onError: (err) => showError(err, "Failed to save activity."),
+    }));
+
+    const chatMutation = createMutation(() => ({
+        mutationFn: ({
+            message,
+            date,
+            images,
+            meal,
+        }: {
+            message: string;
+            date: string;
+            images: File[] | null;
+            meal: MealType;
+        }) => chat(message, date, images, meal),
+        onError: (err) =>
+            showError(err, "Something went wrong. Please try again."),
+    }));
+
+    const confirmChatMutation = createMutation(() => ({
+        mutationFn: ({
+            entries,
+            date,
+        }: {
+            entries: EntryInput[];
+            date: string;
+        }) => confirmChat(entries, date),
+    }));
+
+    const editChatMutation = createMutation(() => ({
+        mutationFn: ({
+            message,
+            entries,
+            date,
+            mealType,
+        }: {
+            message: string;
+            entries: Entry[];
+            date: string;
+            mealType: MealType | null;
+        }) => editChat(message, entries, date, mealType),
+        onError: (err) => showError(err, "Failed to edit meal."),
+    }));
+
+    const patchEntryMutation = createMutation(() => ({
+        mutationFn: ({ id, entry }: { id: string; entry: Partial<Entry> }) =>
+            patchEntry(id, entry),
+    }));
+
+    const deleteEntryMutation = createMutation(() => ({
+        mutationFn: (id: string) => deleteEntry(id),
+    }));
+
+    function onDragStart(e: TouchEvent) {
+        const target = e.target;
+        const tag = target instanceof HTMLElement ? target.tagName : "";
+        const touch = e.touches[0];
         if (
             tag === "TEXTAREA" ||
             tag === "INPUT" ||
@@ -95,14 +171,17 @@
             tag === "SELECT"
         )
             return;
-        dragStartY = e.touches[0].clientY;
+        if (!touch) return;
+        dragStartY = touch.clientY;
         dragCurrentY = 0;
         if (drawerEl) drawerEl.style.transition = "none";
     }
 
-    function onDragMove(e) {
+    function onDragMove(e: TouchEvent) {
         if (dragStartY === null) return;
-        const dy = e.touches[0].clientY - dragStartY;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dy = touch.clientY - dragStartY;
         if (dy < 0) return;
         dragCurrentY = dy;
         if (drawerEl) drawerEl.style.transform = `translateY(${dy}px)`;
@@ -123,7 +202,7 @@
         dragCurrentY = 0;
     }
 
-    function revokePreview(url) {
+    function revokePreview(url: string): void {
         if (typeof url === "string" && url.startsWith("blob:")) {
             URL.revokeObjectURL(url);
         }
@@ -166,16 +245,6 @@
                 if (!favorites) {
                     getFavorites().then((res) => { favorites = res.favorites ?? []; }).catch(() => {});
                 }
-                if (initialTab === "activity" && initialField) {
-                    setTimeout(() => {
-                        if (initialField === "activity")
-                            activityTextareaEl?.focus();
-                        else if (initialField === "feeling")
-                            feelingNotesEl?.focus();
-                        else if (initialField === "poop") poopNotesEl?.focus();
-                        else if (initialField === "hydration") hydrationEl?.focus();
-                    }, 120);
-                }
             } else {
                 tab = "food";
                 selectedDate = "";
@@ -217,7 +286,7 @@
         }
     });
 
-    async function loadActivity(d) {
+    async function loadActivity(d: string): Promise<void> {
         activityLoadedFor = d;
         try {
             const res = await getActivity(d);
@@ -234,24 +303,27 @@
     async function saveActivity() {
         activitySaving = true;
         try {
-            await putActivity(selectedDate, {
-                activity: activityText,
-                feeling_score: 0,
-                feeling_notes: feelingNotes,
-                poop,
-                poop_notes: poopNotes,
-                hydration: hydration ? parseFloat(hydration) : 0,
+            await saveActivityMutation.mutateAsync({
+                date: selectedDate,
+                payload: {
+                    activity: activityText,
+                    feeling_score: 0,
+                    feeling_notes: feelingNotes,
+                    poop,
+                    poop_notes: poopNotes,
+                    hydration: hydration ? parseFloat(hydration) : 0,
+                },
             });
             onClose();
-        } catch (err) {
-            showError(err, "Failed to save activity.");
+        } catch {
         } finally {
             activitySaving = false;
         }
     }
 
-    async function onFileSelected(e) {
-        const files = Array.from(e.target.files ?? []);
+    async function onFileSelected(e: Event): Promise<void> {
+        const target = e.currentTarget as HTMLInputElement;
+        const files = Array.from(target.files ?? []);
         if (!files.length) return;
         pendingImages = [
             ...pendingImages,
@@ -264,12 +336,17 @@
         if (fileInputEl) fileInputEl.value = "";
     }
 
-    function removeImage(index) {
-        revokePreview(pendingImages[index]?.previewUrl);
+    function removeImage(index: number): void {
+        const image = pendingImages[index];
+        if (image) revokePreview(image.previewUrl);
         pendingImages = pendingImages.filter((_, i) => i !== index);
     }
 
-    async function send() {
+    function openFilePicker(): void {
+        fileInputEl?.click();
+    }
+
+    async function send(): Promise<void> {
         if (sending) return;
         if (!selectedMeal) {
             mealError = true;
@@ -290,7 +367,12 @@
         sending = true;
 
         try {
-            const res = await chat(text, selectedDate, imgs, selectedMeal);
+            const res = await chatMutation.mutateAsync({
+                message: text,
+                date: selectedDate,
+                images: imgs,
+                meal: selectedMeal,
+            });
             sending = false;
             if (res.done && res.entries?.length) {
                 savedEntries = res.entries;
@@ -298,9 +380,8 @@
             } else if (!res.done) {
                 clarifyingQuestion = res.message || "Need more details.";
             }
-        } catch (err) {
+        } catch {
             sending = false;
-            showError(err, "Something went wrong. Please try again.");
         }
     }
 
@@ -308,15 +389,16 @@
         onClose();
     }
 
-    function switchToEdit() {
+    function switchToEdit(): void {
+        if (!savedEntries || !selectedMeal) return;
         editModeEntries = [...savedEntries];
         activeEditMealType = selectedMeal;
         savedEntries = null;
         cameFromConfirm = true;
     }
 
-    function goBackFromEdit() {
-        if (cameFromConfirm) {
+    function goBackFromEdit(): void {
+        if (cameFromConfirm && editModeEntries) {
             savedEntries = [...editModeEntries];
             editModeEntries = null;
             activeEditMealType = null;
@@ -328,30 +410,34 @@
 
     // --- Edit mode functions ---
 
-    async function sendEdit() {
-        if (editSending || !editMessage.trim()) return;
+    async function sendEdit(): Promise<void> {
+        if (editSending || !editMessage.trim() || !editModeEntries) return;
         const text = editMessage.trim();
         editMessage = "";
         editSending = true;
         try {
-            const res = await editChat(text, editModeEntries, selectedDate, activeEditMealType);
+            const res = await editChatMutation.mutateAsync({
+                message: text,
+                entries: editModeEntries,
+                date: selectedDate,
+                mealType: activeEditMealType,
+            });
             if (res.entries?.length) {
                 editModeEntries = res.entries;
                 if (onEntriesEdited) onEntriesEdited(res.entries);
             }
-        } catch (err) {
-            showError(err, "Failed to edit meal.");
+        } catch {
         } finally {
             editSending = false;
         }
     }
 
-    async function scaleAllEntries(factor) {
+    async function scaleAllEntries(factor: number): Promise<void> {
         if (scalingAll || !editModeEntries) return;
         scalingAll = true;
         try {
-            const r1 = (v) => Math.round(v * factor);
-            const r10 = (v) => Math.round(v * factor * 10) / 10;
+            const r1 = (v: number) => Math.round(v * factor);
+            const r10 = (v: number) => Math.round(v * factor * 10) / 10;
             const updates = editModeEntries.map((e) => ({
                 ...e,
                 calories: r1(e.calories),
@@ -361,7 +447,9 @@
                 fiber: r10(e.fiber ?? 0),
             }));
             const saved = await Promise.all(
-                updates.map((u) => patchEntry(u.id, u)),
+                updates.map((u) =>
+                    patchEntryMutation.mutateAsync({ id: u.id, entry: u }),
+                ),
             );
             editModeEntries = saved;
             if (onEntriesEdited) onEntriesEdited(saved);
@@ -372,15 +460,15 @@
         }
     }
 
-    async function scaleOneEntry(index, factor) {
-        if (scalingEntry >= 0) return;
+    async function scaleOneEntry(index: number, factor: number): Promise<void> {
+        if (scalingEntry >= 0 || !editModeEntries) return;
         scalingEntry = index;
         scaleEntryOpen = -1;
         try {
             const entry = editModeEntries[index];
             if (!entry) return;
-            const r1 = (v) => Math.round(v * factor);
-            const r10 = (v) => Math.round(v * factor * 10) / 10;
+            const r1 = (v: number) => Math.round(v * factor);
+            const r10 = (v: number) => Math.round(v * factor * 10) / 10;
             const updated = {
                 ...entry,
                 calories: r1(entry.calories),
@@ -389,7 +477,10 @@
                 fat: r10(entry.fat),
                 fiber: r10(entry.fiber ?? 0),
             };
-            const saved = await patchEntry(updated.id, updated);
+            const saved = await patchEntryMutation.mutateAsync({
+                id: updated.id,
+                entry: updated,
+            });
             editModeEntries = editModeEntries.map((e) => e.id === saved.id ? saved : e);
             if (onEntriesEdited) onEntriesEdited(editModeEntries);
         } catch (err) {
@@ -399,13 +490,21 @@
         }
     }
 
-    async function editInlineEntry(index, field, value) {
+    async function editInlineEntry(
+        index: number,
+        field: EditableEntryField,
+        value: number,
+    ): Promise<void> {
+        if (!editModeEntries) return;
         const entry = editModeEntries[index];
         if (!entry) return;
-        const updated = { ...entry, [field]: value };
+        const updated: Entry = { ...entry, [field]: value };
         editModeEntries = editModeEntries.map((e, i) => i === index ? updated : e);
         try {
-            const saved = await patchEntry(updated.id, updated);
+            const saved = await patchEntryMutation.mutateAsync({
+                id: updated.id,
+                entry: updated,
+            });
             editModeEntries = editModeEntries.map((e) => e.id === saved.id ? saved : e);
             if (onEntriesEdited) onEntriesEdited(editModeEntries);
         } catch (err) {
@@ -413,24 +512,27 @@
         }
     }
 
-    async function deleteEditEntry(index) {
+    async function deleteEditEntry(index: number): Promise<void> {
+        if (!editModeEntries) return;
         const entry = editModeEntries[index];
         if (!entry) return;
         // Optimistically remove from UI immediately.
-        editModeEntries = editModeEntries.filter((_, i) => i !== index);
-        if (onEntriesEdited) onEntriesEdited(editModeEntries);
-        if (editModeEntries.length === 0) onClose();
+        const nextEntries = editModeEntries.filter((_, i) => i !== index);
+        editModeEntries = nextEntries;
+        if (onEntriesEdited) onEntriesEdited(nextEntries);
+        if (nextEntries.length === 0) onClose();
         try {
-            await deleteEntry(entry.id);
+            await deleteEntryMutation.mutateAsync(entry.id);
         } catch (err) {
             showError(err, "Failed to delete entry.");
         }
     }
 
-    async function addFavoriteToMeal(fav) {
+    async function addFavoriteToMeal(fav: Favorite): Promise<void> {
+        if (!activeEditMealType || !editModeEntries) return;
         showFavPicker = false;
         try {
-            const entries = [{
+            const entries: EntryInput[] = [{
                 meal_type: activeEditMealType,
                 description: fav.description,
                 calories: fav.calories,
@@ -439,24 +541,30 @@
                 fat: fav.fat,
                 fiber: fav.fiber ?? 0,
             }];
-            const res = await confirmChat(entries, selectedDate);
+            const res = await confirmChatMutation.mutateAsync({
+                entries,
+                date: selectedDate,
+            });
             if (res.entries?.length) {
-                editModeEntries = [...editModeEntries, ...res.entries];
-                if (onEntriesEdited) onEntriesEdited(editModeEntries);
+                const nextEntries = [...editModeEntries, ...res.entries];
+                editModeEntries = nextEntries;
+                if (onEntriesEdited) onEntriesEdited(nextEntries);
             }
         } catch (err) {
             showError(err, "Failed to add favorite.");
         }
     }
 
-    async function repeatYesterday() {
+    async function repeatYesterday(): Promise<void> {
         if (!yesterdayEntries.length) return;
         if (isEditMode) {
+            if (!activeEditMealType || !editModeEntries) return;
+            const mealType = activeEditMealType;
             // Edit mode: add to existing entries
             editSending = true;
             try {
-                const entries = yesterdayEntries.map((e) => ({
-                    meal_type: activeEditMealType,
+                const entries: EntryInput[] = yesterdayEntries.map((e) => ({
+                    meal_type: mealType,
                     description: e.description,
                     calories: e.calories,
                     protein: e.protein,
@@ -464,10 +572,14 @@
                     fat: e.fat,
                     fiber: e.fiber ?? 0,
                 }));
-                const res = await confirmChat(entries, selectedDate);
-                if (res.entries?.length) {
-                    editModeEntries = [...editModeEntries, ...res.entries];
-                    if (onEntriesEdited) onEntriesEdited(editModeEntries);
+                const res = await confirmChatMutation.mutateAsync({
+                    entries,
+                    date: selectedDate,
+                });
+                if (res.entries?.length && editModeEntries) {
+                    const nextEntries = [...editModeEntries, ...res.entries];
+                    editModeEntries = nextEntries;
+                    if (onEntriesEdited) onEntriesEdited(nextEntries);
                 }
             } catch (err) {
                 showError(err, "Failed to repeat yesterday's meal.");
@@ -475,11 +587,13 @@
                 editSending = false;
             }
         } else {
+            if (!selectedMeal) return;
+            const mealType = selectedMeal;
             // New-entry mode: save and show confirmation
             sending = true;
             try {
-                const entries = yesterdayEntries.map((e) => ({
-                    meal_type: selectedMeal,
+                const entries: EntryInput[] = yesterdayEntries.map((e) => ({
+                    meal_type: mealType,
                     description: e.description,
                     calories: e.calories,
                     protein: e.protein,
@@ -487,7 +601,10 @@
                     fat: e.fat,
                     fiber: e.fiber ?? 0,
                 }));
-                const res = await confirmChat(entries, selectedDate);
+                const res = await confirmChatMutation.mutateAsync({
+                    entries,
+                    date: selectedDate,
+                });
                 sending = false;
                 if (res.entries?.length) {
                     savedEntries = res.entries;
@@ -500,11 +617,11 @@
         }
     }
 
-    async function addFavToNewMeal(fav) {
+    async function addFavToNewMeal(fav: Favorite): Promise<void> {
         if (!selectedMeal) return;
         sending = true;
         try {
-            const entries = [{
+            const entries: EntryInput[] = [{
                 meal_type: selectedMeal,
                 description: fav.description,
                 calories: fav.calories,
@@ -513,7 +630,10 @@
                 fat: fav.fat,
                 fiber: fav.fiber ?? 0,
             }];
-            const res = await confirmChat(entries, selectedDate);
+            const res = await confirmChatMutation.mutateAsync({
+                entries,
+                date: selectedDate,
+            });
             sending = false;
             if (res.entries?.length) {
                 savedEntries = [...(savedEntries ?? []), ...res.entries];
@@ -525,14 +645,19 @@
         }
     }
 
-    function onEditKeyDown(e) {
+    function numberValueFromEvent(e: FocusEvent): number {
+        const target = e.currentTarget as HTMLInputElement;
+        return Number(target.value);
+    }
+
+    function onEditKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             sendEdit();
         }
     }
 
-    function onKeyDown(e) {
+    function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             send();
@@ -678,35 +803,35 @@
                                 <div class="card-macros">
                                     <span class="macro-field">
                                         <input type="number" value={entry.calories}
-                                            onblur={(e) => editInlineEntry(i, "calories", +e.target.value)}
+                                            onblur={(e: FocusEvent) => editInlineEntry(i, "calories", numberValueFromEvent(e))}
                                             disabled={editSending} />
                                         <span class="macro-label">cal</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.protein}
-                                            onblur={(e) => editInlineEntry(i, "protein", +e.target.value)}
+                                            onblur={(e: FocusEvent) => editInlineEntry(i, "protein", numberValueFromEvent(e))}
                                             disabled={editSending} />
                                         <span class="macro-label">P</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.carbs}
-                                            onblur={(e) => editInlineEntry(i, "carbs", +e.target.value)}
+                                            onblur={(e: FocusEvent) => editInlineEntry(i, "carbs", numberValueFromEvent(e))}
                                             disabled={editSending} />
                                         <span class="macro-label">C</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fat}
-                                            onblur={(e) => editInlineEntry(i, "fat", +e.target.value)}
+                                            onblur={(e: FocusEvent) => editInlineEntry(i, "fat", numberValueFromEvent(e))}
                                             disabled={editSending} />
                                         <span class="macro-label">F</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fiber ?? 0}
-                                            onblur={(e) => editInlineEntry(i, "fiber", +e.target.value)}
+                                            onblur={(e: FocusEvent) => editInlineEntry(i, "fiber", numberValueFromEvent(e))}
                                             disabled={editSending} />
                                         <span class="macro-label">Fb</span>
                                     </span>
@@ -866,7 +991,7 @@
                         {/each}
                         <button
                             class="thumb-add"
-                            onclick={() => fileInputEl.click()}
+                            onclick={openFilePicker}
                             aria-label="Add another photo"
                         >
                             <svg
@@ -891,7 +1016,7 @@
                 <div class="input-row">
                     <button
                         class="attach-btn"
-                        onclick={() => fileInputEl.click()}
+                        onclick={openFilePicker}
                         disabled={sending}
                         aria-label="Attach photo"
                     >
@@ -930,87 +1055,17 @@
             {/if}
         {:else}
             <!-- Activity form -->
-            <div class="activity-form">
-                <div class="activity-field">
-                    <label class="field-label" for="act-activity"
-                        >Activity</label
-                    >
-                    <textarea
-                        class="text-entry"
-                        id="act-activity"
-                        bind:this={activityTextareaEl}
-                        use:autosize
-                        bind:value={activityText}
-                        placeholder="Exercise, stress, unusual events…"
-                        rows="2"
-                    ></textarea>
-                </div>
-                <div class="activity-field">
-                    <label class="field-label" for="act-feeling">Feeling</label>
-                    <textarea
-                        class="text-entry"
-                        id="act-feeling"
-                        bind:this={feelingNotesEl}
-                        use:autosize
-                        bind:value={feelingNotes}
-                        placeholder="Energy, digestion, mood, sleep…"
-                        rows="2"
-                    ></textarea>
-                </div>
-                <div class="activity-field">
-                    <div class="field-header">
-                        <span class="field-label">Stool</span>
-                        <div class="toggle-group">
-                            <button
-                                class="toggle-btn"
-                                class:selected={poop === true}
-                                onclick={() => (poop = true)}>Yes</button
-                            >
-                            <button
-                                class="toggle-btn"
-                                class:selected={poop === false}
-                                onclick={() => (poop = false)}>No</button
-                            >
-                        </div>
-                    </div>
-                    <textarea
-                        class="text-entry"
-                        bind:this={poopNotesEl}
-                        use:autosize
-                        bind:value={poopNotes}
-                        placeholder="Any details…"
-                        rows="1"
-                    ></textarea>
-                </div>
-                <div class="activity-field">
-                    <div class="field-header">
-                        <label class="field-label" for="act-hydration"
-                            >Water</label
-                        >
-                        <div class="hydration-inline">
-                            <input
-                                id="act-hydration"
-                                bind:this={hydrationEl}
-                                class="hydration-input"
-                                type="number"
-                                min="0"
-                                max="10"
-                                step="0.1"
-                                bind:value={hydration}
-                                placeholder="0.0"
-                            />
-                            <span class="hydration-unit">L</span>
-                        </div>
-                    </div>
-                </div>
-                <button
-                    class="save-activity-btn"
-                    onclick={saveActivity}
-                    disabled={activitySaving}
-                >
-                    {activitySaving ? "Saving…" : "Save"}
-                </button>
-            </div>
+            <ChatDrawerActivityForm
+                active={open && tab === "activity"}
+                {initialField}
+                bind:activityText
+                bind:feelingNotes
+                bind:poop
+                bind:poopNotes
+                bind:hydration
+                saving={activitySaving}
+                onSave={saveActivity}
+            />
         {/if}
     </div>
 {/if}
@@ -1275,6 +1330,7 @@
         font-size: var(--t-meta);
         color: var(--ink);
         padding: 0 1px 1px;
+        appearance: textfield;
         -moz-appearance: textfield;
         font-variant-numeric: tabular-nums;
     }
@@ -1526,124 +1582,6 @@
     }
 
     button:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
-
-    /* --- Activity form --- */
-    .activity-form {
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-        min-height: 0;
-        overflow-y: auto;
-        flex: 1;
-    }
-
-    .activity-field {
-        display: flex;
-        flex-direction: column;
-        gap: 0.45rem;
-    }
-
-    .field-label {
-        font-size: var(--t-micro);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-weight: 600;
-        color: var(--mute-2);
-    }
-
-    .field-header {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-
-    .toggle-group {
-        display: flex;
-        gap: 0.4rem;
-        flex-shrink: 0;
-    }
-
-    .hydration-inline {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        flex-shrink: 0;
-    }
-
-    .toggle-btn {
-        padding: 0.3rem 0.85rem;
-        border: 1px solid var(--rule-4);
-        border-radius: var(--r-pill);
-        background: none;
-        font-family: inherit;
-        font-size: var(--t-meta);
-        color: var(--ink-mute);
-        cursor: pointer;
-        font-weight: 500;
-        flex-shrink: 0;
-        touch-action: manipulation;
-    }
-
-    .toggle-btn.selected {
-        background: var(--ink-2);
-        border-color: var(--ink-2);
-        color: var(--paper);
-    }
-
-    .hydration-input {
-        width: 80px;
-        flex-shrink: 0;
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        padding: 0.5rem 0.5rem;
-        font-size: var(--t-body);
-        font-family: var(--num-stack);
-        background: var(--paper);
-        color: var(--ink);
-        text-align: center;
-        font-variant-numeric: tabular-nums;
-    }
-
-    .hydration-input::-webkit-outer-spin-button,
-    .hydration-input::-webkit-inner-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
-    }
-
-    .hydration-input:focus {
-        outline: none;
-        border-color: var(--ink-2);
-    }
-
-    .hydration-unit {
-        font-size: var(--t-meta);
-        color: var(--mute-2);
-    }
-
-    .save-activity-btn {
-        width: 100%;
-        padding: 0.6rem 1rem;
-        background: var(--ink-2);
-        color: var(--paper);
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: pointer;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-        touch-action: manipulation;
-        margin-top: auto;
-    }
-
-    @media (hover: hover) {
-        .save-activity-btn:not(:disabled):hover {
-            background: var(--ink);
-        }
-    }
-    .save-activity-btn:disabled {
         opacity: 0.35;
         cursor: default;
     }
