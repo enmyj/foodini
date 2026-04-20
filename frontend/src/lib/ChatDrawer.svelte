@@ -58,6 +58,7 @@
     let favorites = $state(null);
     let favSearch = $state("");
     let showFavPicker = $state(false);
+    let cameFromConfirm = $state(false);
 
     let isEditMode = $derived(editModeEntries !== null && editModeEntries.length > 0);
     let started = $derived(sending || savedEntries !== null || clarifyingQuestion !== null);
@@ -161,6 +162,7 @@
                 scaleEntryOpen = -1;
                 showFavPicker = false;
                 favSearch = "";
+                cameFromConfirm = false;
                 if (!favorites) {
                     getFavorites().then((res) => { favorites = res.favorites ?? []; }).catch(() => {});
                 }
@@ -192,6 +194,7 @@
                 scaleEntryOpen = -1;
                 showFavPicker = false;
                 favSearch = "";
+                cameFromConfirm = false;
                 activityText = "";
                 feelingNotes = "";
                 poop = false;
@@ -309,6 +312,18 @@
         editModeEntries = [...savedEntries];
         activeEditMealType = selectedMeal;
         savedEntries = null;
+        cameFromConfirm = true;
+    }
+
+    function goBackFromEdit() {
+        if (cameFromConfirm) {
+            savedEntries = [...editModeEntries];
+            editModeEntries = null;
+            activeEditMealType = null;
+            cameFromConfirm = false;
+        } else {
+            onClose();
+        }
     }
 
     // --- Edit mode functions ---
@@ -713,9 +728,9 @@
                     <button
                         onclick={sendEdit}
                         disabled={editSending || !editMessage.trim()}
-                        >Edit</button
+                        >Add/Edit</button
                     >
-                    <button class="edit-done-btn" onclick={onClose}>Done</button>
+                    <button class="edit-done-btn" onclick={goBackFromEdit}>Back</button>
                 </div>
             {:else}
             <!-- ===== NEW ENTRY MODE ===== -->
@@ -833,7 +848,7 @@
             <!-- Bottom controls -->
             {#if savedEntries}
                 <div class="confirm-btns">
-                    <button class="confirm-done" onclick={confirmSaved}>Looks good</button>
+                    <button class="confirm-done" onclick={confirmSaved}>Save</button>
                     <button class="confirm-edit" onclick={switchToEdit}>Edit</button>
                 </div>
             {:else if !sending}

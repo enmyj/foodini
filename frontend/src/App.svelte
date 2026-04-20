@@ -199,7 +199,7 @@
             <nav class="nav-links">
                 <ThemeToggle />
                 <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
-                <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
+                <a href="/legal" onclick={(e) => go(e, '/legal')}>Privacy Policy</a>
                 <a href="/auth/login" class="btn" onclick={startApp}>Open app</a>
             </nav>
         </header>

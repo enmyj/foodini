@@ -96,7 +96,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	})
 
 	// --- API routes (auth required + per-user rate limited) ---
-	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
+	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), auth.AllowlistMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
 
 	apiGroup.GET("/log", apiHandler.GetLog)
 	apiGroup.GET("/activity", apiHandler.GetActivity)

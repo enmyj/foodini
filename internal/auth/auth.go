@@ -217,6 +217,22 @@ func (h *Handler) TokenSource(_ context.Context, session *Session) oauth2.TokenS
 	return ts
 }
 
+// allowedUsers is the set of email addresses permitted to use the app.
+var allowedUsers = map[string]bool{
+	"aubreymyjer@gmail.com":  true,
+	"catepward@gmail.com":    true,
+	"danranard@gmail.com":    true,
+	"dmyjer@gmail.com":       true,
+	"edulop91@gmail.com":     true,
+	"imyjer@gmail.com":       true,
+	"mmyjer@gmail.com":       true,
+	"natmaas17@gmail.com":    true,
+	"nolanapollock@gmail.com": true,
+	"tmaxxman@gmail.com":     true,
+	"trogari21@gmail.com":    true,
+	"mark.slipp@gmail.com":   true,
+}
+
 // AuthMiddleware returns Echo middleware that requires a valid session.
 func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -227,6 +243,20 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			}
 			c.Set("session", session)
+			return next(c)
+		}
+	}
+}
+
+// AllowlistMiddleware returns Echo middleware that rejects users not in the allowlist.
+// Must be placed after AuthMiddleware so the session is available.
+func AllowlistMiddleware() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			session := SessionFrom(c)
+			if session == nil || !allowedUsers[session.UserEmail] {
+				return c.JSON(http.StatusForbidden, map[string]string{"error": "access denied"})
+			}
 			return next(c)
 		}
 	}
