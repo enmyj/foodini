@@ -1,8 +1,8 @@
 <script>
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
-    import { getProfile, putProfile } from "./api.js";
-    import { autosize } from "./autosize.js";
-    import { showError } from "./toast.js";
+    import { getProfile, putProfile } from "./api.ts";
+    import { autosize } from "./autosize.ts";
+    import { showError } from "./toast.ts";
 
     let { onClose } = $props();
 

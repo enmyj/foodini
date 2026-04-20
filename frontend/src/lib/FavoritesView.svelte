@@ -1,7 +1,7 @@
 <script>
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
-    import { getFavorites, deleteFavorite, confirmChat } from "./api.js";
-    import { showError } from "./toast.js";
+    import { getFavorites, deleteFavorite, confirmChat } from "./api.ts";
+    import { showError } from "./toast.ts";
 
     const MEALS = ["breakfast", "lunch", "snack", "dinner", "supplements"];
 

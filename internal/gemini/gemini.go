@@ -386,40 +386,6 @@ func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPromp
 	return strings.TrimSpace(resp.Text()), nil
 }
 
-// InsightsStream streams insight text chunks via onChunk. Returns the full text when done.
-func (s *Service) InsightsStream(ctx context.Context, summary, profileCtx, sysPrompt string, onChunk func(string)) (string, error) {
-	client, err := s.getClient(ctx)
-	if err != nil {
-		return "", err
-	}
-	systemInstr := sysPrompt
-	if profileCtx != "" {
-		systemInstr = profileCtx + "\n\n" + sysPrompt
-	}
-
-	var full strings.Builder
-	for resp, err := range client.Models.GenerateContentStream(ctx, geminiModel, []*genai.Content{
-		genai.NewContentFromText(summary, genai.RoleUser),
-	}, buildTextConfig(systemInstr)) {
-		if err != nil {
-			return full.String(), fmt.Errorf("gemini stream: %w", err)
-		}
-		chunk := resp.Text()
-		if chunk != "" {
-			full.WriteString(chunk)
-			if onChunk != nil {
-				onChunk(chunk)
-			}
-		}
-	}
-	return strings.TrimSpace(full.String()), nil
-}
-
-// Prompt accessors for use with InsightsStream.
-func (s *Service) InsightsPrompt() string          { return insightsSystemPrompt }
-func (s *Service) DayInsightsPrompt() string       { return dayInsightsSystemPrompt }
-func (s *Service) MealSuggestionsPrompt() string   { return mealSuggestionsSystemPrompt }
-func (s *Service) WeekSuggestionsPrompt() string   { return weekMealSuggestionsSystemPrompt }
 // Insights generates a free-form weekly analysis given a text summary of the week's data.
 func (s *Service) Insights(ctx context.Context, weekSummary, profileCtx string) (string, error) {
 	return s.insights(ctx, weekSummary, profileCtx, insightsSystemPrompt)
@@ -454,8 +420,6 @@ Adapt language to the user's nutrition knowledge level if provided:
 - "intermediate": brief rationale, standard nutrition terms
 - "advanced": can reference nutrient density; skip basic explanations
 If no level is specified, default to beginner.`
-
-func (s *Service) SingleMealSuggestionPrompt() string { return singleMealSuggestionSystemPrompt }
 
 // SingleMealSuggestion generates a suggestion for one specific meal.
 func (s *Service) SingleMealSuggestion(ctx context.Context, summary, profileCtx string) (string, error) {

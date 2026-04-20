@@ -1,9 +1,9 @@
 /** Minimal pushState router for a handful of static routes. */
 
-let _listener = null;
+let _listener: (() => void) | null = null;
 let _current = $state(window.location.pathname);
 
-function navigate(path) {
+function navigate(path: string) {
     if (path === _current) return;
     history.pushState(null, "", path);
     _current = path;

@@ -1,7 +1,7 @@
-export function autosize(node) {
-  let frame = null
+export function autosize(node: HTMLTextAreaElement) {
+  let frame: number | null = null
   const proto = Object.getPrototypeOf(node)
-  const valueDescriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null
+  const valueDescriptor: PropertyDescriptor | undefined = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : undefined
 
   function resize() {
     node.style.height = 'auto'
@@ -28,10 +28,10 @@ export function autosize(node) {
       configurable: true,
       enumerable: valueDescriptor.enumerable ?? true,
       get() {
-        return valueDescriptor.get.call(this)
+        return valueDescriptor.get!.call(this)
       },
-      set(nextValue) {
-        valueDescriptor.set.call(this, nextValue)
+      set(nextValue: string) {
+        valueDescriptor.set!.call(this, nextValue)
         scheduleResize()
       },
     })
@@ -44,7 +44,7 @@ export function autosize(node) {
       if (frame !== null) cancelAnimationFrame(frame)
       node.removeEventListener('input', handleInput)
       if (valueDescriptor?.get && valueDescriptor?.set) {
-        delete node.value
+        delete (node as unknown as Record<string, unknown>).value
       }
     },
   }

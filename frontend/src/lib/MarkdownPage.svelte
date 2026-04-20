@@ -1,5 +1,5 @@
 <script>
-    import { navigate } from './router.svelte.js';
+    import { navigate } from './router.svelte.ts';
     import ThemeToggle from './ThemeToggle.svelte';
     let { html } = $props();
 

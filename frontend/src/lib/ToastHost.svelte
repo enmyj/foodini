@@ -1,5 +1,5 @@
 <script>
-  import { dismissToast, toasts } from './toast.js'
+  import { dismissToast, toasts } from './toast.ts'
 </script>
 
 <div class="toast-host" aria-live="polite" aria-atomic="true">

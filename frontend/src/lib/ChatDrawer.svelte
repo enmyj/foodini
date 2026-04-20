@@ -1,8 +1,8 @@
 <script>
     import { untrack } from "svelte";
-    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.js";
-    import { autosize } from "./autosize.js";
-    import { showError } from "./toast.js";
+    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
+    import { autosize } from "./autosize.ts";
+    import { showError } from "./toast.ts";
 
     let {
         open,

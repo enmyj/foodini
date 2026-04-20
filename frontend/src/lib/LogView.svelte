@@ -8,18 +8,18 @@
         fetchStoredDayInsight,
         fetchStoredWeekSuggestions,
         fetchMealSuggestion,
-        streamDayInsights,
-        streamInsights,
-        streamWeekSuggestions,
-        streamMealSuggestion,
-    } from "./api.js";
+        generateDayInsights,
+        generateInsights,
+        generateWeekSuggestions,
+        generateMealSuggestion,
+    } from "./api.ts";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
     import ActivityNote from "./ActivityNote.svelte";
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
-    import { showError } from "./toast.js";
-    import { navigate } from "./router.svelte.js";
+    import { showError } from "./toast.ts";
+    import { navigate } from "./router.svelte.ts";
     import ThemeToggle from "./ThemeToggle.svelte";
 
     const queryClient = useQueryClient();
@@ -389,7 +389,7 @@
         }
         mealSuggestions = {
             ...mealSuggestions,
-            [key]: { loading: false, text: "", error: null, open: true, generatedAt: null },
+            [key]: { loading: true, text: null, error: null, open: true, generatedAt: null },
         };
         try {
             const stored = await fetchMealSuggestion(date, meal);
@@ -400,15 +400,10 @@
                 };
                 return;
             }
-            const res = await streamMealSuggestion(date, meal, (chunk) => {
-                mealSuggestions = {
-                    ...mealSuggestions,
-                    [key]: { ...mealSuggestions[key], text: (mealSuggestions[key]?.text ?? "") + chunk },
-                };
-            });
+            const res = await generateMealSuggestion(date, meal);
             mealSuggestions = {
                 ...mealSuggestions,
-                [key]: { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at },
+                [key]: { loading: false, text: res.suggestion, error: null, open: true, generatedAt: res.generated_at },
             };
         } catch {
             mealSuggestions = {
@@ -422,18 +417,13 @@
         const key = `${date}|${meal}`;
         mealSuggestions = {
             ...mealSuggestions,
-            [key]: { loading: false, text: "", error: null, open: true, generatedAt: null },
+            [key]: { loading: true, text: null, error: null, open: true, generatedAt: null },
         };
         try {
-            const res = await streamMealSuggestion(date, meal, (chunk) => {
-                mealSuggestions = {
-                    ...mealSuggestions,
-                    [key]: { ...mealSuggestions[key], text: (mealSuggestions[key]?.text ?? "") + chunk },
-                };
-            });
+            const res = await generateMealSuggestion(date, meal);
             mealSuggestions = {
                 ...mealSuggestions,
-                [key]: { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at },
+                [key]: { loading: false, text: res.suggestion, error: null, open: true, generatedAt: res.generated_at },
             };
         } catch {
             mealSuggestions = {
@@ -455,11 +445,8 @@
                     return;
                 }
             }
-            dayInsight = { loading: false, text: "", error: null, open: true, generatedAt: null };
-            const res = await streamDayInsights(date, (chunk) => {
-                dayInsight = { ...dayInsight, text: (dayInsight.text ?? "") + chunk };
-            });
-            dayInsight = { loading: false, text: res.text, error: null, open: true, generatedAt: res.generated_at };
+            const res = await generateDayInsights(date);
+            dayInsight = { loading: false, text: res.insight, error: null, open: true, generatedAt: res.generated_at };
         } catch (e) {
             dayInsight = { loading: false, text: null, error: e.message || "Could not load insights", open: true, generatedAt: null };
         }
@@ -505,22 +492,13 @@
                     return;
                 }
             }
-            insightsByWeek = {
-                ...insightsByWeek,
-                [weekStart]: { open: true, loading: false, text: "", error: null, generatedAt: null, loaded: false },
-            };
-            const res = await streamInsights(weekStart, weekEnd, (chunk) => {
-                insightsByWeek = {
-                    ...insightsByWeek,
-                    [weekStart]: { ...insightsByWeek[weekStart], text: (insightsByWeek[weekStart]?.text ?? "") + chunk },
-                };
-            });
+            const res = await generateInsights(weekStart, weekEnd);
             insightsByWeek = {
                 ...insightsByWeek,
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.text,
+                    text: res.insight,
                     error: null,
                     generatedAt: res.generated_at,
                     loaded: true,
@@ -623,22 +601,13 @@
                     return;
                 }
             }
-            suggestionsByWeek = {
-                ...suggestionsByWeek,
-                [weekStart]: { open: true, loading: false, text: "", error: null, generatedAt: null, loaded: false },
-            };
-            const res = await streamWeekSuggestions(weekStart, weekEnd, (chunk) => {
-                suggestionsByWeek = {
-                    ...suggestionsByWeek,
-                    [weekStart]: { ...suggestionsByWeek[weekStart], text: (suggestionsByWeek[weekStart]?.text ?? "") + chunk },
-                };
-            });
+            const res = await generateWeekSuggestions(weekStart, weekEnd);
             suggestionsByWeek = {
                 ...suggestionsByWeek,
                 [weekStart]: {
                     open: true,
                     loading: false,
-                    text: res.text,
+                    text: res.suggestions,
                     error: null,
                     generatedAt: res.generated_at,
                     loaded: true,
@@ -914,7 +883,13 @@
                 </div>
                 {#if ms?.open}
                     <div class="insights-panel suggestions-panel">
-                        {#if ms.error}
+                        {#if ms.loading}
+                            <div class="insight-skeleton">
+                                <div class="isk-line" style="width: 88%"></div>
+                                <div class="isk-line" style="width: 72%"></div>
+                                <div class="isk-line" style="width: 80%"></div>
+                            </div>
+                        {:else if ms.error}
                             <span class="insights-err">{ms.error}</span>
                         {:else if ms.text != null}
                             <!-- eslint-disable-next-line svelte/no-at-html-tags -->

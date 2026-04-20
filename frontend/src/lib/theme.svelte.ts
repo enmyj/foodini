@@ -7,7 +7,7 @@ function load() {
     return localStorage.getItem(STORAGE_KEY) || "system";
 }
 
-function apply(pref) {
+function apply(pref: string) {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     if (pref === "light" || pref === "dark") {

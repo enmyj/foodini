@@ -1,6 +1,6 @@
 <script>
   import { createQuery } from '@tanstack/svelte-query'
-  import { getActivity } from './api.js'
+  import { getActivity } from './api.ts'
 
   let { date, onOpen, refreshKey = 0 } = $props()
 

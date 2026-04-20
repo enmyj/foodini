@@ -65,15 +65,6 @@ func (h *Handler) Insights(c *echo.Context) error {
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	if wantsStream(c) {
-		insight, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.InsightsPrompt())
-		if err != nil {
-			return nil // response already committed
-		}
-		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "week", StartDate: req.Start, EndDate: req.End, GeneratedAt: generatedAt, Insight: insight})
-		return nil
-	}
-
 	insight, err := h.gemini.Insights(ctx, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
@@ -134,15 +125,6 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 		profile, _ := svc.GetProfile(ctx)
 		profileCtx = formatProfileContext(profile, LocalNow(r).Year())
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
-	}
-
-	if wantsStream(c) {
-		insight, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.DayInsightsPrompt())
-		if err != nil {
-			return nil
-		}
-		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "day", StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: insight})
-		return nil
 	}
 
 	insight, err := h.gemini.DayInsights(ctx, summary, profileCtx)
@@ -264,15 +246,6 @@ func (h *Handler) DaySuggestions(c *echo.Context) error {
 		sugType = "next-day"
 	}
 
-	if wantsStream(c) {
-		suggestions, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.MealSuggestionsPrompt())
-		if err != nil {
-			return nil
-		}
-		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "day-suggestions", StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: sugType + "\n" + suggestions})
-		return nil
-	}
-
 	suggestions, err := h.gemini.MealSuggestions(ctx, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
@@ -366,15 +339,6 @@ func (h *Handler) WeekSuggestions(c *echo.Context) error {
 		h.cacheSet(profileCacheKey, []byte(profileCtx))
 	}
 
-	if wantsStream(c) {
-		suggestions, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.WeekSuggestionsPrompt())
-		if err != nil {
-			return nil
-		}
-		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: "week-suggestions", StartDate: req.Start, EndDate: req.End, GeneratedAt: generatedAt, Insight: suggestions})
-		return nil
-	}
-
 	suggestions, err := h.gemini.WeekMealSuggestions(ctx, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
@@ -452,15 +416,6 @@ func (h *Handler) MealSuggestion(c *echo.Context) error {
 	}
 
 	insightType := "meal-suggestion:" + req.Meal
-
-	if wantsStream(c) {
-		suggestion, generatedAt, err := h.streamInsight(c, summary, profileCtx, h.gemini.SingleMealSuggestionPrompt())
-		if err != nil {
-			return nil
-		}
-		_ = svc.SaveInsight(ctx, sheets.InsightRecord{Type: insightType, StartDate: req.Date, EndDate: req.Date, GeneratedAt: generatedAt, Insight: suggestion})
-		return nil
-	}
 
 	suggestion, err := h.gemini.SingleMealSuggestion(ctx, summary, profileCtx)
 	if err != nil {

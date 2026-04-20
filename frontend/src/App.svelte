@@ -1,9 +1,9 @@
 <script>
     import { onMount } from "svelte";
     import { QueryClientProvider } from "@tanstack/svelte-query";
-    import { queryClient } from "./lib/queryClient.js";
-    import { navigate, init as initRouter, getCurrent } from "./lib/router.svelte.js";
-    import { initTheme } from "./lib/theme.svelte.js";
+    import { queryClient } from "./lib/queryClient.ts";
+    import { navigate, init as initRouter, getCurrent } from "./lib/router.svelte.ts";
+    import { initTheme } from "./lib/theme.svelte.ts";
     import { marked } from "marked";
     import LogView from "./lib/LogView.svelte";
     import MarkdownPage from "./lib/MarkdownPage.svelte";

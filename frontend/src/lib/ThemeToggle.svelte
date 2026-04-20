@@ -1,5 +1,5 @@
 <script>
-    import { getTheme, cycleTheme } from "./theme.svelte.js";
+    import { getTheme, cycleTheme } from "./theme.svelte.ts";
 
     let theme = $state(getTheme());
 </script>

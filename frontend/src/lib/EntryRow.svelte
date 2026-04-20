@@ -1,7 +1,7 @@
 <script>
-    import { patchEntry, deleteEntry } from "./api.js";
-    import { autosize } from "./autosize.js";
-    import { showError } from "./toast.js";
+    import { patchEntry, deleteEntry } from "./api.ts";
+    import { autosize } from "./autosize.ts";
+    import { showError } from "./toast.ts";
 
     let { entry, onUpdate, onDelete, onFavorite = null, isFavorited = false } = $props();
 
