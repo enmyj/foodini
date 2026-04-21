@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
+    import { chat, confirmChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
     import { todayStr } from "./date.ts";
@@ -63,25 +63,18 @@
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let fileInputEl = $state<HTMLInputElement | null>(null);
     let mealError = $state(false);
-    let savedEntries = $state<Entry[] | null>(null); // entries just saved, awaiting confirmation
 
-    // Edit mode state
-    let editModeEntries = $state<Entry[] | null>(null);
-    let activeEditMealType = $state<MealType | null>(null);
-    let editSending = $state(false);
-    let editMessage = $state("");
+    // Entries — always initialised (empty [] for new meals, pre-filled for edits)
+    let entries = $state<Entry[]>([]);
     let scalingAll = $state(false);
     let scaleAllOpen = $state(false);
     let scalingEntry = $state(-1);
     let scaleEntryOpen = $state(-1);
     let favorites = $state<Favorite[] | null>(null);
     let favSearch = $state("");
-    let showFavPicker = $state(false);
-    let cameFromConfirm = $state(false);
     let deletingEntryIds = $state<Set<string>>(new Set());
 
-    let isEditMode = $derived(editModeEntries !== null && editModeEntries.length > 0);
-    let started = $derived(sending || savedEntries !== null || clarifyingQuestion !== null);
+    let hasEntries = $derived(entries.length > 0);
     let filteredFavs = $derived.by(() => {
         if (!favorites || !favSearch.trim()) return favorites ?? [];
         const q = favSearch.toLowerCase();
@@ -135,21 +128,6 @@
             entries: EntryInput[];
             date: string;
         }) => confirmChat(entries, date),
-    }));
-
-    const editChatMutation = createMutation(() => ({
-        mutationFn: ({
-            message,
-            entries,
-            date,
-            mealType,
-        }: {
-            message: string;
-            entries: Entry[];
-            date: string;
-            mealType: MealType | null;
-        }) => editChat(message, entries, date, mealType),
-        onError: (err) => showError(err, "Failed to edit meal."),
     }));
 
     const patchEntryMutation = createMutation(() => ({
@@ -225,24 +203,17 @@
             if (isOpen) {
                 tab = initialTab;
                 selectedDate = date || todayStr();
-                selectedMeal = meal;
+                selectedMeal = editMealType ?? meal;
                 clearPendingImages();
                 input = "";
                 sending = false;
                 clarifyingQuestion = null;
-                savedEntries = null;
-                // Edit mode init
-                editModeEntries = editEntries ? [...editEntries] : null;
-                activeEditMealType = editMealType;
-                editSending = false;
-                editMessage = "";
+                entries = editEntries ? [...editEntries] : [];
                 scalingAll = false;
                 scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
-                showFavPicker = false;
                 favSearch = "";
-                cameFromConfirm = false;
                 deletingEntryIds = new Set();
                 if (!favorites) {
                     getFavorites().then((res) => { favorites = res.favorites ?? []; }).catch(() => {});
@@ -254,18 +225,12 @@
                 clearPendingImages();
                 input = "";
                 clarifyingQuestion = null;
-                savedEntries = null;
-                editModeEntries = null;
-                activeEditMealType = null;
-                editSending = false;
-                editMessage = "";
+                entries = [];
                 scalingAll = false;
                 scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
-                showFavPicker = false;
                 favSearch = "";
-                cameFromConfirm = false;
                 deletingEntryIds = new Set();
                 activityText = "";
                 feelingNotes = "";
@@ -378,7 +343,7 @@
             });
             sending = false;
             if (res.done && res.entries?.length) {
-                savedEntries = res.entries;
+                entries = [...entries, ...res.entries];
                 onEntriesAdded(res.entries);
             } else if (!res.done) {
                 clarifyingQuestion = res.message || "Need more details.";
@@ -388,60 +353,15 @@
         }
     }
 
-    function confirmSaved() {
-        onClose();
-    }
-
-    function switchToEdit(): void {
-        if (!savedEntries || !selectedMeal) return;
-        editModeEntries = [...savedEntries];
-        activeEditMealType = selectedMeal;
-        savedEntries = null;
-        cameFromConfirm = true;
-    }
-
-    function goBackFromEdit(): void {
-        if (cameFromConfirm && editModeEntries) {
-            savedEntries = [...editModeEntries];
-            editModeEntries = null;
-            activeEditMealType = null;
-            cameFromConfirm = false;
-        } else {
-            onClose();
-        }
-    }
-
-    // --- Edit mode functions ---
-
-    async function sendEdit(): Promise<void> {
-        if (editSending || !editMessage.trim() || !editModeEntries) return;
-        const text = editMessage.trim();
-        editMessage = "";
-        editSending = true;
-        try {
-            const res = await editChatMutation.mutateAsync({
-                message: text,
-                entries: editModeEntries,
-                date: selectedDate,
-                mealType: activeEditMealType,
-            });
-            if (res.entries?.length) {
-                editModeEntries = res.entries;
-                if (onEntriesEdited) onEntriesEdited(res.entries);
-            }
-        } catch {
-        } finally {
-            editSending = false;
-        }
-    }
+    // --- Entry editing functions ---
 
     async function scaleAllEntries(factor: number): Promise<void> {
-        if (scalingAll || !editModeEntries) return;
+        if (scalingAll || !entries.length) return;
         scalingAll = true;
         try {
             const r1 = (v: number) => Math.round(v * factor);
             const r10 = (v: number) => Math.round(v * factor * 10) / 10;
-            const updates = editModeEntries.map((e) => ({
+            const updates = entries.map((e) => ({
                 ...e,
                 calories: r1(e.calories),
                 protein: r10(e.protein),
@@ -454,7 +374,7 @@
                     patchEntryMutation.mutateAsync({ id: u.id, entry: u }),
                 ),
             );
-            editModeEntries = saved;
+            entries = saved;
             if (onEntriesEdited) onEntriesEdited(saved);
         } catch (err) {
             showError(err, "Failed to scale meal.");
@@ -464,11 +384,11 @@
     }
 
     async function scaleOneEntry(index: number, factor: number): Promise<void> {
-        if (scalingEntry >= 0 || !editModeEntries) return;
+        if (scalingEntry >= 0 || !entries.length) return;
         scalingEntry = index;
         scaleEntryOpen = -1;
         try {
-            const entry = editModeEntries[index];
+            const entry = entries[index];
             if (!entry) return;
             const r1 = (v: number) => Math.round(v * factor);
             const r10 = (v: number) => Math.round(v * factor * 10) / 10;
@@ -484,8 +404,8 @@
                 id: updated.id,
                 entry: updated,
             });
-            editModeEntries = editModeEntries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(editModeEntries);
+            entries = entries.map((e) => e.id === saved.id ? saved : e);
+            if (onEntriesEdited) onEntriesEdited(entries);
         } catch (err) {
             showError(err, "Failed to scale entry.");
         } finally {
@@ -498,37 +418,34 @@
         field: EditableEntryField,
         value: number,
     ): Promise<void> {
-        if (!editModeEntries) return;
-        const entry = editModeEntries[index];
+        const entry = entries[index];
         if (!entry) return;
         const updated: Entry = { ...entry, [field]: value };
-        editModeEntries = editModeEntries.map((e, i) => i === index ? updated : e);
+        entries = entries.map((e, i) => i === index ? updated : e);
         try {
             const saved = await patchEntryMutation.mutateAsync({
                 id: updated.id,
                 entry: updated,
             });
-            editModeEntries = editModeEntries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(editModeEntries);
+            entries = entries.map((e) => e.id === saved.id ? saved : e);
+            if (onEntriesEdited) onEntriesEdited(entries);
         } catch (err) {
             showError(err, "Failed to save change.");
         }
     }
 
-    async function deleteEditEntry(index: number): Promise<void> {
-        if (!editModeEntries) return;
-        const entry = editModeEntries[index];
+    async function deleteEntry_(index: number): Promise<void> {
+        const entry = entries[index];
         if (!entry || deletingEntryIds.has(entry.id)) return;
-        const previousEntries = [...editModeEntries];
-        const nextEntries = editModeEntries.filter((_, i) => i !== index);
+        const previousEntries = [...entries];
+        const nextEntries = entries.filter((_, i) => i !== index);
         deletingEntryIds = new Set([...deletingEntryIds, entry.id]);
-        editModeEntries = nextEntries;
+        entries = nextEntries;
         if (onEntriesEdited) onEntriesEdited(nextEntries);
         try {
             await deleteEntryMutation.mutateAsync(entry.id);
-            if (nextEntries.length === 0) onClose();
         } catch (err) {
-            editModeEntries = previousEntries;
+            entries = previousEntries;
             if (onEntriesEdited) onEntriesEdited(previousEntries);
             showError(err, "Failed to delete entry.");
         } finally {
@@ -539,99 +456,9 @@
     }
 
     async function addFavoriteToMeal(fav: Favorite): Promise<void> {
-        if (!activeEditMealType || !editModeEntries) return;
-        showFavPicker = false;
-        try {
-            const entries: EntryInput[] = [{
-                meal_type: activeEditMealType,
-                description: fav.description,
-                calories: fav.calories,
-                protein: fav.protein,
-                carbs: fav.carbs,
-                fat: fav.fat,
-                fiber: fav.fiber ?? 0,
-            }];
-            const res = await confirmChatMutation.mutateAsync({
-                entries,
-                date: selectedDate,
-            });
-            if (res.entries?.length) {
-                const nextEntries = [...editModeEntries, ...res.entries];
-                editModeEntries = nextEntries;
-                if (onEntriesEdited) onEntriesEdited(nextEntries);
-            }
-        } catch (err) {
-            showError(err, "Failed to add favorite.");
-        }
-    }
-
-    async function repeatYesterday(): Promise<void> {
-        if (!yesterdayEntries.length) return;
-        if (isEditMode) {
-            if (!activeEditMealType || !editModeEntries) return;
-            const mealType = activeEditMealType;
-            // Edit mode: add to existing entries
-            editSending = true;
-            try {
-                const entries: EntryInput[] = yesterdayEntries.map((e) => ({
-                    meal_type: mealType,
-                    description: e.description,
-                    calories: e.calories,
-                    protein: e.protein,
-                    carbs: e.carbs,
-                    fat: e.fat,
-                    fiber: e.fiber ?? 0,
-                }));
-                const res = await confirmChatMutation.mutateAsync({
-                    entries,
-                    date: selectedDate,
-                });
-                if (res.entries?.length && editModeEntries) {
-                    const nextEntries = [...editModeEntries, ...res.entries];
-                    editModeEntries = nextEntries;
-                    if (onEntriesEdited) onEntriesEdited(nextEntries);
-                }
-            } catch (err) {
-                showError(err, "Failed to repeat yesterday's meal.");
-            } finally {
-                editSending = false;
-            }
-        } else {
-            if (!selectedMeal) return;
-            const mealType = selectedMeal;
-            // New-entry mode: save and show confirmation
-            sending = true;
-            try {
-                const entries: EntryInput[] = yesterdayEntries.map((e) => ({
-                    meal_type: mealType,
-                    description: e.description,
-                    calories: e.calories,
-                    protein: e.protein,
-                    carbs: e.carbs,
-                    fat: e.fat,
-                    fiber: e.fiber ?? 0,
-                }));
-                const res = await confirmChatMutation.mutateAsync({
-                    entries,
-                    date: selectedDate,
-                });
-                sending = false;
-                if (res.entries?.length) {
-                    savedEntries = res.entries;
-                    onEntriesAdded(res.entries);
-                }
-            } catch (err) {
-                sending = false;
-                showError(err, "Failed to repeat yesterday's meal.");
-            }
-        }
-    }
-
-    async function addFavToNewMeal(fav: Favorite): Promise<void> {
         if (!selectedMeal) return;
-        sending = true;
         try {
-            const entries: EntryInput[] = [{
+            const input_: EntryInput[] = [{
                 meal_type: selectedMeal,
                 description: fav.description,
                 calories: fav.calories,
@@ -641,30 +468,49 @@
                 fiber: fav.fiber ?? 0,
             }];
             const res = await confirmChatMutation.mutateAsync({
-                entries,
+                entries: input_,
                 date: selectedDate,
             });
-            sending = false;
             if (res.entries?.length) {
-                savedEntries = [...(savedEntries ?? []), ...res.entries];
+                entries = [...entries, ...res.entries];
                 onEntriesAdded(res.entries);
             }
         } catch (err) {
-            sending = false;
             showError(err, "Failed to add favorite.");
+        }
+    }
+
+    async function repeatYesterday(): Promise<void> {
+        if (!yesterdayEntries.length || !selectedMeal) return;
+        sending = true;
+        try {
+            const input_: EntryInput[] = yesterdayEntries.map((e) => ({
+                meal_type: selectedMeal!,
+                description: e.description,
+                calories: e.calories,
+                protein: e.protein,
+                carbs: e.carbs,
+                fat: e.fat,
+                fiber: e.fiber ?? 0,
+            }));
+            const res = await confirmChatMutation.mutateAsync({
+                entries: input_,
+                date: selectedDate,
+            });
+            if (res.entries?.length) {
+                entries = [...entries, ...res.entries];
+                onEntriesAdded(res.entries);
+            }
+        } catch (err) {
+            showError(err, "Failed to repeat yesterday's meal.");
+        } finally {
+            sending = false;
         }
     }
 
     function numberValueFromEvent(e: FocusEvent): number {
         const target = e.currentTarget as HTMLInputElement;
         return Number(target.value);
-    }
-
-    function onEditKeyDown(e: KeyboardEvent) {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            sendEdit();
-        }
     }
 
     function onKeyDown(e: KeyboardEvent) {
@@ -714,70 +560,66 @@
         </div>
 
         {#if tab === "food"}
-            {#if isEditMode}
-                <!-- ===== EDIT MODE ===== -->
-                <div class="meta-locked">
-                    <span class="meta-chip">{activeEditMealType}</span>
-                    <div class="scale-btns">
-                        <button
-                            class="scale-toggle"
-                            class:open={scaleAllOpen}
-                            onclick={() => (scaleAllOpen = !scaleAllOpen)}
-                            disabled={scalingAll}
-                            aria-label="Scale entire meal"
-                            title="Scale entire meal"
-                            >⊕</button
-                        >
-                        {#if scaleAllOpen}
-                            {#each [0.75, 1.25, 1.5, 2] as factor}
-                                <button
-                                    class="scale-pill"
-                                    onclick={() => { scaleAllOpen = false; scaleAllEntries(factor); }}
-                                    disabled={scalingAll}
-                                    >&times;{factor}</button
-                                >
-                            {/each}
-                        {/if}
-                        <button
-                            class="scale-pill fav-pill"
-                            onclick={() => (showFavPicker = !showFavPicker)}
-                            >+ Fav</button
-                        >
-                        {#if yesterdayEntries.length > 0}
+            <!-- Meal header -->
+            {#if !selectedMeal}
+                <div class="meal-pills-wrap" class:shake={mealError}>
+                    <div class="meal-pills">
+                        {#each MEALS as m}
                             <button
-                                class="scale-pill repeat-pill"
-                                onclick={repeatYesterday}
-                                disabled={editSending}
-                                title="Repeat yesterday's {activeEditMealType}"
-                                >Repeat</button
+                                class="meal-pill"
+                                class:selected={selectedMeal === m}
+                                onclick={() =>
+                                    (selectedMeal =
+                                        selectedMeal === m ? null : m)}
+                                >{m}</button
                             >
-                        {/if}
+                        {/each}
                     </div>
                 </div>
-                {#if showFavPicker && favorites}
-                    <div class="fav-picker">
-                        <input
-                            class="fav-search"
-                            type="text"
-                            placeholder="Search favorites…"
-                            bind:value={favSearch}
-                        />
-                        <div class="fav-list">
-                            {#each filteredFavs as fav}
-                                <button class="fav-item" onclick={() => addFavoriteToMeal(fav)}>
-                                    <span class="fav-desc">{fav.description}</span>
-                                    <span class="fav-cal">{fav.calories} cal</span>
-                                </button>
-                            {/each}
-                            {#if filteredFavs.length === 0}
-                                <span class="fav-empty">No favorites found</span>
+            {:else}
+                <div class="meta-locked">
+                    <span class="meta-chip">{selectedMeal}</span>
+                    {#if hasEntries}
+                        <div class="scale-btns">
+                            <button
+                                class="scale-toggle"
+                                class:open={scaleAllOpen}
+                                onclick={() => (scaleAllOpen = !scaleAllOpen)}
+                                disabled={scalingAll}
+                                aria-label="Scale entire meal"
+                                title="Scale entire meal"
+                                >⊕</button
+                            >
+                            {#if scaleAllOpen}
+                                {#each [0.75, 1.25, 1.5, 2] as factor}
+                                    <button
+                                        class="scale-pill"
+                                        onclick={() => { scaleAllOpen = false; scaleAllEntries(factor); }}
+                                        disabled={scalingAll}
+                                        >&times;{factor}</button
+                                    >
+                                {/each}
+                            {/if}
+                            {#if yesterdayEntries.length > 0}
+                                <button
+                                    class="scale-pill repeat-pill"
+                                    onclick={repeatYesterday}
+                                    disabled={sending}
+                                    title="Repeat yesterday's {selectedMeal}"
+                                    >Repeat</button
+                                >
                             {/if}
                         </div>
-                    </div>
-                {/if}
-                <div class="content-area">
-                    <div class="result-card" class:dimmed={editSending}>
-                        {#each editModeEntries as entry, i}
+                    {/if}
+                </div>
+            {/if}
+
+            <!-- Content area -->
+            <div class="content-area">
+                <!-- Existing entries with inline editing -->
+                {#if hasEntries}
+                    <div class="result-card" class:dimmed={sending}>
+                        {#each entries as entry, i}
                             <div class="card-entry" class:dimmed={deletingEntryIds.has(entry.id)}>
                                 <div class="card-entry-head">
                                     <div class="card-desc">{entry.description}</div>
@@ -793,7 +635,7 @@
                                         >
                                         <button
                                             class="entry-delete"
-                                            onclick={() => deleteEditEntry(i)}
+                                            onclick={() => deleteEntry_(i)}
                                             disabled={deletingEntryIds.has(entry.id)}
                                             aria-label="Delete entry">✕</button
                                         >
@@ -815,160 +657,90 @@
                                     <span class="macro-field">
                                         <input type="number" value={entry.calories}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "calories", numberValueFromEvent(e))}
-                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
+                                            disabled={sending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">cal</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.protein}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "protein", numberValueFromEvent(e))}
-                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
+                                            disabled={sending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">P</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.carbs}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "carbs", numberValueFromEvent(e))}
-                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
+                                            disabled={sending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">C</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fat}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "fat", numberValueFromEvent(e))}
-                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
+                                            disabled={sending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">F</span>
                                     </span>
                                     <span class="macro-sep">·</span>
                                     <span class="macro-field">
                                         <input type="number" value={entry.fiber ?? 0}
                                             onblur={(e: FocusEvent) => editInlineEntry(i, "fiber", numberValueFromEvent(e))}
-                                            disabled={editSending || deletingEntryIds.has(entry.id)} />
+                                            disabled={sending || deletingEntryIds.has(entry.id)} />
                                         <span class="macro-label">Fb</span>
                                     </span>
                                 </div>
                             </div>
                         {/each}
                     </div>
-                </div>
-                <div class="input-row">
-                    <textarea
-                        class="text-entry composer-input"
-                        use:autosize
-                        bind:value={editMessage}
-                        onkeydown={onEditKeyDown}
-                        placeholder="Describe changes…"
-                        rows="1"
-                        disabled={editSending}
-                    ></textarea>
-                    <button
-                        onclick={sendEdit}
-                        disabled={editSending || !editMessage.trim()}
-                        >Add/Edit</button
-                    >
-                    <button class="edit-done-btn" onclick={goBackFromEdit}>Back</button>
-                </div>
-            {:else}
-            <!-- ===== NEW ENTRY MODE ===== -->
-            <!-- Meal pills -->
-            {#if !started}
-                <div class="meal-pills-wrap" class:shake={mealError}>
-                    <div class="meal-pills">
-                        {#each MEALS as m}
-                            <button
-                                class="meal-pill"
-                                class:selected={selectedMeal === m}
-                                onclick={() =>
-                                    (selectedMeal =
-                                        selectedMeal === m ? null : m)}
-                                >{m}</button
-                            >
-                        {/each}
-                    </div>
-                </div>
-            {:else}
-                <div class="meta-locked">
-                    {#if selectedMeal}<span class="meta-chip"
-                            >{selectedMeal}</span
-                        >{/if}
-                </div>
-            {/if}
+                {/if}
 
-            <!-- Content area -->
-            <div class="content-area">
-                {#if sending}
-                    <!-- Skeleton loading -->
+                <!-- Skeleton (only when loading with no entries yet) -->
+                {#if sending && !hasEntries}
                     <div class="skeleton-card">
                         <div class="skeleton-entry">
                             <div class="sk-line" style="width: 62%"></div>
-                            <div
-                                class="sk-line"
-                                style="width: 80%; margin-top: 0.4rem; opacity: 0.6"
-                            ></div>
+                            <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
                         </div>
                         <div class="skeleton-entry">
                             <div class="sk-line" style="width: 45%"></div>
-                            <div
-                                class="sk-line"
-                                style="width: 80%; margin-top: 0.4rem; opacity: 0.6"
-                            ></div>
+                            <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
                         </div>
                     </div>
-                {:else if savedEntries}
-                    <!-- Saved confirmation -->
-                    <div class="result-card">
-                        {#each savedEntries as entry}
-                            <div class="card-entry">
-                                <div class="card-desc">{entry.description}</div>
-                                <div class="card-macros">
-                                    <span class="macro-field"><span class="macro-val">{entry.calories}</span><span class="macro-label">cal</span></span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field"><span class="macro-val">{entry.protein}</span><span class="macro-label">P</span></span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field"><span class="macro-val">{entry.carbs}</span><span class="macro-label">C</span></span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field"><span class="macro-val">{entry.fat}</span><span class="macro-label">F</span></span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field"><span class="macro-val">{entry.fiber ?? 0}</span><span class="macro-label">Fb</span></span>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-                {:else}
-                    {#if clarifyingQuestion}
-                        <p class="clarifying">{clarifyingQuestion}</p>
-                    {/if}
-                    <!-- Quick add: favorites + repeat -->
-                    {#if !started && selectedMeal && favorites}
-                        <div class="quick-add">
-                            {#if mealIsEmpty && yesterdayEntries.length > 0}
-                                <button
-                                    class="repeat-btn"
-                                    onclick={repeatYesterday}
-                                    >Repeat yesterday's {selectedMeal}</button
-                                >
-                            {/if}
-                            {#if favorites.length > 0}
-                                <input
-                                    class="fav-search"
-                                    type="text"
-                                    placeholder="Search favorites…"
-                                    bind:value={favSearch}
-                                />
-                                <div class="fav-list">
-                                    {#each filteredFavs.slice(0, 8) as fav}
-                                        <button class="fav-item" onclick={() => addFavToNewMeal(fav)}>
-                                            <span class="fav-desc">{fav.description}</span>
-                                            <span class="fav-cal">{fav.calories} cal</span>
-                                        </button>
-                                    {/each}
-                                    {#if filteredFavs.length === 0}
-                                        <span class="fav-empty">No favorites found</span>
-                                    {/if}
-                                </div>
+                {/if}
+
+                {#if clarifyingQuestion}
+                    <p class="clarifying">{clarifyingQuestion}</p>
+                {/if}
+
+                <!-- Favorites + repeat yesterday -->
+                {#if selectedMeal && favorites && favorites.length > 0}
+                    <div class="quick-add">
+                        {#if !hasEntries && mealIsEmpty && yesterdayEntries.length > 0}
+                            <button
+                                class="repeat-btn"
+                                onclick={repeatYesterday}
+                                disabled={sending}
+                                >Repeat yesterday's {selectedMeal}</button
+                            >
+                        {/if}
+                        <input
+                            class="fav-search"
+                            type="text"
+                            placeholder="Search favorites…"
+                            bind:value={favSearch}
+                        />
+                        <div class="fav-list">
+                            {#each filteredFavs.slice(0, 8) as fav}
+                                <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
+                                    <span class="fav-desc">{fav.description}</span>
+                                    <span class="fav-cal">{fav.calories} cal</span>
+                                </button>
+                            {/each}
+                            {#if filteredFavs.length === 0}
+                                <span class="fav-empty">No favorites found</span>
                             {/if}
                         </div>
-                    {/if}
+                    </div>
                 {/if}
             </div>
 
@@ -982,12 +754,7 @@
             />
 
             <!-- Bottom controls -->
-            {#if savedEntries}
-                <div class="confirm-btns">
-                    <button class="confirm-done" onclick={confirmSaved}>Save</button>
-                    <button class="confirm-edit" onclick={switchToEdit}>Edit</button>
-                </div>
-            {:else if !sending}
+            {#if selectedMeal && (!sending || hasEntries)}
                 {#if pendingImages.length}
                     <div class="thumb-strip">
                         {#each pendingImages as img, i}
@@ -1051,7 +818,7 @@
                         use:autosize
                         bind:value={input}
                         onkeydown={onKeyDown}
-                        placeholder="What did you eat?"
+                        placeholder={hasEntries ? "Add more…" : "What did you eat?"}
                         rows="1"
                         disabled={sending}
                     ></textarea>
@@ -1059,10 +826,14 @@
                         onclick={send}
                         disabled={sending ||
                             (!input.trim() && !pendingImages.length)}
-                        >Send</button
+                        >{hasEntries ? "Add" : "Send"}</button
                     >
                 </div>
             {/if}
+            {#if hasEntries}
+                <div class="confirm-btns">
+                    <button class="confirm-done" onclick={onClose}>Done</button>
+                </div>
             {/if}
         {:else}
             <!-- Activity form -->
@@ -1377,17 +1148,11 @@
         margin: 0 0.1rem;
     }
 
-    .macro-val {
-        font-family: var(--num-stack);
-        font-size: var(--t-meta);
-        color: var(--ink);
-        font-variant-numeric: tabular-nums;
-    }
-
     /* --- Confirmation buttons --- */
     .confirm-btns {
         display: flex;
         gap: 0.5rem;
+        margin-top: 0.5rem;
     }
 
     .confirm-done {
@@ -1403,39 +1168,9 @@
         font-weight: 500;
     }
 
-    .confirm-edit {
-        padding: 0.6rem 1rem;
-        background: none;
-        color: var(--ink-mute);
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        cursor: pointer;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-    }
-
     @media (hover: hover) {
         .confirm-done:hover {
             background: var(--ink);
-        }
-        .confirm-edit:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .edit-done-btn {
-        background: none;
-        color: var(--ink-mute);
-        border: 1px solid var(--rule);
-        font-weight: 500;
-    }
-
-    @media (hover: hover) {
-        .edit-done-btn:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
         }
     }
 
@@ -1662,10 +1397,6 @@
         cursor: default;
     }
 
-    .fav-pill {
-        margin-left: auto;
-    }
-
     .card-entry-head {
         display: flex;
         justify-content: space-between;
@@ -1730,10 +1461,6 @@
         .entry-delete:hover {
             color: var(--danger, #c00);
         }
-    }
-
-    .fav-picker {
-        margin-bottom: 0.5rem;
     }
 
     .fav-search {

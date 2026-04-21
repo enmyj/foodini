@@ -299,12 +299,12 @@
     }
 
     function onEntriesEdited(updatedEntries: Entry[]) {
-        const editedMeal = drawerEditMealType;
+        const mealType = drawerEditMealType ?? drawerMeal;
         applyDayLogMutation(updatedEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
-            replaceMealEntriesInLogCache(old, editedMeal, updatedEntries),
+            replaceMealEntriesInLogCache(old, mealType, updatedEntries),
         );
-        if (editedMeal && (updatedEntries[0]?.date ?? currentDate) === currentDate) {
-            collapsedMeals = new Set([...collapsedMeals, editedMeal]);
+        if (mealType && (updatedEntries[0]?.date ?? currentDate) === currentDate) {
+            collapsedMeals = new Set([...collapsedMeals, mealType]);
         }
     }
 
