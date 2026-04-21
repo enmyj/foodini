@@ -42,7 +42,6 @@
 
     const queryClient = useQueryClient();
     const LOG_RECONCILE_DELAY_MS = 1200;
-    const DAY_INSIGHT_REGEN_DELAY_MS = 900;
 
     type ViewMode = "day" | "favorites" | "history" | "profile";
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -70,7 +69,7 @@
     let favoritedDescs = $state<Set<string>>(new Set());
     let logReconcileTimer: ReturnType<typeof setTimeout> | null = null;
     let dayInsightFresh = $state(false);
-    let dayInsightRegenTimer: ReturnType<typeof setTimeout> | null = null;
+    let dayInsightStale = $state(false);
     let dayInsightRequestId = 0;
 
     const addFavoriteMutation = createMutation(() => ({
@@ -190,10 +189,7 @@
         if (view === "day") {
             void currentDate;
             dayInsightRequestId++;
-            if (dayInsightRegenTimer) {
-                clearTimeout(dayInsightRegenTimer);
-                dayInsightRegenTimer = null;
-            }
+            dayInsightStale = false;
             collapsedMeals = new Set(MEAL_ORDER);
             dayInsight = null;
             dayInsightExpanded = false;
@@ -205,7 +201,6 @@
     $effect(() => {
         return () => {
             if (logReconcileTimer) clearTimeout(logReconcileTimer);
-            if (dayInsightRegenTimer) clearTimeout(dayInsightRegenTimer);
         };
     });
 
@@ -350,6 +345,16 @@
         drawerField = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
+        if (dayInsightStale && view === "day") {
+            dayInsightStale = false;
+            void fetchDayInsights(currentDate, true, {
+                open: dayInsight?.open ?? false,
+            }).then(() => {
+                if (!dayInsight?.open && dayInsight?.text) {
+                    dayInsightFresh = true;
+                }
+            });
+        }
     }
 
     function closeProfile() {
@@ -437,8 +442,8 @@
             queryClient.setQueryData(queryKeys.logDay(currentDate), updater);
         }
         scheduleLogReconcile();
-        if (date === currentDate) {
-            scheduleDayInsightRegeneration(currentDate);
+        if (date === currentDate && dayInsight?.text) {
+            dayInsightStale = true;
         }
     }
 
@@ -448,21 +453,6 @@
             logReconcileTimer = null;
             void queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
         }, LOG_RECONCILE_DELAY_MS);
-    }
-
-    function scheduleDayInsightRegeneration(date: string): void {
-        if (dayInsightRegenTimer) clearTimeout(dayInsightRegenTimer);
-        dayInsightRegenTimer = setTimeout(() => {
-            dayInsightRegenTimer = null;
-            if (view !== "day" || currentDate !== date) return;
-            void fetchDayInsights(date, true, {
-                open: dayInsight?.open ?? false,
-            }).then(() => {
-                if (!dayInsight?.open && dayInsight?.text) {
-                    dayInsightFresh = true;
-                }
-            });
-        }, DAY_INSIGHT_REGEN_DELAY_MS);
     }
 
     async function fetchDayInsights(

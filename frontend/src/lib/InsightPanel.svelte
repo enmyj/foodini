@@ -69,11 +69,6 @@
         {/if}
         {#if footerVisible}
             <div class="insight-footer">
-                {#if showToggle}
-                    <button class="insight-toggle" onclick={onToggleExpanded} aria-label={expanded ? "Show less" : "Show more"}>
-                        <span class="insight-chevron" class:insight-chevron-up={expanded}>▾</span>
-                    </button>
-                {/if}
                 {#if generatedAt}
                     <span class="insight-ts">{formatGeneratedAt(generatedAt)}</span>
                 {/if}
@@ -180,34 +175,6 @@
     .insights-text :global(strong) {
         font-weight: 600;
         color: var(--ink);
-    }
-
-    .insight-toggle {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 0.15rem 0.5rem;
-        touch-action: manipulation;
-        display: flex;
-        align-items: center;
-        border-radius: var(--r-sm);
-    }
-
-    @media (hover: hover) {
-        .insight-toggle:hover {
-            background: var(--paper-4);
-        }
-    }
-
-    .insight-chevron {
-        font-size: 0.85rem;
-        color: var(--mute-2);
-        transition: transform 0.15s ease;
-        display: inline-block;
-    }
-
-    .insight-chevron-up {
-        transform: rotate(180deg);
     }
 
     .insight-footer {

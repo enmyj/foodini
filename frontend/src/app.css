@@ -154,6 +154,10 @@
     color-scheme: dark;
 }
 
+html {
+    scrollbar-gutter: stable;
+}
+
 body {
     font-family:
         -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI",
