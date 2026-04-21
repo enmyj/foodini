@@ -68,12 +68,10 @@
     // Entries — always initialised (empty [] for new meals, pre-filled for edits)
     let entries = $state<Entry[]>([]);
     let scalingAll = $state(false);
-    let scaleAllOpen = $state(false);
     let scalingEntry = $state(-1);
     let scaleEntryOpen = $state(-1);
     let favorites = $state<Favorite[] | null>(null);
-    let showFavs = $state(false);
-    let showRepeatPicker = $state(false);
+    let openAction = $state<"scale" | "repeat" | "favs" | null>(null);
     let favSearch = $state("");
     let deletingEntryIds = $state<Set<string>>(new Set());
 
@@ -216,11 +214,9 @@
                 clarifyingQuestion = null;
                 entries = editEntries ? [...editEntries] : [];
                 scalingAll = false;
-                scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
-                showFavs = false;
-                showRepeatPicker = false;
+                openAction = null;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 if (!favorites) {
@@ -235,11 +231,9 @@
                 clarifyingQuestion = null;
                 entries = [];
                 scalingAll = false;
-                scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
-                showFavs = false;
-                showRepeatPicker = false;
+                openAction = null;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 activityText = "";
@@ -484,6 +478,7 @@
             if (res.entries?.length) {
                 entries = [...entries, ...res.entries];
                 onEntriesAdded(res.entries);
+                openAction = null;
             }
         } catch (err) {
             showError(err, "Failed to add favorite.");
@@ -589,39 +584,84 @@
             {:else}
                 <div class="meta-locked">
                     <span class="meta-chip">{selectedMeal}</span>
-                    {#if hasEntries}
-                        <div class="scale-btns">
+                </div>
+
+                <!-- Action pills -->
+                {#if selectedMeal}
+                    <div class="action-pills">
+                        {#if hasEntries}
                             <button
-                                class="scale-toggle"
-                                class:open={scaleAllOpen}
-                                onclick={() => (scaleAllOpen = !scaleAllOpen)}
+                                class="action-pill"
+                                class:active={openAction === "scale"}
+                                onclick={() => (openAction = openAction === "scale" ? null : "scale")}
                                 disabled={scalingAll}
-                                aria-label="Scale entire meal"
-                                title="Scale entire meal"
-                                >⊕</button
+                                >Scale</button
                             >
-                            {#if scaleAllOpen}
-                                {#each [0.75, 1.25, 1.5, 2] as factor}
-                                    <button
-                                        class="scale-pill"
-                                        onclick={() => { scaleAllOpen = false; scaleAllEntries(factor); }}
-                                        disabled={scalingAll}
-                                        >&times;{factor}</button
-                                    >
-                                {/each}
-                            {/if}
-                            {#if yesterdayMeals.length > 0}
+                        {/if}
+                        {#if yesterdayMeals.length > 0}
+                            <button
+                                class="action-pill"
+                                class:active={openAction === "repeat"}
+                                onclick={() => (openAction = openAction === "repeat" ? null : "repeat")}
+                                disabled={sending}
+                                >Repeat</button
+                            >
+                        {/if}
+                        {#if favorites && favorites.length > 0}
+                            <button
+                                class="action-pill"
+                                class:active={openAction === "favs"}
+                                onclick={() => (openAction = openAction === "favs" ? null : "favs")}
+                                >Favorites</button
+                            >
+                        {/if}
+                    </div>
+
+                    <!-- Expanded action panel -->
+                    {#if openAction === "scale"}
+                        <div class="action-panel">
+                            {#each [0.75, 1.25, 1.5, 2] as factor}
                                 <button
-                                    class="scale-pill repeat-pill"
-                                    onclick={() => repeatYesterday(yesterdayByMeal[selectedMeal!] ?? [])}
-                                    disabled={sending || !(yesterdayByMeal[selectedMeal!]?.length)}
-                                    title="Repeat yesterday's {selectedMeal}"
-                                    >Repeat</button
+                                    class="scale-pill"
+                                    onclick={() => { openAction = null; scaleAllEntries(factor); }}
+                                    disabled={scalingAll}
+                                    >&times;{factor}</button
                                 >
-                            {/if}
+                            {/each}
+                        </div>
+                    {:else if openAction === "repeat"}
+                        <div class="action-panel">
+                            {#each yesterdayMeals as m}
+                                <button
+                                    class="scale-pill"
+                                    onclick={() => { openAction = null; repeatYesterday(yesterdayByMeal[m] ?? []); }}
+                                    disabled={sending}
+                                    >{m}</button
+                                >
+                            {/each}
+                        </div>
+                    {:else if openAction === "favs"}
+                        <div class="action-panel fav-panel">
+                            <input
+                                class="fav-search"
+                                type="text"
+                                placeholder="Search favorites…"
+                                bind:value={favSearch}
+                            />
+                            <div class="fav-list">
+                                {#each filteredFavs.slice(0, 8) as fav}
+                                    <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
+                                        <span class="fav-desc">{fav.description}</span>
+                                        <span class="fav-cal">{fav.calories} cal</span>
+                                    </button>
+                                {/each}
+                                {#if filteredFavs.length === 0}
+                                    <span class="fav-empty">No favorites found</span>
+                                {/if}
+                            </div>
                         </div>
                     {/if}
-                </div>
+                {/if}
             {/if}
 
             <!-- Content area -->
@@ -641,7 +681,7 @@
                                             disabled={scalingEntry >= 0 || deletingEntryIds.has(entry.id)}
                                             aria-label="Scale portion"
                                             title="Scale portion"
-                                            >⊕</button
+                                            >scale</button
                                         >
                                         <button
                                             class="entry-delete"
@@ -720,59 +760,6 @@
 
                 {#if clarifyingQuestion}
                     <p class="clarifying">{clarifyingQuestion}</p>
-                {/if}
-
-                <!-- Repeat yesterday -->
-                {#if selectedMeal && !hasEntries && mealIsEmpty && yesterdayMeals.length > 0}
-                    <div class="repeat-section">
-                        {#if showRepeatPicker}
-                            <div class="repeat-meals">
-                                {#each yesterdayMeals as m}
-                                    <button
-                                        class="repeat-meal-btn"
-                                        onclick={() => { showRepeatPicker = false; repeatYesterday(yesterdayByMeal[m] ?? []); }}
-                                        disabled={sending}
-                                        >{m}</button
-                                    >
-                                {/each}
-                            </div>
-                        {:else}
-                            <button
-                                class="repeat-btn"
-                                onclick={() => (showRepeatPicker = true)}
-                                disabled={sending}
-                                >Repeat from yesterday</button
-                            >
-                        {/if}
-                    </div>
-                {/if}
-
-                <!-- Favorites (collapsed by default) -->
-                {#if selectedMeal && favorites && favorites.length > 0}
-                    {#if showFavs}
-                        <div class="quick-add">
-                            <button class="fav-toggle" onclick={() => (showFavs = false)}>Hide favorites</button>
-                            <input
-                                class="fav-search"
-                                type="text"
-                                placeholder="Search favorites…"
-                                bind:value={favSearch}
-                            />
-                            <div class="fav-list">
-                                {#each filteredFavs.slice(0, 8) as fav}
-                                    <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
-                                        <span class="fav-desc">{fav.description}</span>
-                                        <span class="fav-cal">{fav.calories} cal</span>
-                                    </button>
-                                {/each}
-                                {#if filteredFavs.length === 0}
-                                    <span class="fav-empty">No favorites found</span>
-                                {/if}
-                            </div>
-                        </div>
-                    {:else}
-                        <button class="fav-toggle" onclick={() => (showFavs = true)}>Favorites</button>
-                    {/if}
                 {/if}
             </div>
 
@@ -1368,40 +1355,56 @@
         cursor: default;
     }
 
-    /* --- Edit mode --- */
-    .scale-btns {
+    /* --- Action pills --- */
+    .action-pills {
         display: flex;
-        gap: 0.3rem;
-        margin-top: 0.35rem;
-        flex-wrap: wrap;
-        align-items: center;
+        gap: 0.4rem;
+        margin-bottom: 0.5rem;
     }
 
-    .scale-toggle {
+    .action-pill {
         background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 1.1rem;
-        line-height: 1;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.72rem;
+        padding: 0.2rem 0.65rem;
         cursor: pointer;
-        padding: 0.15rem 0.25rem;
-        min-width: 0;
+        touch-action: manipulation;
+        font-family: inherit;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
         min-height: 0;
+        min-width: 0;
+        transition:
+            border-color 0.12s,
+            color 0.12s,
+            background 0.12s;
     }
 
-    .scale-toggle.open {
+    .action-pill.active {
+        border-color: var(--ink-2);
         color: var(--ink-2);
-    }
-
-    .scale-toggle:disabled {
-        opacity: 0.35;
-        cursor: default;
+        background: var(--paper-2);
     }
 
     @media (hover: hover) {
-        .scale-toggle:not(:disabled):hover {
+        .action-pill:hover:not(:disabled) {
+            border-color: var(--ink-2);
             color: var(--ink-2);
         }
+    }
+
+    .action-panel {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+        margin-bottom: 0.5rem;
+    }
+
+    .action-panel.fav-panel {
+        flex-direction: column;
     }
 
     .scale-pill {
@@ -1445,18 +1448,28 @@
 
     .entry-scale-toggle {
         background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 0.9rem;
-        line-height: 1;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.65rem;
+        padding: 0.1rem 0.45rem;
         cursor: pointer;
-        padding: 0.15rem 0.25rem;
+        font-family: inherit;
+        font-weight: 500;
+        letter-spacing: 0.02em;
         min-width: 0;
         min-height: 0;
+        touch-action: manipulation;
+        transition:
+            border-color 0.12s,
+            color 0.12s,
+            background 0.12s;
     }
 
     .entry-scale-toggle.open {
+        border-color: var(--ink-2);
         color: var(--ink-2);
+        background: var(--paper-2);
     }
 
     .entry-scale-toggle:disabled {
@@ -1466,6 +1479,7 @@
 
     @media (hover: hover) {
         .entry-scale-toggle:not(:disabled):hover {
+            border-color: var(--ink-2);
             color: var(--ink-2);
         }
     }
@@ -1564,83 +1578,4 @@
         text-align: center;
     }
 
-    .repeat-section {
-        margin-bottom: 0.75rem;
-    }
-
-    .repeat-meals {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-    }
-
-    .repeat-meal-btn {
-        padding: 0.3rem 0.75rem;
-        border: 1px solid var(--rule-4);
-        border-radius: var(--r-pill);
-        background: none;
-        font-family: inherit;
-        font-size: var(--t-meta);
-        color: var(--ink-mute);
-        cursor: pointer;
-        font-weight: 500;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .repeat-meal-btn:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .repeat-btn {
-        width: 100%;
-        padding: 0.55rem 0.75rem;
-        background: var(--paper-3);
-        color: var(--ink-mute);
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-        cursor: pointer;
-        text-align: left;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .repeat-btn:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .quick-add {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .fav-toggle {
-        background: none;
-        border: 1px solid var(--rule);
-        border-radius: var(--r-pill);
-        padding: 0.3rem 0.75rem;
-        font-size: var(--t-meta);
-        color: var(--mute-2);
-        cursor: pointer;
-        font-family: inherit;
-        font-weight: 500;
-        touch-action: manipulation;
-        align-self: flex-start;
-        min-height: 0;
-    }
-
-    @media (hover: hover) {
-        .fav-toggle:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
 </style>
