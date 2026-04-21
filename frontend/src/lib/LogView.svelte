@@ -898,9 +898,6 @@
                             }
                         }}
                     >
-                        <span class="meal-arrow" aria-hidden="true"
-                            >{collapsed ? "▸" : "▾"}</span
-                        >
                         {meal}
                     </button>
                     {#if group.length > 0}
@@ -1310,14 +1307,7 @@
         }
     }
 
-    .meal-arrow {
-        display: inline-block;
-        width: 0.7rem;
-        color: var(--mute-3);
-        font-size: 0.7rem;
-    }
-
-    section {
+section {
         margin: 1.5rem 0;
     }
 
@@ -1333,7 +1323,6 @@
         cursor: pointer;
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
         padding: 0.3rem 0;
         touch-action: manipulation;
     }

@@ -55,14 +55,23 @@
             <span class="suggestions-label">{label}</span>
         {/if}
         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-        <p class="insights-text" class:collapsed-text={collapsed}>
-            {@html renderInsight(text)}
-        </p>
+        {#if showToggle && !expanded}
+            <button class="insights-text-btn collapsed-text" onclick={onToggleExpanded} aria-label="Show more">
+                <p class="insights-text">
+                    {@html renderInsight(text)}
+                </p>
+                <span class="collapsed-fade"></span>
+            </button>
+        {:else}
+            <p class="insights-text">
+                {@html renderInsight(text)}
+            </p>
+        {/if}
         {#if footerVisible}
             <div class="insight-footer">
                 {#if showToggle}
-                    <button class="insight-more" onclick={onToggleExpanded}>
-                        {expanded ? "less" : "more"}
+                    <button class="insight-toggle" onclick={onToggleExpanded} aria-label={expanded ? "Show less" : "Show more"}>
+                        <span class="insight-chevron" class:insight-chevron-up={expanded}>▾</span>
                     </button>
                 {/if}
                 {#if generatedAt}
@@ -132,7 +141,21 @@
         margin: 0;
     }
 
-    .insights-text.collapsed-text {
+    .insights-text-btn {
+        display: block;
+        position: relative;
+        width: 100%;
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        cursor: pointer;
+        text-align: left;
+        font-family: inherit;
+        touch-action: manipulation;
+    }
+
+    .insights-text-btn .insights-text {
         display: -webkit-box;
         line-clamp: 3;
         -webkit-line-clamp: 3;
@@ -140,26 +163,51 @@
         overflow: hidden;
     }
 
+    .collapsed-fade {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 1.5rem;
+        background: linear-gradient(transparent, var(--paper-2));
+        pointer-events: none;
+    }
+
+    .suggestions-panel .collapsed-fade {
+        background: linear-gradient(transparent, var(--sugg-paper));
+    }
+
     .insights-text :global(strong) {
         font-weight: 600;
         color: var(--ink);
     }
 
-    .insight-more {
+    .insight-toggle {
         background: none;
         border: none;
-        font-family: inherit;
-        font-size: 0.72rem;
-        color: var(--mute-2);
         cursor: pointer;
-        padding: 0;
+        padding: 0.15rem 0.5rem;
         touch-action: manipulation;
+        display: flex;
+        align-items: center;
+        border-radius: var(--r-sm);
     }
 
     @media (hover: hover) {
-        .insight-more:hover {
-            color: var(--ink-mute);
+        .insight-toggle:hover {
+            background: var(--paper-4);
         }
+    }
+
+    .insight-chevron {
+        font-size: 0.85rem;
+        color: var(--mute-2);
+        transition: transform 0.15s ease;
+        display: inline-block;
+    }
+
+    .insight-chevron-up {
+        transform: rotate(180deg);
     }
 
     .insight-footer {

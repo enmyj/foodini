@@ -140,15 +140,6 @@
             >{isFavorited ? "★" : "☆"}</button
         >
     {/if}
-    <button
-        class="del"
-        class:confirm={pendingDelete}
-        onclick={handleDelete}
-        disabled={deleting}
-        aria-label={pendingDelete
-            ? "Tap again to confirm delete"
-            : "Delete entry"}>{pendingDelete ? "?" : "×"}</button
-    >
 </div>
 
 {#if modalOpen}
@@ -224,6 +215,12 @@
                 disabled={saving}>Cancel</button
             >
         </div>
+        <button
+            class="modal-delete"
+            class:confirm={pendingDelete}
+            onclick={handleDelete}
+            disabled={deleting}
+        >{pendingDelete ? "Tap again to confirm" : "Delete entry"}</button>
     </div>
 {/if}
 
@@ -302,40 +299,34 @@
         opacity: 0.35;
     }
 
-    .del {
+    .modal-delete {
+        width: 100%;
+        margin-top: 1.25rem;
+        padding: 0.5rem 1rem;
         background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 1.1rem;
-        line-height: 1;
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        color: var(--mute);
+        font-size: var(--t-body-sm);
+        font-family: inherit;
         cursor: pointer;
-        padding: 0;
-        flex-shrink: 0;
-        min-width: 2.75rem;
-        min-height: 2.75rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         touch-action: manipulation;
     }
 
-    .del.confirm {
+    .modal-delete.confirm {
+        border-color: var(--danger);
         color: var(--danger);
-        font-weight: 600;
+        font-weight: 500;
     }
 
     @media (hover: hover) {
-        .del:hover {
-            color: var(--mute);
+        .modal-delete:hover:not(:disabled) {
+            border-color: var(--danger);
+            color: var(--danger);
         }
     }
 
-    .del:focus-visible {
-        outline: 2px solid var(--ink-2);
-        outline-offset: 2px;
-    }
-
-    .del:disabled {
+    .modal-delete:disabled {
         opacity: 0.35;
         cursor: default;
     }
