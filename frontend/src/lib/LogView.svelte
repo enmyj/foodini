@@ -1446,6 +1446,7 @@
         font-family: inherit;
         letter-spacing: 0.02em;
         white-space: nowrap;
+        margin-left: auto;
         transition:
             border-color 0.12s,
             color 0.12s,

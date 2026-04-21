@@ -73,6 +73,7 @@
     let scaleEntryOpen = $state(-1);
     let favorites = $state<Favorite[] | null>(null);
     let showFavs = $state(false);
+    let showRepeatPicker = $state(false);
     let favSearch = $state("");
     let deletingEntryIds = $state<Set<string>>(new Set());
 
@@ -219,6 +220,7 @@
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
                 showFavs = false;
+                showRepeatPicker = false;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 if (!favorites) {
@@ -237,6 +239,7 @@
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
                 showFavs = false;
+                showRepeatPicker = false;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 activityText = "";
@@ -719,17 +722,28 @@
                     <p class="clarifying">{clarifyingQuestion}</p>
                 {/if}
 
-                <!-- Repeat yesterday (any meal) -->
+                <!-- Repeat yesterday -->
                 {#if selectedMeal && !hasEntries && mealIsEmpty && yesterdayMeals.length > 0}
                     <div class="repeat-section">
-                        {#each yesterdayMeals as m}
+                        {#if showRepeatPicker}
+                            <div class="repeat-meals">
+                                {#each yesterdayMeals as m}
+                                    <button
+                                        class="repeat-meal-btn"
+                                        onclick={() => { showRepeatPicker = false; repeatYesterday(yesterdayByMeal[m] ?? []); }}
+                                        disabled={sending}
+                                        >{m}</button
+                                    >
+                                {/each}
+                            </div>
+                        {:else}
                             <button
                                 class="repeat-btn"
-                                onclick={() => repeatYesterday(yesterdayByMeal[m] ?? [])}
+                                onclick={() => (showRepeatPicker = true)}
                                 disabled={sending}
-                                >Repeat yesterday's {m}</button
+                                >Repeat from yesterday</button
                             >
-                        {/each}
+                        {/if}
                     </div>
                 {/if}
 
@@ -1551,10 +1565,33 @@
     }
 
     .repeat-section {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
         margin-bottom: 0.75rem;
+    }
+
+    .repeat-meals {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+
+    .repeat-meal-btn {
+        padding: 0.3rem 0.75rem;
+        border: 1px solid var(--rule-4);
+        border-radius: var(--r-pill);
+        background: none;
+        font-family: inherit;
+        font-size: var(--t-meta);
+        color: var(--ink-mute);
+        cursor: pointer;
+        font-weight: 500;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .repeat-meal-btn:hover:not(:disabled) {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
     }
 
     .repeat-btn {
