@@ -62,6 +62,7 @@
 
     let dayInsight = $state<InsightPanelState | null>(null);
     let dayInsightExpanded = $state(false);
+    let totalsOpen = $state(false);
     let insightsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let suggestionsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
@@ -298,9 +299,13 @@
     }
 
     function onEntriesEdited(updatedEntries: Entry[]) {
+        const editedMeal = drawerEditMealType;
         applyDayLogMutation(updatedEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
-            replaceMealEntriesInLogCache(old, drawerEditMealType, updatedEntries),
+            replaceMealEntriesInLogCache(old, editedMeal, updatedEntries),
         );
+        if (editedMeal && (updatedEntries[0]?.date ?? currentDate) === currentDate) {
+            collapsedMeals = new Set([...collapsedMeals, editedMeal]);
+        }
     }
 
     function handleDelete(id: string) {
@@ -352,9 +357,14 @@
     }
 
     function onEntriesAdded(newEntries: Entry[]) {
-        applyDayLogMutation(newEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
+        const addedDate = newEntries[0]?.date ?? currentDate;
+        applyDayLogMutation(addedDate, (old: LogResponse | undefined) =>
             appendEntriesToLogCache(old, newEntries),
         );
+        if (addedDate === currentDate) {
+            const mealsAdded = new Set(newEntries.map((e) => e.meal_type));
+            collapsedMeals = new Set([...collapsedMeals, ...mealsAdded]);
+        }
     }
 
     // --- Meal suggestions (for empty meals) ---
@@ -805,11 +815,19 @@
             {#if dayData?.entries}
                 {@const t = totals(dayData.entries)}
                 <div class="totals">
-                    <span>{t.calories} cal</span>
-                    <span>{t.protein}g P</span>
-                    <span>{t.carbs}g C</span>
-                    <span>{t.fat}g F</span>
-                    <span>{t.fiber}g Fb</span>
+                    <button
+                        class="totals-toggle"
+                        class:active={totalsOpen}
+                        onclick={() => (totalsOpen = !totalsOpen)}
+                        aria-expanded={totalsOpen}
+                    >{t.calories} cal <span class="totals-arrow" aria-hidden="true">{totalsOpen ? "▾" : "▸"}</span></button>
+                    <div class="macros" class:open={totalsOpen}>
+                        <span class="macro-cal">{t.calories} cal</span>
+                        <span>{t.protein}g P</span>
+                        <span>{t.carbs}g C</span>
+                        <span>{t.fat}g F</span>
+                        <span>{t.fiber}g Fb</span>
+                    </div>
                     {#if t.calories > 0}
                         <button
                             class="insights-btn"
@@ -1230,10 +1248,64 @@
         font-variant-numeric: tabular-nums;
     }
 
-    @media (max-width: 380px) {
+    .macros {
+        display: contents;
+    }
+
+    .macros .macro-cal {
+        display: none;
+    }
+
+    .totals-toggle {
+        display: none;
+    }
+
+    @media (max-width: 600px) {
         .totals {
             gap: 0.3rem 0.5rem;
             font-size: 0.72rem;
+        }
+        .totals-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            background: none;
+            border: 1px solid var(--rule-3);
+            border-radius: var(--r-pill);
+            color: var(--mute);
+            font-family: inherit;
+            font-size: 0.72rem;
+            letter-spacing: 0.02em;
+            padding: 0.2rem 0.6rem;
+            cursor: pointer;
+            touch-action: manipulation;
+            order: 1;
+        }
+        .totals-toggle.active {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+            background: var(--paper-2);
+        }
+        .totals-arrow {
+            color: var(--mute-3);
+            font-size: 0.7rem;
+        }
+        .insights-btn {
+            order: 2;
+            margin-left: auto;
+        }
+        .macros {
+            display: none;
+            flex-basis: 100%;
+            order: 3;
+        }
+        .macros.open {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem 0.6rem;
+        }
+        .macros .macro-cal {
+            display: inline;
         }
     }
 
