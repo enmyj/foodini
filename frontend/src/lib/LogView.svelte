@@ -833,6 +833,7 @@
                             class="insights-btn"
                             class:active={dayInsight?.open}
                             class:fresh={dayInsightFresh}
+                            class:generating={dayInsight?.loading}
                             onclick={toggleDayInsights}
                             aria-label="AI insights"
                             title="AI insights">insights{#if dayInsightFresh}<span class="insight-dot"></span>{/if}</button
@@ -1460,6 +1461,32 @@
     .insights-btn.fresh {
         border-color: var(--accent, var(--ink-2));
         color: var(--accent, var(--ink-2));
+    }
+
+    .insights-btn.generating {
+        background-image: linear-gradient(
+            100deg,
+            transparent 20%,
+            color-mix(in srgb, var(--ink-2) 12%, transparent) 45%,
+            color-mix(in srgb, var(--ink-2) 18%, transparent) 50%,
+            color-mix(in srgb, var(--ink-2) 12%, transparent) 55%,
+            transparent 80%
+        );
+        background-size: 220% 100%;
+        background-repeat: no-repeat;
+        animation: insights-shimmer 1.6s linear infinite;
+    }
+
+    @keyframes insights-shimmer {
+        0% { background-position: 180% 0; }
+        100% { background-position: -80% 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .insights-btn.generating {
+            animation: none;
+            background-image: none;
+        }
     }
 
     .insight-dot {

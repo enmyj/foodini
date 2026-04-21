@@ -34,9 +34,10 @@
         onRegenerate?: (() => void) | null;
     } = $props();
 
-    let footerVisible = $derived(
-        Boolean(generatedAt && (!showMoreToggle || expanded)),
+    let showToggle = $derived(
+        Boolean(showMoreToggle && generatedAt && onToggleExpanded),
     );
+    let footerVisible = $derived(Boolean(generatedAt) || showToggle);
 </script>
 
 <div class="insights-panel" class:suggestions-panel={variant === "suggestion"}>
@@ -57,14 +58,16 @@
         <p class="insights-text" class:collapsed-text={collapsed}>
             {@html renderInsight(text)}
         </p>
-        {#if showMoreToggle && generatedAt && onToggleExpanded}
-            <button class="insight-more" onclick={onToggleExpanded}>
-                {expanded ? "less" : "more"}
-            </button>
-        {/if}
         {#if footerVisible}
             <div class="insight-footer">
-                <span class="insight-ts">{formatGeneratedAt(generatedAt)}</span>
+                {#if showToggle}
+                    <button class="insight-more" onclick={onToggleExpanded}>
+                        {expanded ? "less" : "more"}
+                    </button>
+                {/if}
+                {#if generatedAt}
+                    <span class="insight-ts">{formatGeneratedAt(generatedAt)}</span>
+                {/if}
                 {#if onRegenerate}
                     <button class="insight-regen" onclick={onRegenerate}>
                         regenerate
@@ -149,7 +152,7 @@
         font-size: 0.72rem;
         color: var(--mute-2);
         cursor: pointer;
-        padding: 0.25rem 0 0;
+        padding: 0;
         touch-action: manipulation;
     }
 
