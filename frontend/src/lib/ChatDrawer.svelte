@@ -13,6 +13,7 @@
         Entry,
         EntryInput,
         Favorite,
+        MealEntriesMap,
         MealType,
         PendingImage,
     } from "./types.ts";
@@ -30,7 +31,7 @@
         initialField = null,
         editEntries = null,
         editMealType = null,
-        yesterdayEntries = [],
+        yesterdayByMeal = {},
         mealIsEmpty = true,
     }: {
         open: boolean;
@@ -43,7 +44,7 @@
         initialField?: ActivityField | null;
         editEntries?: Entry[] | null;
         editMealType?: MealType | null;
-        yesterdayEntries?: Entry[];
+        yesterdayByMeal?: MealEntriesMap;
         mealIsEmpty?: boolean;
     } = $props();
 
@@ -71,10 +72,14 @@
     let scalingEntry = $state(-1);
     let scaleEntryOpen = $state(-1);
     let favorites = $state<Favorite[] | null>(null);
+    let showFavs = $state(false);
     let favSearch = $state("");
     let deletingEntryIds = $state<Set<string>>(new Set());
 
     let hasEntries = $derived(entries.length > 0);
+    let yesterdayMeals = $derived(
+        (Object.keys(yesterdayByMeal) as MealType[]).filter((m) => (yesterdayByMeal[m]?.length ?? 0) > 0),
+    );
     let filteredFavs = $derived.by(() => {
         if (!favorites || !favSearch.trim()) return favorites ?? [];
         const q = favSearch.toLowerCase();
@@ -213,6 +218,7 @@
                 scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
+                showFavs = false;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 if (!favorites) {
@@ -230,6 +236,7 @@
                 scaleAllOpen = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
+                showFavs = false;
                 favSearch = "";
                 deletingEntryIds = new Set();
                 activityText = "";
@@ -480,11 +487,11 @@
         }
     }
 
-    async function repeatYesterday(): Promise<void> {
-        if (!yesterdayEntries.length || !selectedMeal) return;
+    async function repeatYesterday(fromEntries: Entry[]): Promise<void> {
+        if (!fromEntries.length || !selectedMeal) return;
         sending = true;
         try {
-            const input_: EntryInput[] = yesterdayEntries.map((e) => ({
+            const input_: EntryInput[] = fromEntries.map((e) => ({
                 meal_type: selectedMeal!,
                 description: e.description,
                 calories: e.calories,
@@ -600,11 +607,11 @@
                                     >
                                 {/each}
                             {/if}
-                            {#if yesterdayEntries.length > 0}
+                            {#if yesterdayMeals.length > 0}
                                 <button
                                     class="scale-pill repeat-pill"
-                                    onclick={repeatYesterday}
-                                    disabled={sending}
+                                    onclick={() => repeatYesterday(yesterdayByMeal[selectedMeal!] ?? [])}
+                                    disabled={sending || !(yesterdayByMeal[selectedMeal!]?.length)}
                                     title="Repeat yesterday's {selectedMeal}"
                                     >Repeat</button
                                 >
@@ -712,35 +719,46 @@
                     <p class="clarifying">{clarifyingQuestion}</p>
                 {/if}
 
-                <!-- Favorites + repeat yesterday -->
-                {#if selectedMeal && favorites && favorites.length > 0}
-                    <div class="quick-add">
-                        {#if !hasEntries && mealIsEmpty && yesterdayEntries.length > 0}
+                <!-- Repeat yesterday (any meal) -->
+                {#if selectedMeal && !hasEntries && mealIsEmpty && yesterdayMeals.length > 0}
+                    <div class="repeat-section">
+                        {#each yesterdayMeals as m}
                             <button
                                 class="repeat-btn"
-                                onclick={repeatYesterday}
+                                onclick={() => repeatYesterday(yesterdayByMeal[m] ?? [])}
                                 disabled={sending}
-                                >Repeat yesterday's {selectedMeal}</button
+                                >Repeat yesterday's {m}</button
                             >
-                        {/if}
-                        <input
-                            class="fav-search"
-                            type="text"
-                            placeholder="Search favorites…"
-                            bind:value={favSearch}
-                        />
-                        <div class="fav-list">
-                            {#each filteredFavs.slice(0, 8) as fav}
-                                <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
-                                    <span class="fav-desc">{fav.description}</span>
-                                    <span class="fav-cal">{fav.calories} cal</span>
-                                </button>
-                            {/each}
-                            {#if filteredFavs.length === 0}
-                                <span class="fav-empty">No favorites found</span>
-                            {/if}
-                        </div>
+                        {/each}
                     </div>
+                {/if}
+
+                <!-- Favorites (collapsed by default) -->
+                {#if selectedMeal && favorites && favorites.length > 0}
+                    {#if showFavs}
+                        <div class="quick-add">
+                            <button class="fav-toggle" onclick={() => (showFavs = false)}>Hide favorites</button>
+                            <input
+                                class="fav-search"
+                                type="text"
+                                placeholder="Search favorites…"
+                                bind:value={favSearch}
+                            />
+                            <div class="fav-list">
+                                {#each filteredFavs.slice(0, 8) as fav}
+                                    <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
+                                        <span class="fav-desc">{fav.description}</span>
+                                        <span class="fav-cal">{fav.calories} cal</span>
+                                    </button>
+                                {/each}
+                                {#if filteredFavs.length === 0}
+                                    <span class="fav-empty">No favorites found</span>
+                                {/if}
+                            </div>
+                        </div>
+                    {:else}
+                        <button class="fav-toggle" onclick={() => (showFavs = true)}>Favorites</button>
+                    {/if}
                 {/if}
             </div>
 
@@ -1532,10 +1550,11 @@
         text-align: center;
     }
 
-    .quick-add {
+    .repeat-section {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.35rem;
+        margin-bottom: 0.75rem;
     }
 
     .repeat-btn {
@@ -1555,6 +1574,34 @@
 
     @media (hover: hover) {
         .repeat-btn:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .quick-add {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .fav-toggle {
+        background: none;
+        border: 1px solid var(--rule);
+        border-radius: var(--r-pill);
+        padding: 0.3rem 0.75rem;
+        font-size: var(--t-meta);
+        color: var(--mute-2);
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 500;
+        touch-action: manipulation;
+        align-self: flex-start;
+        min-height: 0;
+    }
+
+    @media (hover: hover) {
+        .fav-toggle:hover {
             border-color: var(--ink-2);
             color: var(--ink-2);
         }

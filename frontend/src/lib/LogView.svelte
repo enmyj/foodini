@@ -1024,7 +1024,7 @@
     initialField={drawerField}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
-    yesterdayEntries={drawerHistoryMeal ? (yesterdayByMeal[drawerHistoryMeal] ?? []) : []}
+    {yesterdayByMeal}
     mealIsEmpty={drawerMeal ? (groupedByMeal(dayData?.entries)[drawerMeal] ?? []).length === 0 : true}
 />
 
