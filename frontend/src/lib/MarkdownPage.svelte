@@ -17,7 +17,7 @@
         <nav class="nav-links">
             <ThemeToggle />
             <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
-            <a href="/legal" onclick={(e) => go(e, '/legal')}>Legal</a>
+            <a href="/legal" onclick={(e) => go(e, '/legal')}>Privacy Policy</a>
             <a href="/app" class="btn" onclick={(e) => go(e, '/app')}>Open app</a>
         </nav>
     </header>
@@ -60,13 +60,13 @@
         align-items: center;
     }
 
-    .nav-links a {
+    .nav-links a:not(.btn) {
         font-size: var(--t-meta);
         color: var(--mute);
         text-decoration: none;
     }
 
-    .nav-links a:hover {
+    .nav-links a:not(.btn):hover {
         color: var(--ink);
     }
 
@@ -77,8 +77,9 @@
 
     .btn {
         padding: 0.6rem 1rem;
-        border: 1px solid var(--ink-2);
-        color: var(--ink-2);
+        background: var(--ink);
+        border: 1px solid var(--ink);
+        color: var(--paper);
         border-radius: var(--r-sm);
         text-decoration: none;
         font-size: var(--t-body-sm);
@@ -88,6 +89,7 @@
 
     .btn:hover {
         background: var(--ink-2);
+        border-color: var(--ink-2);
         color: var(--paper);
     }
 

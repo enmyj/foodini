@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { chat, confirmChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
+    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
     import { todayStr } from "./date.ts";
@@ -132,6 +132,20 @@
             entries: EntryInput[];
             date: string;
         }) => confirmChat(entries, date),
+    }));
+
+    const editChatMutation = createMutation(() => ({
+        mutationFn: ({
+            message,
+            entries,
+            date,
+            mealType,
+        }: {
+            message: string;
+            entries: Entry[];
+            date: string;
+            mealType: MealType | null;
+        }) => editChat(message, entries, date, mealType),
     }));
 
     const patchEntryMutation = createMutation(() => ({
@@ -318,6 +332,32 @@
         fileInputEl?.click();
     }
 
+    async function sendEdit(): Promise<void> {
+        if (sending) return;
+        if (!selectedMeal || !entries.length) return;
+        const text = input.trim();
+        if (!text) return;
+        input = "";
+        clarifyingQuestion = null;
+        sending = true;
+        try {
+            const res = await editChatMutation.mutateAsync({
+                message: text,
+                entries: [...entries],
+                date: selectedDate,
+                mealType: selectedMeal,
+            });
+            if (res.entries) {
+                entries = res.entries;
+                if (onEntriesEdited) onEntriesEdited(res.entries);
+            }
+        } catch (err) {
+            showError(err, "Failed to apply edit.");
+        } finally {
+            sending = false;
+        }
+    }
+
     async function send(): Promise<void> {
         if (sending) return;
         if (!selectedMeal) {
@@ -441,16 +481,13 @@
     async function deleteEntry_(index: number): Promise<void> {
         const entry = entries[index];
         if (!entry || deletingEntryIds.has(entry.id)) return;
-        const previousEntries = [...entries];
-        const nextEntries = entries.filter((_, i) => i !== index);
         deletingEntryIds = new Set([...deletingEntryIds, entry.id]);
-        entries = nextEntries;
-        if (onEntriesEdited) onEntriesEdited(nextEntries);
         try {
             await deleteEntryMutation.mutateAsync(entry.id);
+            const nextEntries = entries.filter((e) => e.id !== entry.id);
+            entries = nextEntries;
+            if (onEntriesEdited) onEntriesEdited(nextEntries);
         } catch (err) {
-            entries = previousEntries;
-            if (onEntriesEdited) onEntriesEdited(previousEntries);
             showError(err, "Failed to delete entry.");
         } finally {
             deletingEntryIds = new Set(
@@ -461,55 +498,67 @@
 
     async function addFavoriteToMeal(fav: Favorite): Promise<void> {
         if (!selectedMeal) return;
+        const input_: EntryInput[] = [{
+            meal_type: selectedMeal,
+            description: fav.description,
+            calories: fav.calories,
+            protein: fav.protein,
+            carbs: fav.carbs,
+            fat: fav.fat,
+            fiber: fav.fiber ?? 0,
+        }];
+        let res: Awaited<ReturnType<typeof confirmChat>>;
         try {
-            const input_: EntryInput[] = [{
-                meal_type: selectedMeal,
-                description: fav.description,
-                calories: fav.calories,
-                protein: fav.protein,
-                carbs: fav.carbs,
-                fat: fav.fat,
-                fiber: fav.fiber ?? 0,
-            }];
-            const res = await confirmChatMutation.mutateAsync({
+            res = await confirmChatMutation.mutateAsync({
                 entries: input_,
                 date: selectedDate,
             });
-            if (res.entries?.length) {
-                entries = [...entries, ...res.entries];
-                onEntriesAdded(res.entries);
-                openAction = null;
-            }
         } catch (err) {
             showError(err, "Failed to add favorite.");
+            return;
+        }
+        if (res.entries?.length) {
+            entries = [...entries, ...res.entries];
+            openAction = null;
+            try {
+                onEntriesAdded(res.entries);
+            } catch (err) {
+                console.error("onEntriesAdded failed:", err);
+            }
         }
     }
 
     async function repeatYesterday(fromEntries: Entry[]): Promise<void> {
         if (!fromEntries.length || !selectedMeal) return;
         sending = true;
+        const input_: EntryInput[] = fromEntries.map((e) => ({
+            meal_type: selectedMeal!,
+            description: e.description,
+            calories: e.calories,
+            protein: e.protein,
+            carbs: e.carbs,
+            fat: e.fat,
+            fiber: e.fiber ?? 0,
+        }));
+        let res: Awaited<ReturnType<typeof confirmChat>>;
         try {
-            const input_: EntryInput[] = fromEntries.map((e) => ({
-                meal_type: selectedMeal!,
-                description: e.description,
-                calories: e.calories,
-                protein: e.protein,
-                carbs: e.carbs,
-                fat: e.fat,
-                fiber: e.fiber ?? 0,
-            }));
-            const res = await confirmChatMutation.mutateAsync({
+            res = await confirmChatMutation.mutateAsync({
                 entries: input_,
                 date: selectedDate,
             });
-            if (res.entries?.length) {
-                entries = [...entries, ...res.entries];
-                onEntriesAdded(res.entries);
-            }
         } catch (err) {
-            showError(err, "Failed to repeat yesterday's meal.");
-        } finally {
             sending = false;
+            showError(err, "Failed to repeat yesterday's meal.");
+            return;
+        }
+        sending = false;
+        if (res.entries?.length) {
+            entries = [...entries, ...res.entries];
+            try {
+                onEntriesAdded(res.entries);
+            } catch (err) {
+                console.error("onEntriesAdded failed:", err);
+            }
         }
     }
 
@@ -685,9 +734,11 @@
                                         >
                                         <button
                                             class="entry-delete"
+                                            class:deleting={deletingEntryIds.has(entry.id)}
                                             onclick={() => deleteEntry_(i)}
                                             disabled={deletingEntryIds.has(entry.id)}
-                                            aria-label="Delete entry">✕</button
+                                            aria-label={deletingEntryIds.has(entry.id) ? "Deleting…" : "Delete entry"}
+                                            >{#if deletingEntryIds.has(entry.id)}<span class="entry-spinner" aria-hidden="true"></span>{:else}✕{/if}</button
                                         >
                                     </div>
                                 </div>
@@ -837,10 +888,19 @@
                         use:autosize
                         bind:value={input}
                         onkeydown={onKeyDown}
-                        placeholder={hasEntries ? "Add more…" : "What did you eat?"}
+                        placeholder={hasEntries ? "Add more, or “fix” to correct…" : "What did you eat?"}
                         rows="1"
                         disabled={sending}
                     ></textarea>
+                    {#if hasEntries}
+                        <button
+                            class="fix-btn"
+                            onclick={sendEdit}
+                            disabled={sending || !input.trim() || pendingImages.length > 0}
+                            title="Apply edit to existing entries (e.g. ‘actually 2 tortillas’)"
+                            >Fix</button
+                        >
+                    {/if}
                     <button
                         onclick={send}
                         disabled={sending ||
@@ -1355,6 +1415,19 @@
         cursor: default;
     }
 
+    .fix-btn {
+        background: none;
+        color: var(--ink-2);
+        border: 1px solid var(--rule-4);
+    }
+
+    @media (hover: hover) {
+        .fix-btn:hover:not(:disabled) {
+            border-color: var(--ink-2);
+            background: var(--paper-2);
+        }
+    }
+
     /* --- Action pills --- */
     .action-pills {
         display: flex;
@@ -1501,6 +1574,29 @@
         flex-shrink: 0;
         min-width: 0;
         min-height: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+
+    .entry-delete.deleting {
+        opacity: 1;
+        cursor: default;
+    }
+
+    .entry-spinner {
+        width: 0.75rem;
+        height: 0.75rem;
+        border: 1.5px solid var(--rule-3);
+        border-top-color: var(--ink-2);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
     }
 
     @media (hover: hover) {

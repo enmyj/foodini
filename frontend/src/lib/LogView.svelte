@@ -41,7 +41,6 @@
     } from "./types.ts";
 
     const queryClient = useQueryClient();
-    const LOG_RECONCILE_DELAY_MS = 1200;
 
     type ViewMode = "day" | "favorites" | "history" | "profile";
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -67,8 +66,26 @@
     let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
-    let logReconcileTimer: ReturnType<typeof setTimeout> | null = null;
     let dayInsightFresh = $state(false);
+
+    const INSIGHT_FRESH_KEY = (date: string) => `insightFresh:${date}`;
+    function readFresh(date: string): boolean {
+        try {
+            return localStorage.getItem(INSIGHT_FRESH_KEY(date)) === "1";
+        } catch {
+            return false;
+        }
+    }
+    function writeFresh(date: string): void {
+        try {
+            localStorage.setItem(INSIGHT_FRESH_KEY(date), "1");
+        } catch {}
+    }
+    function clearFresh(date: string): void {
+        try {
+            localStorage.removeItem(INSIGHT_FRESH_KEY(date));
+        } catch {}
+    }
     let dayInsightStale = $state(false);
     let dayInsightRequestId = 0;
 
@@ -193,15 +210,9 @@
             collapsedMeals = new Set(MEAL_ORDER);
             dayInsight = null;
             dayInsightExpanded = false;
-            dayInsightFresh = false;
+            dayInsightFresh = readFresh(currentDate);
             mealSuggestions = {};
         }
-    });
-
-    $effect(() => {
-        return () => {
-            if (logReconcileTimer) clearTimeout(logReconcileTimer);
-        };
     });
 
     function openDatePicker(): void {
@@ -347,13 +358,16 @@
         drawerEditMealType = null;
         if (dayInsightStale && view === "day") {
             dayInsightStale = false;
-            void fetchDayInsights(currentDate, true, {
-                open: dayInsight?.open ?? false,
-            }).then(() => {
-                if (!dayInsight?.open && dayInsight?.text) {
-                    dayInsightFresh = true;
-                }
-            });
+            const hasEntries = (dayQuery.data?.entries?.length ?? 0) > 0;
+            if (hasEntries) {
+                const wasOpen = dayInsight?.open ?? false;
+                void fetchDayInsights(currentDate, true, { open: wasOpen }).then(() => {
+                    if (!dayInsight?.open && dayInsight?.text) {
+                        dayInsightFresh = true;
+                        writeFresh(currentDate);
+                    }
+                });
+            }
         }
     }
 
@@ -437,22 +451,14 @@
         date: string,
         updater: (old: LogResponse | undefined) => LogResponse | undefined,
     ): void {
-        void queryClient.cancelQueries({ queryKey: queryKeys.logBase });
+        // All callers pass authoritative server entries, so update the cache
+        // directly and skip any refetch — a reconcile here would race the
+        // Sheets API's read-your-write window and overwrite good data.
         if (date === currentDate) {
+            void queryClient.cancelQueries({ queryKey: queryKeys.logDay(currentDate) });
             queryClient.setQueryData(queryKeys.logDay(currentDate), updater);
-        }
-        scheduleLogReconcile();
-        if (date === currentDate && dayInsight?.text) {
             dayInsightStale = true;
         }
-    }
-
-    function scheduleLogReconcile(): void {
-        if (logReconcileTimer) clearTimeout(logReconcileTimer);
-        logReconcileTimer = setTimeout(() => {
-            logReconcileTimer = null;
-            void queryClient.invalidateQueries({ queryKey: queryKeys.logBase });
-        }, LOG_RECONCILE_DELAY_MS);
     }
 
     async function fetchDayInsights(
@@ -507,6 +513,7 @@
 
     function toggleDayInsights() {
         dayInsightFresh = false;
+        clearFresh(currentDate);
         if (!dayInsight || (!dayInsight.loading && !dayInsight.text && !dayInsight.error)) {
             fetchDayInsights(currentDate, false);
         } else {
