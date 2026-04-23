@@ -170,9 +170,28 @@
         )
             return;
         if (!touch) return;
+        // Don't hijack touches that start inside a scrollable region —
+        // the user is trying to scroll content, not dismiss the drawer.
+        if (target instanceof HTMLElement && isInsideScrollable(target)) return;
         dragStartY = touch.clientY;
         dragCurrentY = 0;
         if (drawerEl) drawerEl.style.transition = "none";
+    }
+
+    function isInsideScrollable(el: HTMLElement): boolean {
+        let node: HTMLElement | null = el;
+        while (node && node !== drawerEl) {
+            const style = window.getComputedStyle(node);
+            const overflowY = style.overflowY;
+            if (
+                (overflowY === "auto" || overflowY === "scroll") &&
+                node.scrollHeight > node.clientHeight
+            ) {
+                return true;
+            }
+            node = node.parentElement;
+        }
+        return false;
     }
 
     function onDragMove(e: TouchEvent) {
