@@ -4,6 +4,7 @@
     import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
+    import CoachChat from "./CoachChat.svelte";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
@@ -604,6 +605,11 @@
                     class:active={tab === "activity"}
                     onclick={() => (tab = "activity")}>Activity</button
                 >
+                <button
+                    class="tab-btn"
+                    class:active={tab === "coach"}
+                    onclick={() => (tab = "coach")}>Coach</button
+                >
             </div>
             <input
                 class="date-input"
@@ -914,8 +920,7 @@
                     <button class="confirm-done" onclick={onClose}>Done</button>
                 </div>
             {/if}
-        {:else}
-            <!-- Activity form -->
+        {:else if tab === "activity"}
             <ChatDrawerActivityForm
                 active={open && tab === "activity"}
                 {initialField}
@@ -927,6 +932,8 @@
                 saving={activitySaving}
                 onSave={saveActivity}
             />
+        {:else}
+            <CoachChat active={open && tab === "coach"} date={selectedDate} />
         {/if}
     </div>
 {/if}
@@ -1052,17 +1059,19 @@
     }
 
     .meal-pill {
-        padding: 0.3rem 0.75rem;
-        border: 1px solid var(--rule-4);
+        padding: 0.2rem 0.6rem;
+        border: 1px solid var(--rule-3);
         border-radius: var(--r-pill);
         background: none;
         font-family: inherit;
-        font-size: var(--t-meta);
+        font-size: 0.72rem;
+        letter-spacing: 0.02em;
         color: var(--ink-mute);
         cursor: pointer;
         white-space: nowrap;
         touch-action: manipulation;
         font-weight: 500;
+        min-height: 0;
     }
 
     @media (hover: hover) {

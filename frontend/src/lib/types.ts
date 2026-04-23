@@ -12,7 +12,16 @@ export type RoutePath = "/" | "/about" | "/app" | "/legal";
 
 export type ThemePreference = "system" | "dark" | "light";
 
-export type DrawerTab = "food" | "activity";
+export type DrawerTab = "food" | "activity" | "coach";
+
+export interface CoachMessage {
+    role: "user" | "model";
+    text: string;
+}
+
+export interface CoachChatResponse {
+    message: string;
+}
 
 export type ActivityField = "activity" | "feeling" | "poop" | "hydration";
 

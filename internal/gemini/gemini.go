@@ -435,3 +435,54 @@ If no level is specified, default to beginner.`
 func (s *Service) SingleMealSuggestion(ctx context.Context, summary, profileCtx string) (string, error) {
 	return s.insights(ctx, summary, profileCtx, singleMealSuggestionSystemPrompt)
 }
+
+const coachSystemPrompt = `You are a personal nutrition coach having a conversation with the user about their recent eating habits. The user's profile and the last 7 days of their food log + nutrition insights are provided as context below.
+
+Style:
+- Conversational and direct. Talk like a knowledgeable friend, not a chatbot.
+- Reference specific foods, meals, and patterns from their actual log when relevant.
+- Keep responses concise — usually 1-3 short paragraphs. Use bullets only when listing multiple items.
+- Skip filler ("Great question!", "I'd be happy to help!"). Just answer.
+- If asked something the data can't answer, say so plainly.
+
+Adapt language to the user's nutrition knowledge level if specified in their profile (beginner = plain language, no jargon; intermediate = standard terms; advanced = clinical terminology welcome). Default to beginner.`
+
+// CoachMessage is a single turn in the coach conversation.
+type CoachMessage struct {
+	Role string `json:"role"` // "user" or "model"
+	Text string `json:"text"`
+}
+
+// Coach sends a multi-turn coaching conversation with food/insight context and returns the next reply.
+func (s *Service) Coach(ctx context.Context, messages []CoachMessage, contextSummary, profileCtx string) (string, error) {
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(messages) == 0 {
+		return "", fmt.Errorf("no messages provided")
+	}
+
+	systemInstr := coachSystemPrompt
+	if profileCtx != "" {
+		systemInstr = profileCtx + "\n\n" + systemInstr
+	}
+	if contextSummary != "" {
+		systemInstr += "\n\n" + contextSummary
+	}
+
+	contents := make([]*genai.Content, 0, len(messages))
+	for _, m := range messages {
+		role := genai.RoleUser
+		if m.Role == "model" || m.Role == "assistant" {
+			role = genai.RoleModel
+		}
+		contents = append(contents, genai.NewContentFromText(m.Text, genai.Role(role)))
+	}
+
+	resp, err := client.Models.GenerateContent(ctx, geminiModel, contents, buildTextConfig(systemInstr))
+	if err != nil {
+		return "", fmt.Errorf("gemini coach: %w", err)
+	}
+	return strings.TrimSpace(resp.Text()), nil
+}

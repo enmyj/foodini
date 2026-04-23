@@ -2,6 +2,8 @@ import type {
     ActivityPayload,
     ActivityResponse,
     ChatParseResponse,
+    CoachChatResponse,
+    CoachMessage,
     EntriesResponse,
     Entry,
     EntryInput,
@@ -160,6 +162,21 @@ export async function editChat(
     if (date) body.date = date;
     if (mealType) body.meal_type = mealType;
     return apiFetchJson<EntriesResponse>("/api/chat/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+}
+
+export async function coachChat(
+    messages: CoachMessage[],
+    date: string | null = null,
+    days: number | null = null,
+): Promise<CoachChatResponse> {
+    const body: { messages: CoachMessage[]; date?: string; days?: number } = { messages };
+    if (date) body.date = date;
+    if (days) body.days = days;
+    return apiFetchJson<CoachChatResponse>("/api/coach/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

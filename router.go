@@ -104,6 +104,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.POST("/chat", apiHandler.Chat, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
 	apiGroup.POST("/chat/edit", apiHandler.EditChat)
+	apiGroup.POST("/coach/chat", apiHandler.CoachChat)
 	apiGroup.GET("/insights", apiHandler.GetStoredInsights)
 	apiGroup.POST("/insights", apiHandler.Insights)
 	apiGroup.GET("/insights/day", apiHandler.GetStoredDayInsights)
