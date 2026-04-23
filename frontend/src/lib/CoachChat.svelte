@@ -83,7 +83,7 @@
     <div class="messages" bind:this={scrollEl}>
         {#if messages.length === 0}
             <p class="empty">
-                Ask your coach about the last 7 days — patterns, gaps, swaps, ideas.
+                Ask your coach about the last {weeks * 7} days — patterns, gaps, swaps, ideas.
             </p>
         {/if}
         {#each messages as msg, i (i)}
