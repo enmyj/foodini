@@ -172,8 +172,10 @@ func buildChatConfig(systemInstr string) *genai.GenerateContentConfig {
 }
 
 func buildTextConfig(systemInstr string) *genai.GenerateContentConfig {
+	temp := float32(1.2)
 	return &genai.GenerateContentConfig{
 		SystemInstruction: buildSystemInstruction(systemInstr),
+		Temperature:       &temp,
 	}
 }
 
