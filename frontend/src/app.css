@@ -156,6 +156,11 @@
 
 html {
     scrollbar-gutter: stable;
+    overscroll-behavior-y: contain;
+}
+
+body {
+    overscroll-behavior-y: contain;
 }
 
 body {

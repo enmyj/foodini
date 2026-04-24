@@ -626,6 +626,7 @@
         ontouchend={onDragEnd}
     >
         <div class="handle"></div>
+        <button class="drawer-close" onclick={onClose} aria-label="Close">✕</button>
 
         <!-- Tab switcher + date -->
         <div class="drawer-top">
@@ -655,28 +656,23 @@
         </div>
 
         {#if tab === "food"}
-            <!-- Meal header -->
-            {#if !selectedMeal}
-                <div class="meal-pills-wrap" class:shake={mealError}>
-                    <div class="meal-pills">
-                        {#each MEALS as m}
-                            <button
-                                class="meal-pill"
-                                class:selected={selectedMeal === m}
-                                onclick={() => chooseMeal(m)}
-                                >{m}</button
-                            >
-                        {/each}
-                    </div>
+            <!-- Meal header — always visible so users can switch meals -->
+            <div class="meal-pills-wrap" class:shake={mealError}>
+                <div class="meal-pills">
+                    {#each MEALS as m}
+                        <button
+                            class="meal-pill"
+                            class:selected={selectedMeal === m}
+                            onclick={() => chooseMeal(m)}
+                            >{m}</button
+                        >
+                    {/each}
                 </div>
-            {:else}
-                <div class="meta-locked">
-                    <span class="meta-chip">{selectedMeal}</span>
-                </div>
+            </div>
 
+            {#if selectedMeal}
                 <!-- Action pills -->
-                {#if selectedMeal}
-                    <div class="action-pills">
+                <div class="action-pills">
                         {#if hasEntries}
                             <button
                                 class="action-pill"
@@ -749,7 +745,6 @@
                             </div>
                         </div>
                     {/if}
-                {/if}
             {/if}
 
             <!-- Content area -->
@@ -931,7 +926,9 @@
                         rows="1"
                         disabled={sending}
                     ></textarea>
-                    {#if hasEntries}
+                </div>
+                {#if hasEntries}
+                    <div class="action-row">
                         <button
                             class="fix-btn"
                             onclick={sendEdit}
@@ -939,19 +936,25 @@
                             title="Apply edit to existing entries (e.g. ‘actually 2 tortillas’)"
                             >Fix</button
                         >
-                    {/if}
-                    <button
-                        onclick={send}
-                        disabled={sending ||
-                            (!input.trim() && !pendingImages.length)}
-                        >{hasEntries ? "Add" : "Send"}</button
-                    >
-                </div>
-            {/if}
-            {#if hasEntries}
-                <div class="confirm-btns">
-                    <button class="confirm-done" onclick={onClose}>Done</button>
-                </div>
+                        <button
+                            class="add-btn"
+                            onclick={send}
+                            disabled={sending ||
+                                (!input.trim() && !pendingImages.length)}
+                            >Add</button
+                        >
+                    </div>
+                {:else}
+                    <div class="action-row">
+                        <button
+                            class="add-btn"
+                            onclick={send}
+                            disabled={sending ||
+                                (!input.trim() && !pendingImages.length)}
+                            >Send</button
+                        >
+                    </div>
+                {/if}
             {/if}
         {:else if tab === "activity"}
             <ChatDrawerActivityForm
@@ -1120,18 +1123,6 @@
         color: var(--paper);
     }
 
-    .meta-locked {
-        margin-bottom: 0.5rem;
-    }
-
-    .meta-chip {
-        font-size: var(--t-micro);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--mute-2);
-        font-weight: 600;
-    }
-
     /* --- Content area --- */
     .content-area {
         flex: 1;
@@ -1269,29 +1260,42 @@
         margin: 0 0.1rem;
     }
 
-    /* --- Confirmation buttons --- */
-    .confirm-btns {
+    /* --- Action row (Fix / Add) --- */
+    .action-row {
         display: flex;
         gap: 0.5rem;
         margin-top: 0.5rem;
     }
 
-    .confirm-done {
+    .action-row > button {
         flex: 1;
-        padding: 0.6rem 1rem;
-        background: var(--ink-2);
-        color: var(--paper);
+    }
+
+    /* --- Close button --- */
+    .drawer-close {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.75rem;
+        width: 2rem;
+        height: 2rem;
+        min-height: 0;
+        padding: 0;
+        background: none;
+        color: var(--mute);
         border: none;
-        border-radius: var(--r-sm);
+        border-radius: 50%;
+        font-size: 1rem;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         cursor: pointer;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
     }
 
     @media (hover: hover) {
-        .confirm-done:hover {
-            background: var(--ink);
+        .drawer-close:hover {
+            background: var(--paper-3);
+            color: var(--ink-2);
         }
     }
 

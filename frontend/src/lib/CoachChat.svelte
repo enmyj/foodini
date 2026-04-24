@@ -20,6 +20,7 @@
     let weeks = $state(1);
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let scrollEl = $state<HTMLDivElement | null>(null);
+    let prevLen = 0;
 
     const chatMutation = createMutation(() => ({
         mutationFn: ({ msgs, d, days }: { msgs: CoachMessage[]; d: string; days: number }) =>
@@ -34,10 +35,16 @@
     });
 
     $effect(() => {
-        void messages.length;
-        if (scrollEl) {
-            scrollEl.scrollTop = scrollEl.scrollHeight;
+        const len = messages.length;
+        const last = messages[len - 1];
+        if (scrollEl && len > prevLen && last?.role === "user") {
+            queueMicrotask(() => {
+                const items = scrollEl?.querySelectorAll(".msg");
+                const el = items?.[items.length - 1] as HTMLElement | undefined;
+                el?.scrollIntoView({ block: "start", behavior: "smooth" });
+            });
         }
+        prevLen = len;
     });
 
     async function send(): Promise<void> {
@@ -108,7 +115,7 @@
             use:autosize
             bind:value={input}
             onkeydown={onKeyDown}
-            placeholder="Ask about your last 7 days…"
+            placeholder={`Ask about your last ${weeks * 7} days…`}
             rows="1"
             disabled={sending}
         ></textarea>
