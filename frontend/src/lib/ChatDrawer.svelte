@@ -714,7 +714,7 @@
                             {/each}
                         </div>
                     {:else if openAction === "repeat"}
-                        <div class="action-panel">
+                        <div class="action-panel action-panel--equal">
                             {#each yesterdayMeals as m}
                                 <button
                                     class="scale-pill"
@@ -1524,6 +1524,11 @@
 
     .action-panel.fav-panel {
         flex-direction: column;
+    }
+
+    .action-panel--equal .scale-pill {
+        flex: 1 1 0;
+        text-align: center;
     }
 
     .scale-pill {

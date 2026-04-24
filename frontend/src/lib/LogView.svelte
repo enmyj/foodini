@@ -64,6 +64,7 @@
     let insightsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let suggestionsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
+    let expandedMealMacros = $state<Set<MealType>>(new Set());
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
     let dayInsightFresh = $state(false);
@@ -906,6 +907,29 @@
                         {meal}
                     </button>
                     {#if group.length > 0}
+                        {@const mt = totals(group)}
+                        {@const macrosOpen = expandedMealMacros.has(meal)}
+                        <button
+                            class="meal-macros-pill"
+                            class:active={macrosOpen}
+                            aria-expanded={macrosOpen}
+                            onclick={() => {
+                                const next = new Set(expandedMealMacros);
+                                if (macrosOpen) next.delete(meal);
+                                else next.add(meal);
+                                expandedMealMacros = next;
+                            }}
+                        >
+                            {#if macrosOpen}
+                                <span>{mt.calories} cal</span>
+                                <span>{mt.protein}g P</span>
+                                <span>{mt.carbs}g C</span>
+                                <span>{mt.fat}g F</span>
+                                <span>{mt.fiber}g Fb</span>
+                            {:else}
+                                {mt.calories} cal
+                            {/if}
+                        </button>
                         <button
                             class="meal-action-btn"
                             onclick={() => openEditDrawer(meal, group)}
@@ -1256,10 +1280,6 @@
         display: contents;
     }
 
-    .macros .macro-cal {
-        display: none;
-    }
-
     .totals-toggle {
         display: none;
     }
@@ -1369,6 +1389,36 @@ section {
 
     @media (hover: hover) {
         .meal-action-btn:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .meal-macros-pill {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.68rem;
+        padding: 0.15rem 0.55rem;
+        cursor: pointer;
+        touch-action: manipulation;
+        font-family: inherit;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        font-weight: 500;
+        display: inline-flex;
+        gap: 0.5rem;
+        transition: border-color 0.12s, color 0.12s;
+    }
+
+    .meal-macros-pill.active {
+        border-color: var(--ink-2);
+        color: var(--ink-2);
+    }
+
+    @media (hover: hover) {
+        .meal-macros-pill:hover {
             border-color: var(--ink-2);
             color: var(--ink-2);
         }

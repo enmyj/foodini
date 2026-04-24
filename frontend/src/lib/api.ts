@@ -183,6 +183,56 @@ export async function coachChat(
     });
 }
 
+export async function* coachChatStream(
+    messages: CoachMessage[],
+    date: string | null = null,
+    days: number | null = null,
+): AsyncGenerator<string, void, void> {
+    const body: { messages: CoachMessage[]; date?: string; days?: number } = { messages };
+    if (date) body.date = date;
+    if (days) body.days = days;
+    const res = await apiFetch("/api/coach/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify(body),
+    });
+    if (!res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+            const raw = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            let event = "";
+            const dataLines: string[] = [];
+            for (const line of raw.split("\n")) {
+                if (line.startsWith("event:")) event = line.slice(6).trim();
+                else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+            }
+            if (!dataLines.length) continue;
+            const data = dataLines.join("\n");
+            if (event === "done") return;
+            if (event === "error") {
+                let msg = "stream error";
+                try {
+                    const parsed = JSON.parse(data) as { error?: string };
+                    if (parsed.error) msg = parsed.error;
+                } catch {}
+                throw new Error(msg);
+            }
+            try {
+                const parsed = JSON.parse(data) as { text?: string };
+                if (parsed.text) yield parsed.text;
+            } catch {}
+        }
+    }
+}
+
 export async function fetchMealSuggestion(
     date: string,
     meal: MealType,

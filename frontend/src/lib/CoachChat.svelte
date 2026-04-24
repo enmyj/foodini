@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { createMutation } from "@tanstack/svelte-query";
-    import { coachChat } from "./api.ts";
+    import { coachChatStream } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import { renderInsight } from "./insight.ts";
     import { showError } from "./toast.ts";
@@ -17,16 +16,11 @@
     let messages = $state<CoachMessage[]>([]);
     let input = $state("");
     let sending = $state(false);
+    let streaming = $state(false);
     let weeks = $state(1);
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let scrollEl = $state<HTMLDivElement | null>(null);
     let prevLen = 0;
-
-    const chatMutation = createMutation(() => ({
-        mutationFn: ({ msgs, d, days }: { msgs: CoachMessage[]; d: string; days: number }) =>
-            coachChat(msgs, d, days),
-        onError: (err) => showError(err, "Coach is unavailable. Try again."),
-    }));
 
     $effect(() => {
         if (active) {
@@ -55,14 +49,36 @@
         messages = next;
         input = "";
         sending = true;
+        let started = false;
         try {
-            const res = await chatMutation.mutateAsync({ msgs: next, d: date, days: weeks * 7 });
-            messages = [...next, { role: "model", text: res.message }];
-        } catch {
-            messages = next.slice(0, -1);
-            input = text;
+            for await (const chunk of coachChatStream(next, date, weeks * 7)) {
+                if (!started) {
+                    messages = [...next, { role: "model", text: chunk }];
+                    started = true;
+                    streaming = true;
+                } else {
+                    const last = messages[messages.length - 1];
+                    if (last) {
+                        messages = [
+                            ...messages.slice(0, -1),
+                            { role: "model", text: last.text + chunk },
+                        ];
+                    }
+                }
+            }
+            if (!started) {
+                messages = next.slice(0, -1);
+                input = text;
+            }
+        } catch (err) {
+            if (!started) {
+                messages = next.slice(0, -1);
+                input = text;
+            }
+            showError(err, "Coach is unavailable. Try again.");
         } finally {
             sending = false;
+            streaming = false;
         }
     }
 
@@ -99,7 +115,7 @@
                 <div class="bubble">{@html renderInsight(msg.text)}</div>
             </div>
         {/each}
-        {#if sending}
+        {#if sending && !streaming}
             <div class="msg model">
                 <div class="bubble typing">
                     <span></span><span></span><span></span>

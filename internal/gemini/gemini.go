@@ -2,10 +2,15 @@ package gemini
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"iter"
+	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -131,14 +136,24 @@ type Service struct {
 	apiKey string
 	mu     sync.Mutex
 	convs  map[string][]*genai.Content // keyed by userEmail|date
+	caches map[string]*cacheRecord     // keyed by sha256(systemInstr)
 
 	clientOnce sync.Once
 	client     *genai.Client
 	clientErr  error
 }
 
+type cacheRecord struct {
+	name   string
+	expire time.Time
+}
+
 func NewService(apiKey string) *Service {
-	return &Service{apiKey: apiKey, convs: make(map[string][]*genai.Content)}
+	return &Service{
+		apiKey: apiKey,
+		convs:  make(map[string][]*genai.Content),
+		caches: make(map[string]*cacheRecord),
+	}
 }
 
 func (s *Service) getClient(ctx context.Context) (*genai.Client, error) {
@@ -168,14 +183,16 @@ func buildChatConfig(systemInstr string) *genai.GenerateContentConfig {
 		SystemInstruction: buildSystemInstruction(systemInstr),
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    responseSchema,
+		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelLow},
 	}
 }
 
-func buildTextConfig(systemInstr string) *genai.GenerateContentConfig {
+func buildTextConfig(systemInstr string, level genai.ThinkingLevel) *genai.GenerateContentConfig {
 	temp := float32(1.2)
 	return &genai.GenerateContentConfig{
 		SystemInstruction: buildSystemInstruction(systemInstr),
 		Temperature:       &temp,
+		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: level},
 	}
 }
 
@@ -391,7 +408,7 @@ func (s *Service) insights(ctx context.Context, summary, profileCtx, systemPromp
 
 	resp, err := client.Models.GenerateContent(ctx, geminiModel, []*genai.Content{
 		genai.NewContentFromText(summary, genai.RoleUser),
-	}, buildTextConfig(systemInstr))
+	}, buildTextConfig(systemInstr, genai.ThinkingLevelMedium))
 	if err != nil {
 		return "", fmt.Errorf("gemini generate: %w", err)
 	}
@@ -455,14 +472,53 @@ type CoachMessage struct {
 	Text string `json:"text"`
 }
 
-// Coach sends a multi-turn coaching conversation with food/insight context and returns the next reply.
-func (s *Service) Coach(ctx context.Context, messages []CoachMessage, contextSummary, profileCtx string) (string, error) {
+// cacheTTL is how long a cached system instruction stays valid on the Gemini side.
+const cacheTTL = 5 * time.Minute
+
+// getCachedSystemInstr returns a cache resource name for the given system instruction
+// and tools, creating one if needed. Returns "" if caching isn't viable (e.g. content
+// below the model's minimum cacheable token threshold).
+func (s *Service) getCachedSystemInstr(ctx context.Context, client *genai.Client, systemInstr string, tools []*genai.Tool) string {
+	sum := sha256.Sum256([]byte(systemInstr))
+	key := hex.EncodeToString(sum[:])
+
+	s.mu.Lock()
+	rec, ok := s.caches[key]
+	if ok && time.Now().Before(rec.expire) {
+		name := rec.name
+		s.mu.Unlock()
+		return name
+	}
+	if ok {
+		delete(s.caches, key)
+	}
+	s.mu.Unlock()
+
+	cache, err := client.Caches.Create(ctx, geminiModel, &genai.CreateCachedContentConfig{
+		SystemInstruction: buildSystemInstruction(systemInstr),
+		Tools:             tools,
+		TTL:               cacheTTL,
+	})
+	if err != nil {
+		log.Printf("gemini: cache create skipped: %v", err)
+		return ""
+	}
+
+	s.mu.Lock()
+	s.caches[key] = &cacheRecord{name: cache.Name, expire: time.Now().Add(cacheTTL - 30*time.Second)}
+	s.mu.Unlock()
+	return cache.Name
+}
+
+// CoachStream sends a multi-turn coaching conversation and streams the reply token-by-token.
+// Uses Google Search grounding and caches the system instruction across turns within TTL.
+func (s *Service) CoachStream(ctx context.Context, messages []CoachMessage, contextSummary, profileCtx string) (iter.Seq2[string, error], error) {
 	client, err := s.getClient(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(messages) == 0 {
-		return "", fmt.Errorf("no messages provided")
+		return nil, fmt.Errorf("no messages provided")
 	}
 
 	systemInstr := coachSystemPrompt
@@ -471,6 +527,19 @@ func (s *Service) Coach(ctx context.Context, messages []CoachMessage, contextSum
 	}
 	if contextSummary != "" {
 		systemInstr += "\n\n" + contextSummary
+	}
+
+	tools := []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
+	temp := float32(1.2)
+	cfg := &genai.GenerateContentConfig{
+		Temperature:    &temp,
+		ThinkingConfig: &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelMedium},
+	}
+	if name := s.getCachedSystemInstr(ctx, client, systemInstr, tools); name != "" {
+		cfg.CachedContent = name
+	} else {
+		cfg.SystemInstruction = buildSystemInstruction(systemInstr)
+		cfg.Tools = tools
 	}
 
 	contents := make([]*genai.Content, 0, len(messages))
@@ -482,9 +551,17 @@ func (s *Service) Coach(ctx context.Context, messages []CoachMessage, contextSum
 		contents = append(contents, genai.NewContentFromText(m.Text, genai.Role(role)))
 	}
 
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, contents, buildTextConfig(systemInstr))
-	if err != nil {
-		return "", fmt.Errorf("gemini coach: %w", err)
-	}
-	return strings.TrimSpace(resp.Text()), nil
+	return func(yield func(string, error) bool) {
+		for resp, err := range client.Models.GenerateContentStream(ctx, geminiModel, contents, cfg) {
+			if err != nil {
+				yield("", fmt.Errorf("gemini coach: %w", err))
+				return
+			}
+			if t := resp.Text(); t != "" {
+				if !yield(t, nil) {
+					return
+				}
+			}
+		}
+	}, nil
 }

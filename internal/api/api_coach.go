@@ -71,11 +71,40 @@ func (h *Handler) CoachChat(c *echo.Context) error {
 		return h.writeAPIErr(c, err)
 	}
 
-	reply, err := h.gemini.Coach(ctx, req.Messages, summary, profileCtx)
+	stream, err := h.gemini.CoachStream(ctx, req.Messages, summary, profileCtx)
 	if err != nil {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{"message": reply})
+
+	w := c.Response()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+
+	writeEvent := func(event, data string) {
+		if event != "" {
+			fmt.Fprintf(w, "event: %s\n", event)
+		}
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	for chunk, err := range stream {
+		if err != nil {
+			payload, _ := json.Marshal(map[string]string{"error": err.Error()})
+			writeEvent("error", string(payload))
+			return nil
+		}
+		payload, _ := json.Marshal(map[string]string{"text": chunk})
+		writeEvent("", string(payload))
+	}
+	writeEvent("done", "{}")
+	return nil
 }
 
 func (h *Handler) buildCoachContext(ctx context.Context, svc *sheets.Service, start, end string) (string, error) {
