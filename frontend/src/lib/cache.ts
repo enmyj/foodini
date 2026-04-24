@@ -54,7 +54,12 @@ export function appendEntriesToLogCache(
     log: LogResponse | undefined,
     newEntries: Entry[],
 ): LogResponse | undefined {
-    if (!log) return log;
+    if (!log) {
+        return {
+            entries: newEntries,
+            daily_logs: [],
+        };
+    }
     return {
         ...log,
         entries: [...log.entries, ...newEntries],

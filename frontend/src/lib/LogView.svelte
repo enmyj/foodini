@@ -358,7 +358,10 @@
         drawerEditMealType = null;
         if (dayInsightStale && view === "day") {
             dayInsightStale = false;
-            const hasEntries = (dayQuery.data?.entries?.length ?? 0) > 0;
+            const currentLog = queryClient.getQueryData<LogResponse>(
+                queryKeys.logDay(currentDate),
+            );
+            const hasEntries = (currentLog?.entries?.length ?? 0) > 0;
             if (hasEntries) {
                 const wasOpen = dayInsight?.open ?? false;
                 void fetchDayInsights(currentDate, true, { open: wasOpen }).then(() => {
