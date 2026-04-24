@@ -304,8 +304,13 @@
         drawerOpen = true;
     }
 
-    function onEntriesEdited(updatedEntries: Entry[]) {
-        const mealType = drawerEditMealType ?? drawerMeal;
+    function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | null = null) {
+        const mealType =
+            editedMealType ??
+            drawerEditMealType ??
+            drawerMeal ??
+            updatedEntries[0]?.meal_type ??
+            null;
         applyDayLogMutation(updatedEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
             replaceMealEntriesInLogCache(old, mealType, updatedEntries),
         );
@@ -1021,6 +1026,7 @@
     initialField={drawerField}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
+    mealEntriesByMeal={groupedByMeal(dayData?.entries)}
     {yesterdayByMeal}
     mealIsEmpty={drawerMeal ? (groupedByMeal(dayData?.entries)[drawerMeal] ?? []).length === 0 : true}
 />

@@ -32,19 +32,21 @@
         initialField = null,
         editEntries = null,
         editMealType = null,
+        mealEntriesByMeal = {},
         yesterdayByMeal = {},
         mealIsEmpty = true,
     }: {
         open: boolean;
         onClose: () => void;
         onEntriesAdded: (entries: Entry[]) => void;
-        onEntriesEdited?: ((entries: Entry[]) => void) | null;
+        onEntriesEdited?: ((entries: Entry[], mealType: MealType | null) => void) | null;
         date?: string | null;
         meal?: MealType | null;
         initialTab?: DrawerTab;
         initialField?: ActivityField | null;
         editEntries?: Entry[] | null;
         editMealType?: MealType | null;
+        mealEntriesByMeal?: MealEntriesMap;
         yesterdayByMeal?: MealEntriesMap;
         mealIsEmpty?: boolean;
     } = $props();
@@ -232,6 +234,20 @@
         pendingImages = [];
     }
 
+    function entriesForMeal(mealType: MealType | null): Entry[] {
+        return mealType ? [...(mealEntriesByMeal[mealType] ?? [])] : [];
+    }
+
+    function chooseMeal(mealType: MealType): void {
+        const nextMeal = selectedMeal === mealType ? null : mealType;
+        selectedMeal = nextMeal;
+        entries = editEntries ? [...editEntries] : entriesForMeal(nextMeal);
+        clarifyingQuestion = null;
+        openAction = null;
+        scaleEntryOpen = -1;
+        deletingEntryIds = new Set();
+    }
+
     // Only re-run when `open` changes — read props via untrack so edits
     // during the session (e.g. onEntriesEdited resetting parent state) don't
     // re-initialize the drawer.
@@ -246,7 +262,7 @@
                 input = "";
                 sending = false;
                 clarifyingQuestion = null;
-                entries = editEntries ? [...editEntries] : [];
+                entries = editEntries ? [...editEntries] : entriesForMeal(selectedMeal);
                 scalingAll = false;
                 scalingEntry = -1;
                 scaleEntryOpen = -1;
@@ -369,7 +385,7 @@
             });
             if (res.entries) {
                 entries = res.entries;
-                if (onEntriesEdited) onEntriesEdited(res.entries);
+                if (onEntriesEdited) onEntriesEdited(res.entries, selectedMeal);
             }
         } catch (err) {
             showError(err, "Failed to apply edit.");
@@ -439,7 +455,7 @@
                 ),
             );
             entries = saved;
-            if (onEntriesEdited) onEntriesEdited(saved);
+            if (onEntriesEdited) onEntriesEdited(saved, selectedMeal);
         } catch (err) {
             showError(err, "Failed to scale meal.");
         } finally {
@@ -469,7 +485,7 @@
                 entry: updated,
             });
             entries = entries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(entries);
+            if (onEntriesEdited) onEntriesEdited(entries, selectedMeal);
         } catch (err) {
             showError(err, "Failed to scale entry.");
         } finally {
@@ -492,7 +508,7 @@
                 entry: updated,
             });
             entries = entries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(entries);
+            if (onEntriesEdited) onEntriesEdited(entries, selectedMeal);
         } catch (err) {
             showError(err, "Failed to save change.");
         }
@@ -506,7 +522,7 @@
             await deleteEntryMutation.mutateAsync(entry.id);
             const nextEntries = entries.filter((e) => e.id !== entry.id);
             entries = nextEntries;
-            if (onEntriesEdited) onEntriesEdited(nextEntries);
+            if (onEntriesEdited) onEntriesEdited(nextEntries, selectedMeal);
         } catch (err) {
             showError(err, "Failed to delete entry.");
         } finally {
@@ -647,9 +663,7 @@
                             <button
                                 class="meal-pill"
                                 class:selected={selectedMeal === m}
-                                onclick={() =>
-                                    (selectedMeal =
-                                        selectedMeal === m ? null : m)}
+                                onclick={() => chooseMeal(m)}
                                 >{m}</button
                             >
                         {/each}
