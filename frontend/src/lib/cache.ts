@@ -62,7 +62,7 @@ export function appendEntriesToLogCache(
     }
     return {
         ...log,
-        entries: [...log.entries, ...newEntries],
+        entries: [...(log.entries ?? []), ...newEntries],
     };
 }
 

@@ -10,8 +10,6 @@
         poop = $bindable(false),
         poopNotes = $bindable(""),
         hydration = $bindable(""),
-        saving = false,
-        onSave,
     }: {
         active: boolean;
         initialField?: ActivityField | null;
@@ -20,8 +18,6 @@
         poop?: boolean;
         poopNotes?: string;
         hydration?: string;
-        saving?: boolean;
-        onSave: () => void;
     } = $props();
 
     let activityTextareaEl = $state<HTMLTextAreaElement | null>(null);
@@ -113,9 +109,6 @@
             </div>
         </div>
     </div>
-    <button class="save-activity-btn" onclick={onSave} disabled={saving}>
-        {saving ? "Saving…" : "Save"}
-    </button>
 </div>
 
 <style>
@@ -209,31 +202,5 @@
     .hydration-unit {
         font-size: var(--t-meta);
         color: var(--mute-2);
-    }
-
-    .save-activity-btn {
-        width: 100%;
-        padding: 0.6rem 1rem;
-        background: var(--ink-2);
-        color: var(--paper);
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: pointer;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-        touch-action: manipulation;
-        margin-top: auto;
-    }
-
-    @media (hover: hover) {
-        .save-activity-btn:not(:disabled):hover {
-            background: var(--ink);
-        }
-    }
-
-    .save-activity-btn:disabled {
-        opacity: 0.35;
-        cursor: default;
     }
 </style>

@@ -65,6 +65,9 @@ func (h *Handler) GetLog(c *echo.Context) error {
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
+	if entries == nil {
+		entries = []sheets.FoodEntry{}
+	}
 	dayLog, err := svc.GetActivity(ctx, date)
 	if err != nil {
 		return h.writeAPIErr(c, err)

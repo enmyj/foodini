@@ -53,6 +53,15 @@
 
     const MEALS = [...MEAL_ORDER];
 
+    function guessMealForNow(): MealType {
+        const h = new Date().getHours();
+        if (h < 10) return "breakfast";
+        if (h < 14) return "lunch";
+        if (h < 16) return "snack";
+        if (h < 21) return "dinner";
+        return "snack";
+    }
+
     // Shared
     let tab = $state<DrawerTab>("food");
     let selectedDate = $state("");
@@ -70,11 +79,8 @@
 
     // Entries — always initialised (empty [] for new meals, pre-filled for edits)
     let entries = $state<Entry[]>([]);
-    let scalingAll = $state(false);
-    let scalingEntry = $state(-1);
-    let scaleEntryOpen = $state(-1);
     let favorites = $state<Favorite[] | null>(null);
-    let openAction = $state<"more" | "repeat" | "favs" | null>(null);
+    let openAction = $state<"repeat" | "favs" | null>(null);
     let mealsExpanded = $state(false);
     let favSearch = $state("");
     let deletingEntryIds = $state<Set<string>>(new Set());
@@ -246,7 +252,6 @@
         entries = useEditSeed ? [...editEntries!] : entriesForMeal(nextMeal);
         clarifyingQuestion = null;
         openAction = null;
-        scaleEntryOpen = -1;
         deletingEntryIds = new Set();
         if (nextMeal) mealsExpanded = false;
     }
@@ -260,16 +265,13 @@
             if (isOpen) {
                 tab = initialTab;
                 selectedDate = date || todayStr();
-                selectedMeal = editMealType ?? meal;
+                selectedMeal = editMealType ?? meal ?? guessMealForNow();
                 clearPendingImages();
                 input = "";
                 sending = false;
                 clarifyingQuestion = null;
                 entries = editEntries ? [...editEntries] : entriesForMeal(selectedMeal);
-                mealsExpanded = !selectedMeal;
-                scalingAll = false;
-                scalingEntry = -1;
-                scaleEntryOpen = -1;
+                mealsExpanded = false;
                 openAction = null;
                 favSearch = "";
                 deletingEntryIds = new Set();
@@ -284,9 +286,6 @@
                 input = "";
                 clarifyingQuestion = null;
                 entries = [];
-                scalingAll = false;
-                scalingEntry = -1;
-                scaleEntryOpen = -1;
                 openAction = null;
                 favSearch = "";
                 deletingEntryIds = new Set();
@@ -439,62 +438,6 @@
 
     // --- Entry editing functions ---
 
-    async function scaleAllEntries(factor: number): Promise<void> {
-        if (scalingAll || !entries.length) return;
-        scalingAll = true;
-        try {
-            const r1 = (v: number) => Math.round(v * factor);
-            const updates = entries.map((e) => ({
-                ...e,
-                calories: r1(e.calories),
-                protein: r1(e.protein),
-                carbs: r1(e.carbs),
-                fat: r1(e.fat),
-                fiber: r1(e.fiber ?? 0),
-            }));
-            const saved = await Promise.all(
-                updates.map((u) =>
-                    patchEntryMutation.mutateAsync({ id: u.id, entry: u }),
-                ),
-            );
-            entries = saved;
-            if (onEntriesEdited) onEntriesEdited(saved, selectedMeal);
-        } catch (err) {
-            showError(err, "Failed to scale meal.");
-        } finally {
-            scalingAll = false;
-        }
-    }
-
-    async function scaleOneEntry(index: number, factor: number): Promise<void> {
-        if (scalingEntry >= 0 || !entries.length) return;
-        scalingEntry = index;
-        scaleEntryOpen = -1;
-        try {
-            const entry = entries[index];
-            if (!entry) return;
-            const r1 = (v: number) => Math.round(v * factor);
-            const updated = {
-                ...entry,
-                calories: r1(entry.calories),
-                protein: r1(entry.protein),
-                carbs: r1(entry.carbs),
-                fat: r1(entry.fat),
-                fiber: r1(entry.fiber ?? 0),
-            };
-            const saved = await patchEntryMutation.mutateAsync({
-                id: updated.id,
-                entry: updated,
-            });
-            entries = entries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(entries, selectedMeal);
-        } catch (err) {
-            showError(err, "Failed to scale entry.");
-        } finally {
-            scalingEntry = -1;
-        }
-    }
-
     async function editInlineEntry(
         index: number,
         field: EditableEntryField,
@@ -605,6 +548,16 @@
         return Number(target.value);
     }
 
+    function onDone() {
+        if (tab === "activity") {
+            saveActivity();
+        } else {
+            onClose();
+        }
+    }
+
+    let doneLabel = $derived(tab === "activity" && activitySaving ? "Saving…" : "Done");
+
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -631,7 +584,7 @@
             <span class="handle-bar"></span>
         </button>
 
-        <!-- Tab switcher + date -->
+        <!-- Tab switcher + date + done -->
         <div class="drawer-top">
             <div class="tabs">
                 <button
@@ -650,12 +603,20 @@
                     onclick={() => (tab = "coach")}>Coach</button
                 >
             </div>
-            <input
-                class="date-input"
-                type="date"
-                bind:value={selectedDate}
-                max={todayStr()}
-            />
+            <div class="top-right">
+                <input
+                    class="date-input"
+                    type="date"
+                    bind:value={selectedDate}
+                    max={todayStr()}
+                />
+                <button
+                    class="done-btn"
+                    onclick={onDone}
+                    disabled={tab === "activity" && activitySaving}
+                    >{doneLabel}</button
+                >
+            </div>
         </div>
 
         {#if tab === "food"}
@@ -679,113 +640,57 @@
                 </div>
             </div>
 
-            {#if selectedMeal}
-                {#if hasEntries}
-                    <!-- Populated meal: single ⋯ menu (Scale + add Favorite) -->
-                    <div class="action-pills">
+            {#if selectedMeal && (yesterdayMeals.length > 0 || (favorites && favorites.length > 0))}
+                <div class="action-pills">
+                    {#if yesterdayMeals.length > 0}
                         <button
-                            class="action-pill action-pill--more"
-                            class:active={openAction === "more"}
-                            onclick={() => (openAction = openAction === "more" ? null : "more")}
-                            disabled={scalingAll}
-                            aria-label="More actions"
-                            >⋯</button
+                            class="action-pill"
+                            class:active={openAction === "repeat"}
+                            onclick={() => (openAction = openAction === "repeat" ? null : "repeat")}
+                            disabled={sending}
+                            >Repeat</button
                         >
+                    {/if}
+                    {#if favorites && favorites.length > 0}
+                        <button
+                            class="action-pill"
+                            class:active={openAction === "favs"}
+                            onclick={() => (openAction = openAction === "favs" ? null : "favs")}
+                            >Favorites</button
+                        >
+                    {/if}
+                </div>
+                {#if openAction === "repeat"}
+                    <div class="action-panel action-panel--equal">
+                        {#each yesterdayMeals as m}
+                            <button
+                                class="scale-pill"
+                                onclick={() => { openAction = null; repeatYesterday(yesterdayByMeal[m] ?? []); }}
+                                disabled={sending}
+                                >{m}</button
+                            >
+                        {/each}
                     </div>
-                    {#if openAction === "more"}
-                        <div class="action-panel action-panel--menu">
-                            <div class="menu-section">
-                                <span class="menu-label">Scale meal</span>
-                                <div class="menu-row">
-                                    {#each [0.75, 1.25, 1.5, 2] as factor}
-                                        <button
-                                            class="scale-pill"
-                                            onclick={() => { openAction = null; scaleAllEntries(factor); }}
-                                            disabled={scalingAll}
-                                            >&times;{factor}</button
-                                        >
-                                    {/each}
-                                </div>
-                            </div>
-                            {#if favorites && favorites.length > 0}
-                                <div class="menu-section">
-                                    <span class="menu-label">Add favorite</span>
-                                    <input
-                                        class="fav-search"
-                                        type="text"
-                                        placeholder="Search favorites…"
-                                        bind:value={favSearch}
-                                    />
-                                    <div class="fav-list">
-                                        {#each filteredFavs.slice(0, 8) as fav}
-                                            <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
-                                                <span class="fav-desc">{fav.description}</span>
-                                                <span class="fav-cal">{fav.calories} cal</span>
-                                            </button>
-                                        {/each}
-                                        {#if filteredFavs.length === 0}
-                                            <span class="fav-empty">No favorites found</span>
-                                        {/if}
-                                    </div>
-                                </div>
+                {:else if openAction === "favs"}
+                    <div class="action-panel fav-panel">
+                        <input
+                            class="fav-search"
+                            type="text"
+                            placeholder="Search favorites…"
+                            bind:value={favSearch}
+                        />
+                        <div class="fav-list">
+                            {#each filteredFavs.slice(0, 8) as fav}
+                                <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
+                                    <span class="fav-desc">{fav.description}</span>
+                                    <span class="fav-cal">{fav.calories} cal</span>
+                                </button>
+                            {/each}
+                            {#if filteredFavs.length === 0}
+                                <span class="fav-empty">No favorites found</span>
                             {/if}
                         </div>
-                    {/if}
-                {:else}
-                    <!-- Empty meal: Repeat + Favorites seeds -->
-                    {#if yesterdayMeals.length > 0 || (favorites && favorites.length > 0)}
-                        <div class="action-pills">
-                            {#if yesterdayMeals.length > 0}
-                                <button
-                                    class="action-pill"
-                                    class:active={openAction === "repeat"}
-                                    onclick={() => (openAction = openAction === "repeat" ? null : "repeat")}
-                                    disabled={sending}
-                                    >Repeat</button
-                                >
-                            {/if}
-                            {#if favorites && favorites.length > 0}
-                                <button
-                                    class="action-pill"
-                                    class:active={openAction === "favs"}
-                                    onclick={() => (openAction = openAction === "favs" ? null : "favs")}
-                                    >Favorites</button
-                                >
-                            {/if}
-                        </div>
-                        {#if openAction === "repeat"}
-                            <div class="action-panel action-panel--equal">
-                                {#each yesterdayMeals as m}
-                                    <button
-                                        class="scale-pill"
-                                        onclick={() => { openAction = null; repeatYesterday(yesterdayByMeal[m] ?? []); }}
-                                        disabled={sending}
-                                        >{m}</button
-                                    >
-                                {/each}
-                            </div>
-                        {:else if openAction === "favs"}
-                            <div class="action-panel fav-panel">
-                                <input
-                                    class="fav-search"
-                                    type="text"
-                                    placeholder="Search favorites…"
-                                    bind:value={favSearch}
-                                />
-                                <div class="fav-list">
-                                    {#each filteredFavs.slice(0, 8) as fav}
-                                        <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
-                                            <span class="fav-desc">{fav.description}</span>
-                                            <span class="fav-cal">{fav.calories} cal</span>
-                                        </button>
-                                    {/each}
-                                    {#if filteredFavs.length === 0}
-                                        <span class="fav-empty">No favorites found</span>
-                                    {/if}
-                                </div>
-                            </div>
-                        {/if}
-                    {/if}
+                    </div>
                 {/if}
             {/if}
 
@@ -798,38 +703,15 @@
                             <div class="card-entry" class:dimmed={deletingEntryIds.has(entry.id)}>
                                 <div class="card-entry-head">
                                     <div class="card-desc">{entry.description}</div>
-                                    <div class="entry-actions">
-                                        <button
-                                            class="entry-scale-toggle"
-                                            class:open={scaleEntryOpen === i}
-                                            onclick={() => (scaleEntryOpen = scaleEntryOpen === i ? -1 : i)}
-                                            disabled={scalingEntry >= 0 || deletingEntryIds.has(entry.id)}
-                                            aria-label="Scale portion"
-                                            title="Scale portion"
-                                            >scale</button
-                                        >
-                                        <button
-                                            class="entry-delete"
-                                            class:deleting={deletingEntryIds.has(entry.id)}
-                                            onclick={() => deleteEntry_(i)}
-                                            disabled={deletingEntryIds.has(entry.id)}
-                                            aria-label={deletingEntryIds.has(entry.id) ? "Deleting…" : "Delete entry"}
-                                            >{#if deletingEntryIds.has(entry.id)}<span class="entry-spinner" aria-hidden="true"></span>{:else}✕{/if}</button
-                                        >
-                                    </div>
+                                    <button
+                                        class="entry-delete"
+                                        class:deleting={deletingEntryIds.has(entry.id)}
+                                        onclick={() => deleteEntry_(i)}
+                                        disabled={deletingEntryIds.has(entry.id)}
+                                        aria-label={deletingEntryIds.has(entry.id) ? "Deleting…" : "Delete entry"}
+                                        >{#if deletingEntryIds.has(entry.id)}<span class="entry-spinner" aria-hidden="true"></span>{:else}✕{/if}</button
+                                    >
                                 </div>
-                                {#if scaleEntryOpen === i}
-                                    <div class="entry-scale-opts">
-                                        {#each [0.75, 1.5, 2] as factor}
-                                            <button
-                                                class="scale-pill"
-                                                onclick={() => scaleOneEntry(i, factor)}
-                                                disabled={scalingEntry >= 0}
-                                                >&times;{factor}</button
-                                            >
-                                        {/each}
-                                    </div>
-                                {/if}
                                 <div class="card-macros">
                                     <span class="macro-field">
                                         <input type="number" value={entry.calories}
@@ -1007,8 +889,6 @@
                 bind:poop
                 bind:poopNotes
                 bind:hydration
-                saving={activitySaving}
-                onSave={saveActivity}
             />
         {:else}
             <CoachChat active={open && tab === "coach"} date={selectedDate} />
@@ -1076,17 +956,20 @@
         }
     }
 
-    /* --- Top header row (tabs + date) --- */
+    /* --- Top header row (tabs + date + done) --- */
     .drawer-top {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 0.5rem;
         margin-bottom: 0.75rem;
     }
 
     .tabs {
         display: flex;
-        gap: 0.4rem;
+        gap: 0.25rem;
+        flex-shrink: 1;
+        min-width: 0;
     }
 
     .tab-btn {
@@ -1102,9 +985,65 @@
         min-height: 2.75rem;
     }
 
+    @media (max-width: 480px) {
+        .drawer {
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        .tabs {
+            gap: 0.1rem;
+        }
+        .tab-btn {
+            padding: 0.4rem 0.55rem;
+            font-size: var(--t-meta);
+        }
+        .top-right {
+            gap: 0.35rem;
+        }
+        .done-btn {
+            padding: 0.35rem 0.65rem;
+            font-size: var(--t-meta);
+        }
+        .date-input {
+            padding: 0.3rem 0.4rem;
+            font-size: 0.7rem;
+        }
+    }
+
     .tab-btn.active {
         background: var(--paper-4);
         color: var(--ink);
+    }
+
+    .top-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .done-btn {
+        background: var(--ink-2);
+        color: var(--paper);
+        border: none;
+        border-radius: var(--r-sm);
+        padding: 0.4rem 0.85rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.25rem;
+        white-space: nowrap;
+    }
+
+    @media (hover: hover) {
+        .done-btn:not(:disabled):hover {
+            background: var(--ink);
+        }
+    }
+
+    .done-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
     }
 
     /* --- Date input --- */
@@ -1159,7 +1098,7 @@
     }
 
     .meal-toggle {
-        display: none;
+        display: inline-flex;
         align-items: center;
         gap: 0.3rem;
         background: none;
@@ -1182,21 +1121,16 @@
         font-size: 0.7rem;
     }
 
-    @media (max-width: 600px) {
-        .meal-toggle {
-            display: inline-flex;
-        }
-        .meal-pills-wrap.collapsed .meal-pills {
-            display: none;
-        }
-        .meal-pills-wrap.collapsed .meal-toggle {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-            background: var(--paper-2);
-        }
-        .meal-pills-wrap:not(.collapsed) .meal-toggle {
-            margin-bottom: 0.4rem;
-        }
+    .meal-pills-wrap.collapsed .meal-pills {
+        display: none;
+    }
+    .meal-pills-wrap.collapsed .meal-toggle {
+        border-color: var(--ink-2);
+        color: var(--ink-2);
+        background: var(--paper-2);
+    }
+    .meal-pills-wrap:not(.collapsed) .meal-toggle {
+        margin-bottom: 0.4rem;
     }
 
     .meal-pill {
@@ -1603,42 +1537,6 @@
         flex-direction: column;
     }
 
-    .action-pill--more {
-        font-size: 0.95rem;
-        line-height: 0.6;
-        padding: 0.15rem 0.7rem;
-        letter-spacing: 0;
-    }
-
-    .action-panel--menu {
-        flex-direction: column;
-        gap: 0.6rem;
-        padding: 0.5rem 0.65rem;
-        border: 1px solid var(--rule);
-        border-radius: var(--r-md);
-        background: var(--paper-2);
-    }
-
-    .menu-section {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-    }
-
-    .menu-label {
-        font-size: 0.65rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--mute-2);
-        font-weight: 600;
-    }
-
-    .menu-row {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-    }
-
     .action-panel--equal .scale-pill {
         flex: 1 1 0;
         text-align: center;
@@ -1677,57 +1575,6 @@
         justify-content: space-between;
         align-items: flex-start;
         gap: 0.5rem;
-    }
-
-    .entry-actions {
-        display: flex;
-        align-items: center;
-        gap: 0.15rem;
-        flex-shrink: 0;
-    }
-
-    .entry-scale-toggle {
-        background: none;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        color: var(--mute);
-        font-size: 0.65rem;
-        padding: 0.1rem 0.45rem;
-        cursor: pointer;
-        font-family: inherit;
-        font-weight: 500;
-        letter-spacing: 0.02em;
-        min-width: 0;
-        min-height: 0;
-        touch-action: manipulation;
-        transition:
-            border-color 0.12s,
-            color 0.12s,
-            background 0.12s;
-    }
-
-    .entry-scale-toggle.open {
-        border-color: var(--ink-2);
-        color: var(--ink-2);
-        background: var(--paper-2);
-    }
-
-    .entry-scale-toggle:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
-
-    @media (hover: hover) {
-        .entry-scale-toggle:not(:disabled):hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .entry-scale-opts {
-        display: flex;
-        gap: 0.3rem;
-        padding: 0.25rem 0 0.15rem;
     }
 
     .entry-delete {
