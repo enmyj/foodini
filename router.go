@@ -31,7 +31,8 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	blCfg := middleware.BodyLimitConfig{
 		LimitBytes: defaultBodyLimit,
 		Skipper: func(c *echo.Context) bool {
-			return c.Request().URL.Path == "/api/chat"
+			p := c.Request().URL.Path
+			return p == "/api/chat" || p == "/api/agent"
 		},
 	}
 	blMw, _ := blCfg.ToMiddleware()
@@ -104,6 +105,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.POST("/chat", apiHandler.Chat, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
 	apiGroup.POST("/chat/edit", apiHandler.EditChat)
+	apiGroup.POST("/agent", apiHandler.Agent, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/coach/chat", apiHandler.CoachChat)
 	apiGroup.GET("/insights", apiHandler.GetStoredInsights)
 	apiGroup.POST("/insights", apiHandler.Insights)

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
+    import { agent, confirmChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
     import CoachChat from "./CoachChat.svelte";
@@ -79,6 +79,13 @@
 
     // Entries — always initialised (empty [] for new meals, pre-filled for edits)
     let entries = $state<Entry[]>([]);
+    // Non-meal agent actions surfaced inside the drawer so the user sees them too.
+    type AgentNote =
+        | { kind: "activity"; text: string }
+        | { kind: "stool" }
+        | { kind: "favorite"; description: string }
+        | { kind: "message"; text: string };
+    let agentNotes = $state<AgentNote[]>([]);
     let favorites = $state<Favorite[] | null>(null);
     let openAction = $state<"repeat" | "favs" | null>(null);
     let mealsExpanded = $state(false);
@@ -86,6 +93,7 @@
     let deletingEntryIds = $state<Set<string>>(new Set());
 
     let hasEntries = $derived(entries.length > 0);
+    let hasContent = $derived(hasEntries || agentNotes.length > 0);
     let yesterdayMeals = $derived(
         (Object.keys(yesterdayByMeal) as MealType[]).filter((m) => (yesterdayByMeal[m]?.length ?? 0) > 0),
     );
@@ -118,18 +126,20 @@
         onError: (err) => showError(err, "Failed to save activity."),
     }));
 
-    const chatMutation = createMutation(() => ({
+    const agentMutation = createMutation(() => ({
         mutationFn: ({
             message,
             date,
             images,
             meal,
+            currentEntries,
         }: {
             message: string;
             date: string;
             images: File[] | null;
             meal: MealType;
-        }) => chat(message, date, images, meal),
+            currentEntries: Entry[] | null;
+        }) => agent(message, { date, meal, images, currentEntries }),
         onError: (err) =>
             showError(err, "Something went wrong. Please try again."),
     }));
@@ -142,20 +152,6 @@
             entries: EntryInput[];
             date: string;
         }) => confirmChat(entries, date),
-    }));
-
-    const editChatMutation = createMutation(() => ({
-        mutationFn: ({
-            message,
-            entries,
-            date,
-            mealType,
-        }: {
-            message: string;
-            entries: Entry[];
-            date: string;
-            mealType: MealType | null;
-        }) => editChat(message, entries, date, mealType),
     }));
 
     const patchEntryMutation = createMutation(() => ({
@@ -371,32 +367,6 @@
         fileInputEl?.click();
     }
 
-    async function sendEdit(): Promise<void> {
-        if (sending) return;
-        if (!selectedMeal || !entries.length) return;
-        const text = input.trim();
-        if (!text) return;
-        input = "";
-        clarifyingQuestion = null;
-        sending = true;
-        try {
-            const res = await editChatMutation.mutateAsync({
-                message: text,
-                entries: [...entries],
-                date: selectedDate,
-                mealType: selectedMeal,
-            });
-            if (res.entries) {
-                entries = res.entries;
-                if (onEntriesEdited) onEntriesEdited(res.entries, selectedMeal);
-            }
-        } catch (err) {
-            showError(err, "Failed to apply edit.");
-        } finally {
-            sending = false;
-        }
-    }
-
     async function send(): Promise<void> {
         if (sending) return;
         if (!selectedMeal) {
@@ -418,18 +388,33 @@
         sending = true;
 
         try {
-            const res = await chatMutation.mutateAsync({
+            const res = await agentMutation.mutateAsync({
                 message: text,
                 date: selectedDate,
                 images: imgs,
                 meal: selectedMeal,
+                currentEntries: entries.length ? [...entries] : null,
             });
             sending = false;
-            if (res.done && res.entries?.length) {
-                entries = [...entries, ...res.entries];
-                onEntriesAdded(res.entries);
-            } else if (!res.done) {
-                clarifyingQuestion = res.message || "Need more details.";
+            let added: Entry[] = [];
+            let edited: { entries: Entry[] } | null = null;
+            for (const action of res.actions ?? []) {
+                if (action.type === "meal_added" && action.entries?.length) {
+                    added = added.concat(action.entries);
+                } else if (action.type === "meal_edited" && action.entries) {
+                    edited = { entries: action.entries };
+                }
+            }
+            if (edited) {
+                entries = edited.entries;
+                if (onEntriesEdited) onEntriesEdited(edited.entries, selectedMeal);
+            }
+            if (added.length) {
+                entries = [...entries, ...added];
+                onEntriesAdded(added);
+            }
+            if (!added.length && !edited && res.message) {
+                clarifyingQuestion = res.message;
             }
         } catch {
             sending = false;
@@ -851,34 +836,15 @@
                         disabled={sending}
                     ></textarea>
                 </div>
-                {#if hasEntries}
-                    <div class="action-row">
-                        <button
-                            class="fix-btn"
-                            onclick={sendEdit}
-                            disabled={sending || !input.trim() || pendingImages.length > 0}
-                            title="Apply edit to existing entries (e.g. ‘actually 2 tortillas’)"
-                            >Fix</button
-                        >
-                        <button
-                            class="add-btn"
-                            onclick={send}
-                            disabled={sending ||
-                                (!input.trim() && !pendingImages.length)}
-                            >Add</button
-                        >
-                    </div>
-                {:else}
-                    <div class="action-row">
-                        <button
-                            class="add-btn"
-                            onclick={send}
-                            disabled={sending ||
-                                (!input.trim() && !pendingImages.length)}
-                            >Send</button
-                        >
-                    </div>
-                {/if}
+                <div class="action-row">
+                    <button
+                        class="add-btn"
+                        onclick={send}
+                        disabled={sending ||
+                            (!input.trim() && !pendingImages.length)}
+                        >Send</button
+                    >
+                </div>
             {/if}
         {:else if tab === "activity"}
             <ChatDrawerActivityForm
@@ -1470,19 +1436,6 @@
     button:disabled {
         opacity: 0.35;
         cursor: default;
-    }
-
-    .fix-btn {
-        background: none;
-        color: var(--ink-2);
-        border: 1px solid var(--rule-4);
-    }
-
-    @media (hover: hover) {
-        .fix-btn:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            background: var(--paper-2);
-        }
     }
 
     /* --- Action pills --- */

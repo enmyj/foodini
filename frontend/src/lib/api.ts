@@ -1,6 +1,7 @@
 import type {
     ActivityPayload,
     ActivityResponse,
+    AgentResponse,
     ChatParseResponse,
     CoachChatResponse,
     CoachMessage,
@@ -128,6 +129,45 @@ export async function chat(
     if (date) body.date = date;
     if (meal) body.meal = meal;
     return apiFetchJson<ChatParseResponse>("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+}
+
+export async function agent(
+    message: string | null,
+    options: {
+        date?: string | null;
+        meal?: MealType | null;
+        currentEntries?: Entry[] | null;
+        images?: File[] | null;
+        reset?: boolean;
+    } = {},
+): Promise<AgentResponse> {
+    const { date = null, meal = null, currentEntries = null, images = null, reset = false } = options;
+    if (images?.length) {
+        const body = new FormData();
+        body.append("message", message ?? "");
+        if (date) body.append("date", date);
+        if (meal) body.append("meal", meal);
+        if (reset) body.append("reset", "true");
+        if (currentEntries) body.append("current_entries", JSON.stringify(currentEntries));
+        for (const image of images) body.append("images", image);
+        return apiFetchJson<AgentResponse>("/api/agent", { method: "POST", body });
+    }
+    const body: {
+        message: string | null;
+        date?: string;
+        meal?: MealType;
+        current_entries?: Entry[];
+        reset?: boolean;
+    } = { message };
+    if (date) body.date = date;
+    if (meal) body.meal = meal;
+    if (currentEntries) body.current_entries = currentEntries;
+    if (reset) body.reset = true;
+    return apiFetchJson<AgentResponse>("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -71,6 +71,25 @@ export interface ChatParseResponse {
     message?: string | null;
 }
 
+export type AgentActionType =
+    | "meal_added"
+    | "meal_edited"
+    | "activity_updated"
+    | "stool_logged"
+    | "favorite_added";
+
+export interface AgentAction {
+    type: AgentActionType;
+    entries?: Entry[];
+    removed_ids?: string[];
+    date?: string;
+}
+
+export interface AgentResponse {
+    message: string;
+    actions: AgentAction[];
+}
+
 export interface EntriesResponse {
     entries: Entry[];
 }
