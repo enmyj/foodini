@@ -12,8 +12,6 @@ export type RoutePath = "/" | "/about" | "/app" | "/legal";
 
 export type ThemePreference = "system" | "dark" | "light";
 
-export type DrawerTab = "food" | "activity" | "coach";
-
 export interface CoachMessage {
     role: "user" | "model";
     text: string;
@@ -22,8 +20,6 @@ export interface CoachMessage {
 export interface CoachChatResponse {
     message: string;
 }
-
-export type ActivityField = "activity" | "feeling" | "poop" | "hydration";
 
 export interface MacroFields {
     calories: number;
@@ -36,6 +32,7 @@ export interface MacroFields {
 export interface Entry extends MacroFields {
     id: string;
     date: string;
+    time?: string;
     description: string;
     meal_type: MealType;
 }
@@ -76,13 +73,16 @@ export type AgentActionType =
     | "meal_edited"
     | "activity_updated"
     | "stool_logged"
-    | "favorite_added";
+    | "favorite_added"
+    | "hydration_updated"
+    | "feeling_updated";
 
 export interface AgentAction {
     type: AgentActionType;
     entries?: Entry[];
     removed_ids?: string[];
     date?: string;
+    day_log?: DailyLog;
 }
 
 export interface AgentResponse {
@@ -97,6 +97,7 @@ export interface EntriesResponse {
 export interface InsightResponse {
     insight?: string | null;
     generated_at?: string | null;
+    triggered_by?: string | null;
 }
 
 export interface MealSuggestionResponse {

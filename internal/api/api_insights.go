@@ -132,14 +132,33 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 		return writeErr(c, http.StatusInternalServerError, "gemini error: "+err.Error())
 	}
 	generatedAt := time.Now().UTC().Format(time.RFC3339)
+	triggerID := latestEntryID(entries)
 	_ = svc.SaveInsight(ctx, sheets.InsightRecord{
 		Type:        "day",
 		StartDate:   req.Date,
 		EndDate:     req.Date,
 		GeneratedAt: generatedAt,
 		Insight:     insight,
+		TriggeredBy: triggerID,
 	})
-	return c.JSON(http.StatusOK, map[string]any{"insight": insight, "generated_at": generatedAt})
+	return c.JSON(http.StatusOK, map[string]any{
+		"insight":      insight,
+		"generated_at": generatedAt,
+		"triggered_by": triggerID,
+	})
+}
+
+// latestEntryID returns the ID of the most recent entry by Time (HH:MM),
+// tie-breaking by ID lexicographically. Empty list → "".
+func latestEntryID(entries []sheets.FoodEntry) string {
+	var pickID, pickTime string
+	for _, e := range entries {
+		if e.Time > pickTime || (e.Time == pickTime && e.ID > pickID) {
+			pickTime = e.Time
+			pickID = e.ID
+		}
+	}
+	return pickID
 }
 
 // GET /api/insights?start=...&end=...
@@ -184,7 +203,70 @@ func (h *Handler) GetStoredDayInsights(c *echo.Context) error {
 	if rec == nil {
 		return c.JSON(http.StatusOK, map[string]any{"insight": nil, "generated_at": nil})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"insight": rec.Insight, "generated_at": rec.GeneratedAt})
+	return c.JSON(http.StatusOK, map[string]any{
+		"insight":      rec.Insight,
+		"generated_at": rec.GeneratedAt,
+		"triggered_by": rec.TriggeredBy,
+	})
+}
+
+// GET /api/insights/snapshots?date=YYYY-MM-DD
+// Lists all day-insight snapshots for the date with their trigger entry IDs,
+// so the day timeline can show per-meal insight bubbles without N round-trips.
+func (h *Handler) GetInsightSnapshots(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+
+	date := c.QueryParam("date")
+	if date == "" {
+		return writeErr(c, http.StatusBadRequest, "date required")
+	}
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	recs, err := svc.GetInsightSnapshotsByDate(c.Request().Context(), date)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	type snap struct {
+		TriggeredBy string `json:"triggered_by"`
+		GeneratedAt string `json:"generated_at"`
+	}
+	out := make([]snap, 0, len(recs))
+	for _, r := range recs {
+		if r.TriggeredBy == "" {
+			continue
+		}
+		out = append(out, snap{TriggeredBy: r.TriggeredBy, GeneratedAt: r.GeneratedAt})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"snapshots": out})
+}
+
+// GET /api/insights/by-trigger?id=ENTRY_ID
+// Returns the insight anchored to the given food entry ID, or nil.
+func (h *Handler) GetInsightByTrigger(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+
+	id := c.QueryParam("id")
+	if id == "" {
+		return writeErr(c, http.StatusBadRequest, "id required")
+	}
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	rec, err := svc.GetInsightByTrigger(c.Request().Context(), id)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if rec == nil {
+		return c.JSON(http.StatusOK, map[string]any{"insight": nil, "generated_at": nil, "triggered_by": id})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"insight":      rec.Insight,
+		"generated_at": rec.GeneratedAt,
+		"triggered_by": rec.TriggeredBy,
+	})
 }
 
 // POST /api/suggestions/day

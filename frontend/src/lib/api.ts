@@ -339,6 +339,27 @@ export async function generateDayInsights(
     });
 }
 
+export interface InsightSnapshot {
+    triggered_by: string;
+    generated_at: string;
+}
+
+export async function fetchInsightSnapshots(
+    date: string,
+): Promise<{ snapshots: InsightSnapshot[] }> {
+    return apiFetchJson<{ snapshots: InsightSnapshot[] }>(
+        `/api/insights/snapshots?date=${date}`,
+    );
+}
+
+export async function fetchInsightByTrigger(
+    id: string,
+): Promise<InsightResponse> {
+    return apiFetchJson<InsightResponse>(
+        `/api/insights/by-trigger?id=${encodeURIComponent(id)}`,
+    );
+}
+
 export async function fetchStoredInsight(
     start: string,
     end: string,

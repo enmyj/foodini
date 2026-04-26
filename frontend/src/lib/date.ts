@@ -33,6 +33,19 @@ export function formatDateNav(dateStr: string): string {
     });
 }
 
+export function formatTimeShort(hhmm: string | null | undefined): string {
+    if (!hhmm) return "";
+    const [hStr, mStr] = hhmm.split(":");
+    if (!hStr || !mStr) return "";
+    const h = Number(hStr);
+    const m = Number(mStr);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+    const suffix = h >= 12 ? "pm" : "am";
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    const mPad = String(m).padStart(2, "0");
+    return `${h12}:${mPad}${suffix}`;
+}
+
 export function formatWeekRange(start: string, end: string): string {
     const s = new Date(start + "T12:00:00");
     const e = new Date(end + "T12:00:00");

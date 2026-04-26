@@ -8,17 +8,21 @@
         fetchStoredDayInsight,
         fetchStoredWeekSuggestions,
         fetchMealSuggestion,
+        fetchInsightSnapshots,
+        fetchInsightByTrigger,
         generateDayInsights,
         generateInsights,
         generateWeekSuggestions,
         generateMealSuggestion,
     } from "./api.ts";
+    import type { InsightSnapshot } from "./api.ts";
     import type { ApiError } from "./api.ts";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
+    import CoachChat from "./CoachChat.svelte";
     import ActivityNote from "./ActivityNote.svelte";
     import { appendEntriesToLogCache, removeEntryFromLogCache, replaceMealEntriesInLogCache, updateEntryInLogCache } from "./cache.ts";
-    import { addDays, formatDateNav, getMonday, todayStr } from "./date.ts";
+    import { addDays, formatDateNav, formatTimeShort, getMonday, todayStr } from "./date.ts";
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
     import HistoryWeekBlock from "./HistoryWeekBlock.svelte";
@@ -29,7 +33,7 @@
     import ThemeToggle from "./ThemeToggle.svelte";
     import { MEAL_ORDER } from "./types.ts";
     import type {
-        ActivityField,
+        DailyLog,
         Entry,
         Favorite,
         InsightPanelState,
@@ -42,17 +46,15 @@
 
     const queryClient = useQueryClient();
 
-    type ViewMode = "day" | "favorites" | "history" | "profile";
+    type ViewMode = "day" | "favorites" | "history" | "coach" | "profile";
     const DAY_ABBREV = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
     let view = $state<ViewMode>("day");
     let currentDate = $state(todayStr());
     let menuOpen = $state(false);
     let drawerOpen = $state(false);
-    let drawerTab = $state<"food" | "activity">("food");
     let activityRefreshKey = $state(0);
     let drawerDate = $state<string | null>(null);
     let drawerMeal = $state<MealType | null>(null);
-    let drawerField = $state<ActivityField | null>(null);
     let drawerEditEntries = $state<Entry[] | null>(null);
     let drawerEditMealType = $state<MealType | null>(null);
     let dateInputEl = $state<HTMLInputElement | null>(null);
@@ -65,6 +67,9 @@
     let suggestionsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
     let expandedMealMacros = $state<Set<MealType>>(new Set());
+    let insightSnapshots = $state<InsightSnapshot[]>([]);
+    let openMealInsightFor = $state<MealType | null>(null);
+    let mealInsightCache = $state<Record<string, InsightPanelState>>({});
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
     let dayInsightFresh = $state(false);
@@ -125,12 +130,6 @@
         enabled: view === "day",
     }));
 
-    const yesterdayQuery = createQuery(() => ({
-        queryKey: queryKeys.logDay(addDays(currentDate, -1)),
-        queryFn: () => getLog({ date: addDays(currentDate, -1) }),
-        enabled: view === "day",
-    }));
-
     const historyQuery = createQuery(() => ({
         queryKey: queryKeys.logHistory(historyWeeks),
         queryFn: () => getLog({ days: historyWeeks * 7 }),
@@ -178,19 +177,99 @@
         return null;
     });
 
-    let yesterdayByMeal = $derived.by<MealEntriesMap>(() => {
-        const entries = yesterdayQuery.data?.entries ?? [];
-        const g: MealEntriesMap = {};
-        for (const e of entries) {
-            (g[e.meal_type] ??= []).push(e);
+    let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
+
+    // Time-sorted timeline of meals that have entries. Each item is one meal type
+    // present today, sorted by its earliest entry's time. Untimed entries sort last.
+    let timelineMeals = $derived.by<{ meal: MealType; entries: Entry[]; firstTime: string }[]>(() => {
+        const grouped = groupedByMeal(dayData?.entries);
+        const items: { meal: MealType; entries: Entry[]; firstTime: string }[] = [];
+        for (const meal of MEAL_ORDER) {
+            const entries = grouped[meal] ?? [];
+            if (entries.length === 0) continue;
+            // earliest time within this meal anchors the row
+            let firstTime = "99:99";
+            for (const e of entries) {
+                const t = e.time ?? "";
+                if (t && t < firstTime) firstTime = t;
+            }
+            items.push({ meal, entries, firstTime });
         }
-        return g;
+        items.sort((a, b) => a.firstTime.localeCompare(b.firstTime));
+        return items;
     });
 
-    let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
-    let drawerHistoryMeal = $derived<MealType | null>(
-        drawerEditMealType ?? drawerMeal,
+    let emptyMeals = $derived<MealType[]>(
+        MEAL_ORDER.filter(
+            (m) => (groupedByMeal(dayData?.entries)[m]?.length ?? 0) === 0,
+        ),
     );
+
+    let triggerEntryIds = $derived<Set<string>>(
+        new Set(insightSnapshots.map((s) => s.triggered_by).filter(Boolean)),
+    );
+
+    // For each meal, the latest trigger entry whose id falls within that meal's
+    // entries — that's the "verdict at this point in the day" anchor.
+    function latestTriggerForMeal(entries: Entry[]): string | null {
+        if (insightSnapshots.length === 0 || entries.length === 0) return null;
+        const ids = new Set(entries.map((e) => e.id));
+        let pickId: string | null = null;
+        let pickAt = "";
+        for (const snap of insightSnapshots) {
+            if (!ids.has(snap.triggered_by)) continue;
+            if (snap.generated_at >= pickAt) {
+                pickAt = snap.generated_at;
+                pickId = snap.triggered_by;
+            }
+        }
+        return pickId;
+    }
+
+    async function toggleMealInsight(meal: MealType, entries: Entry[]) {
+        if (openMealInsightFor === meal) {
+            openMealInsightFor = null;
+            return;
+        }
+        openMealInsightFor = meal;
+        const triggerId = latestTriggerForMeal(entries);
+        if (!triggerId) return;
+        if (mealInsightCache[triggerId]?.text != null) return;
+        mealInsightCache = {
+            ...mealInsightCache,
+            [triggerId]: {
+                loading: true,
+                text: null,
+                error: null,
+                open: true,
+                generatedAt: null,
+            },
+        };
+        try {
+            const res = await fetchInsightByTrigger(triggerId);
+            mealInsightCache = {
+                ...mealInsightCache,
+                [triggerId]: {
+                    loading: false,
+                    text: res.insight ?? null,
+                    error: null,
+                    open: true,
+                    generatedAt: res.generated_at ?? null,
+                },
+            };
+        } catch {
+            mealInsightCache = {
+                ...mealInsightCache,
+                [triggerId]: {
+                    loading: false,
+                    text: null,
+                    error: "Could not load insight",
+                    open: true,
+                    generatedAt: null,
+                },
+            };
+        }
+    }
 
     // Sync favorited descriptions from query
     $effect(() => {
@@ -213,8 +292,22 @@
             dayInsightExpanded = false;
             dayInsightFresh = readFresh(currentDate);
             mealSuggestions = {};
+            insightSnapshots = [];
+            mealInsightCache = {};
+            openMealInsightFor = null;
+            void loadInsightSnapshots(currentDate);
         }
     });
+
+    async function loadInsightSnapshots(date: string): Promise<void> {
+        try {
+            const res = await fetchInsightSnapshots(date);
+            if (date !== currentDate) return;
+            insightSnapshots = res.snapshots ?? [];
+        } catch {
+            // best-effort; bubble simply won't appear
+        }
+    }
 
     function openDatePicker(): void {
         if (!dateInputEl) return;
@@ -300,8 +393,6 @@
         drawerEditMealType = meal;
         drawerDate = currentDate;
         drawerMeal = meal;
-        drawerField = null;
-        drawerTab = "food";
         drawerOpen = true;
     }
 
@@ -345,21 +436,23 @@
         );
     }
 
-    function openActivityDrawer(field: ActivityField | null = null) {
-        drawerField = field;
-        drawerTab = "activity";
+    function openActivityDrawer() {
         drawerDate = currentDate;
         drawerMeal = null;
+        drawerEditEntries = null;
+        drawerEditMealType = null;
         drawerOpen = true;
     }
 
+    function onDayLogUpdated(_dayLog: DailyLog) {
+        activityRefreshKey++;
+        dayInsightStale = true;
+    }
+
     function closeDrawer() {
-        if (drawerTab === "activity") activityRefreshKey++;
         drawerOpen = false;
         drawerDate = null;
         drawerMeal = null;
-        drawerTab = "food";
-        drawerField = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
         if (dayInsightStale && view === "day") {
@@ -508,6 +601,8 @@
                 open,
                 generatedAt: res.generated_at ?? null,
             };
+            // a regeneration creates a new snapshot anchored to the latest entry
+            void loadInsightSnapshots(date);
         } catch (e: unknown) {
             if (requestId !== dayInsightRequestId) return;
             dayInsight = {
@@ -699,7 +794,7 @@
                 >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
                 </button>
-                <span class="view-label">{view === "day" ? "Day" : view === "history" ? "History" : view === "favorites" ? "Favorites" : view === "profile" ? "Profile" : ""}</span>
+                <span class="view-label">{view === "day" ? "Day" : view === "history" ? "History" : view === "favorites" ? "Favorites" : view === "coach" ? "Coach" : view === "profile" ? "Profile" : ""}</span>
                 {#if menuOpen}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <div class="menu-backdrop" aria-hidden="true" onclick={() => (menuOpen = false)}></div>
@@ -707,6 +802,7 @@
                         <button class:active={view === "day"} onclick={() => { view = "day"; menuOpen = false; }}>Day</button>
                         <button class:active={view === "history"} onclick={() => { view = "history"; menuOpen = false; }}>History</button>
                         <button class:active={view === "favorites"} onclick={() => { view = "favorites"; menuOpen = false; }}>Favorites</button>
+                        <button class:active={view === "coach"} onclick={() => { view = "coach"; menuOpen = false; }}>Coach</button>
                         <hr />
                         <button class:active={view === "profile"} onclick={() => { view = "profile"; menuOpen = false; }}>Profile</button>
                     </nav>
@@ -880,105 +976,151 @@
                 />
             </div>
         {/if}
-        {#each MEAL_ORDER as meal}
-            {@const group = groupedByMeal(dayData?.entries)[meal] ?? []}
+        {#each timelineMeals as item (item.meal)}
+            {@const meal = item.meal}
+            {@const group = item.entries}
             {@const collapsed = collapsedMeals.has(meal)}
-            {@const miKey = `${currentDate}|${meal}`}
-            {@const ms = mealSuggestions[miKey]}
-            <section>
-                <div class="meal-header">
+            {@const mt = totals(group)}
+            {@const macrosOpen = expandedMealMacros.has(meal)}
+            {@const hasAnchor = group.some((e) => triggerEntryIds.has(e.id))}
+            {@const insightOpen = openMealInsightFor === meal}
+            {@const triggerId = insightOpen ? latestTriggerForMeal(group) : null}
+            {@const mealInsight = triggerId ? mealInsightCache[triggerId] : null}
+            <section class="event-row" class:expanded={!collapsed}>
+                <div class="event-head">
                     <button
-                        class="meal-name"
+                        class="event-toggle"
                         onclick={() => {
-                            if (collapsed) {
-                                collapsedMeals = new Set(
-                                    [...collapsedMeals].filter(
-                                        (m) => m !== meal,
-                                    ),
-                                );
-                            } else {
-                                collapsedMeals = new Set([
-                                    ...collapsedMeals,
-                                    meal,
-                                ]);
-                            }
+                            collapsedMeals = collapsed
+                                ? new Set([...collapsedMeals].filter((m) => m !== meal))
+                                : new Set([...collapsedMeals, meal]);
                         }}
+                        aria-expanded={!collapsed}
                     >
-                        {meal}
+                        {#if item.firstTime !== "99:99"}
+                            <span class="event-time">{formatTimeShort(item.firstTime)}</span>
+                        {/if}
+                        <span class="event-name">{meal}</span>
+                        <span class="event-caret" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
                     </button>
-                    {#if group.length > 0}
-                        {@const mt = totals(group)}
-                        {@const macrosOpen = expandedMealMacros.has(meal)}
+                    {#if hasAnchor}
                         <button
-                            class="meal-macros-pill"
-                            class:active={macrosOpen}
-                            aria-expanded={macrosOpen}
-                            onclick={() => {
-                                const next = new Set(expandedMealMacros);
-                                if (macrosOpen) next.delete(meal);
-                                else next.add(meal);
-                                expandedMealMacros = next;
-                            }}
-                        >
-                            {#if macrosOpen}
-                                <span>{mt.calories} cal</span>
-                                <span>{mt.protein}g P</span>
-                                <span>{mt.carbs}g C</span>
-                                <span>{mt.fat}g F</span>
-                                <span>{mt.fiber}g Fb</span>
-                            {:else}
-                                {mt.calories} cal
-                            {/if}
-                        </button>
-                        <button
-                            class="meal-action-btn"
-                            onclick={() => openEditDrawer(meal, group)}
-                            >Edit</button
-                        >
-                    {:else if meal !== "supplements"}
-                        <button
-                            class="meal-action-btn"
-                            class:active={ms?.open}
-                            onclick={() => toggleMealSuggestion(meal, currentDate)}
-                            >Suggest</button
+                            class="meal-insight-bubble"
+                            class:active={insightOpen}
+                            aria-label="Insight at this point"
+                            title="Insight at this point in the day"
+                            onclick={() => toggleMealInsight(meal, group)}
+                            >💡</button
                         >
                     {/if}
+                    <button
+                        class="meal-macros-pill"
+                        class:active={macrosOpen}
+                        aria-expanded={macrosOpen}
+                        onclick={() => {
+                            const next = new Set(expandedMealMacros);
+                            if (macrosOpen) next.delete(meal);
+                            else next.add(meal);
+                            expandedMealMacros = next;
+                        }}
+                    >
+                        {#if macrosOpen}
+                            <span>{mt.calories} cal</span>
+                            <span>{mt.protein}g P</span>
+                            <span>{mt.carbs}g C</span>
+                            <span>{mt.fat}g F</span>
+                            <span>{mt.fiber}g Fb</span>
+                        {:else}
+                            {mt.calories} cal
+                        {/if}
+                    </button>
+                    <button
+                        class="meal-action-btn"
+                        onclick={() => openEditDrawer(meal, group)}
+                        >Edit</button
+                    >
                 </div>
-                {#if ms?.open}
-                    <InsightPanel
-                        loading={ms.loading}
-                        error={ms.error}
-                        text={ms.text}
-                        generatedAt={ms.generatedAt}
-                        variant="suggestion"
-                        onRegenerate={() => regenMealSuggestion(meal, currentDate)}
-                    />
+                {#if insightOpen && mealInsight}
+                    <div class="meal-insight-panel">
+                        <InsightPanel
+                            loading={mealInsight.loading}
+                            error={mealInsight.error}
+                            text={mealInsight.text}
+                            generatedAt={mealInsight.generatedAt}
+                        />
+                    </div>
                 {/if}
                 {#if !collapsed}
-                    {#each group as entry (entry.id)}
-                        <EntryRow
-                            {entry}
-                            onUpdate={handleUpdate}
-                            onDelete={handleDelete}
-                            onFavorite={handleFavoriteEntry}
-                            isFavorited={favoritedDescs.has(
-                                normalizeFavoriteKey(entry.description),
-                            )}
-                        />
-                    {/each}
-                    <button
-                        class="add-row"
-                        onclick={() => {
-                            drawerMeal = meal;
-                            drawerDate = currentDate;
-                            drawerField = null;
-                            drawerTab = "food";
-                            drawerOpen = true;
-                        }}>+ add item</button
-                    >
+                    <div class="event-body">
+                        {#each group as entry (entry.id)}
+                            <EntryRow
+                                {entry}
+                                onUpdate={handleUpdate}
+                                onDelete={handleDelete}
+                                onFavorite={handleFavoriteEntry}
+                                isFavorited={favoritedDescs.has(
+                                    normalizeFavoriteKey(entry.description),
+                                )}
+                            />
+                        {/each}
+                        <button
+                            class="add-row"
+                            onclick={() => {
+                                drawerMeal = meal;
+                                drawerDate = currentDate;
+                                drawerEditEntries = null;
+                                drawerEditMealType = null;
+                                drawerOpen = true;
+                            }}>+ add item</button
+                        >
+                    </div>
                 {/if}
             </section>
         {/each}
+
+        {#if emptyMeals.length > 0}
+            <div class="missing-row">
+                <span class="missing-label">missing</span>
+                {#each emptyMeals as meal}
+                    {@const miKey = `${currentDate}|${meal}`}
+                    {@const ms = mealSuggestions[miKey]}
+                    <button
+                        class="missing-pill"
+                        class:active={ms?.open}
+                        onclick={() => {
+                            if (meal === "supplements") {
+                                drawerMeal = meal;
+                                drawerDate = currentDate;
+                                drawerEditEntries = null;
+                                drawerEditMealType = null;
+                                drawerOpen = true;
+                            } else {
+                                toggleMealSuggestion(meal, currentDate);
+                            }
+                        }}
+                        >{meal}</button
+                    >
+                {/each}
+            </div>
+            {#each emptyMeals as meal}
+                {@const miKey = `${currentDate}|${meal}`}
+                {@const ms = mealSuggestions[miKey]}
+                {#if ms?.open}
+                    <div class="missing-suggestion">
+                        <div class="missing-suggestion-head">{meal} suggestion</div>
+                        <InsightPanel
+                            loading={ms.loading}
+                            error={ms.error}
+                            text={ms.text}
+                            generatedAt={ms.generatedAt}
+                            variant="suggestion"
+                            onRegenerate={() => regenMealSuggestion(meal, currentDate)}
+                        />
+                    </div>
+                {/if}
+            {/each}
+        {/if}
+
         <ActivityNote
             date={currentDate}
             onOpen={openActivityDrawer}
@@ -986,6 +1128,10 @@
         />
     {:else if view === "favorites"}
         <FavoritesView onLoad={syncFavoritedDescs} />
+    {:else if view === "coach"}
+        <div class="coach-pane">
+            <CoachChat active={view === "coach"} date={currentDate} />
+        </div>
     {:else if view === "profile"}
         <ProfilePanel onClose={closeProfile} />
     {:else}
@@ -1012,13 +1158,14 @@
     {/if}
 </div>
 
+{#if view === "day"}
 <button
     class="fab"
     onclick={() => {
         drawerDate = currentDate;
         drawerMeal = null;
-        drawerField = null;
-        drawerTab = "food";
+        drawerEditEntries = null;
+        drawerEditMealType = null;
         drawerOpen = true;
     }}
     aria-label="Add food"
@@ -1039,20 +1186,17 @@
         /></svg
     >
 </button>
+{/if}
 <ChatDrawer
     open={drawerOpen}
     onClose={closeDrawer}
     {onEntriesAdded}
     {onEntriesEdited}
+    {onDayLogUpdated}
     date={drawerDate}
     meal={drawerMeal}
-    initialTab={drawerTab}
-    initialField={drawerField}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
-    mealEntriesByMeal={groupedByMeal(dayData?.entries)}
-    {yesterdayByMeal}
-    mealIsEmpty={drawerMeal ? (groupedByMeal(dayData?.entries)[drawerMeal] ?? []).length === 0 : true}
 />
 
 <style>
@@ -1060,6 +1204,12 @@
         max-width: 640px;
         margin: 0 auto;
         padding: 0 1.25rem 6rem;
+    }
+
+    .coach-pane {
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100dvh - 8rem);
     }
 
     header {
@@ -1334,36 +1484,164 @@
     }
 
 section {
-        margin: 1.5rem 0;
+        margin: 0.6rem 0;
     }
 
-    .meal-name {
+    .event-row {
+        border-top: 1px solid var(--rule);
+        padding: 0.4rem 0;
+    }
+
+    .event-row:last-of-type {
+        border-bottom: 1px solid var(--rule);
+    }
+
+    .event-head {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .event-toggle {
         background: none;
         border: none;
         font-family: inherit;
-        text-transform: uppercase;
-        font-size: 0.72rem;
-        color: var(--mute);
-        letter-spacing: 0.08em;
-        font-weight: 600;
         cursor: pointer;
         display: inline-flex;
-        align-items: center;
+        align-items: baseline;
+        gap: 0.45rem;
         padding: 0.3rem 0;
+        flex: 1;
+        min-width: 0;
+        text-align: left;
         touch-action: manipulation;
+        color: inherit;
+    }
+
+    .event-time {
+        font-size: 0.72rem;
+        color: var(--mute-2);
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+        min-width: 3.2rem;
+    }
+
+    .event-name {
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        color: var(--ink);
+        letter-spacing: 0.08em;
+        font-weight: 600;
+    }
+
+    .event-caret {
+        color: var(--mute-3);
+        font-size: 0.7rem;
     }
 
     @media (hover: hover) {
-        .meal-name:hover {
+        .event-toggle:hover .event-name {
             color: var(--ink-2);
         }
     }
 
-    .meal-header {
+    .event-body {
+        padding: 0.25rem 0 0.5rem;
+    }
+
+    .meal-insight-bubble {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: 50%;
+        width: 1.65rem;
+        height: 1.65rem;
+        font-size: 0.85rem;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        transition: border-color 0.12s, background 0.12s;
+    }
+
+    .meal-insight-bubble.active {
+        border-color: var(--ink-2);
+        background: var(--paper-2);
+    }
+
+    @media (hover: hover) {
+        .meal-insight-bubble:hover {
+            border-color: var(--ink-2);
+        }
+    }
+
+    .meal-insight-panel {
+        margin: 0.4rem 0 0.2rem;
+    }
+
+    /* Missing-meals strip */
+    .missing-row {
         display: flex;
         align-items: center;
-        gap: 0.25rem;
-        margin-bottom: 0.5rem;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        padding: 0.5rem 0;
+        margin-top: 0.4rem;
+    }
+
+    .missing-label {
+        font-size: 0.7rem;
+        color: var(--mute-3);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 600;
+        margin-right: 0.25rem;
+    }
+
+    .missing-pill {
+        background: none;
+        border: 1px dashed var(--rule-4);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.7rem;
+        padding: 0.18rem 0.55rem;
+        cursor: pointer;
+        font-family: inherit;
+        letter-spacing: 0.02em;
+        text-transform: capitalize;
+        font-weight: 500;
+        white-space: nowrap;
+        touch-action: manipulation;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+
+    .missing-pill.active {
+        border-style: solid;
+        border-color: var(--ink-2);
+        color: var(--ink-2);
+        background: var(--paper-2);
+    }
+
+    @media (hover: hover) {
+        .missing-pill:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .missing-suggestion {
+        margin: 0.35rem 0;
+    }
+
+    .missing-suggestion-head {
+        font-size: var(--t-micro);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--mute-2);
+        font-weight: 600;
+        margin-bottom: 0.2rem;
     }
 
     .meal-action-btn {
@@ -1380,11 +1658,6 @@ section {
         white-space: nowrap;
         font-weight: 500;
         transition: border-color 0.12s, color 0.12s;
-    }
-
-    .meal-action-btn.active {
-        border-color: var(--ink-2);
-        color: var(--ink-2);
     }
 
     @media (hover: hover) {

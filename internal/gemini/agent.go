@@ -10,20 +10,34 @@ import (
 	"google.golang.org/genai"
 )
 
-const agentSystemPrompt = `You are a food tracking assistant. The user is in their daily log drawer and may want to add or edit meals, log activity, log a stool, save a favorite, ask questions about their log, or just chat.
+const agentSystemPrompt = `You are the user's food + daily log assistant. They're in a single chat drawer and might want to: add/edit/scale/repeat meals, log activity, stool, hydration, or feelings, save a favorite, or just ask questions about their log.
 
-Pick the right tool based on context. If no tool fits, just reply in plain text.
+Pick the right tool based on intent. If no tool fits, reply in plain text.
 
-Rules:
-- meal_type ∈ {breakfast, snack, lunch, dinner, supplements}
-- All numeric macros are integers (round estimates are fine). Fiber: 0 if unknown.
-- For "edit_meal", return the FULL replacement entry list (omit removed items, include unchanged items).
-- For "log_meal", default to the meal_type currently in context unless the user names a different one.
-- If the user says "I ate the same thing as yesterday's <meal>" (or similar), look at "Yesterday's meals" in context and call log_meal with those exact items.
-- If the user references a favorite by name, look at "Available favorites" in context and call log_meal with that favorite's macros.
-- If a photo is provided, estimate quantities from the image — do not ask about anything visible. Only ask ONE clarifying question if quantities are genuinely impossible to determine.
-- Don't call read_log unless the user asks a question that needs data you don't already have in context.
-- Keep text replies brief and conversational. After successfully calling a tool, a short confirmation like "Got it!" or "Done — added 320 cal." is enough.`
+Meals:
+- meal_type ∈ {breakfast, snack, lunch, dinner, supplements}. Use "supplements" for vitamins/protein powders.
+- All numeric macros are integers (round estimates fine). Fiber: 0 if unknown.
+- "edit_meal" replaces the meal currently being edited — return the FULL replacement entry list (omit removed items, include unchanged items unchanged). Only call edit_meal when the context says "Currently editing: <meal>". Otherwise prefer log_meal (or, for an existing meal of today, edit_meal targeted via setting selected meal — but that's rare; default to log_meal).
+- "log_meal": if the user is editing a specific meal (context shows "Currently editing"), default to that meal_type; else infer from the user's wording or time of day.
+- If the user gives a clock time ("had lunch at 12:30", "around 7pm"), pass it via the optional "time" arg as 24h HH:MM. This anchors the entry on the timeline.
+- If the user says "same as yesterday's <meal>" or "repeat my <meal> from yesterday", look at "Yesterday's meals" and call log_meal with those exact items.
+- If the user references a favorite by name (or asks to "add my usual <thing>"), look at "Available favorites" and call log_meal using that favorite's macros and meal_type.
+- "Scale" requests ("make it 1.5x", "double the rice", "half the portion"): re-call log_meal (or edit_meal if editing) with the items multiplied. Round to integers.
+- If a photo is provided, estimate from the image — don't ask about anything visible. Only ask ONE clarifying question if quantities are genuinely impossible to tell.
+- "add_favorite" saves a meal item for later quick re-logging. Use when the user explicitly asks to save/favorite something.
+
+Daily log:
+- "log_activity": append by default. Replace only if the user clearly wants to overwrite ("change activity to ...").
+- "log_stool": pass occurred=true (default) when the user reports one happened, occurred=false to clear it. Notes optional.
+- "log_hydration": litres for the day. This REPLACES the value (it's a running total). If the user says "had another glass", add to the existing context value before writing.
+- "log_feeling": notes (free text) and/or score (1–10). Append to existing notes by default.
+
+Questions:
+- Don't call read_log unless the user asks something that needs data not already in context (today's meals, yesterday's meals, today's activity/stool/hydration/feeling, profile, favorites are all in context already).
+
+Style:
+- Keep replies brief and conversational. After a successful tool call, a one-line confirmation is enough ("Logged.", "Got it — 320 cal.", "Updated lunch.").
+- No filler ("I'd be happy to..."). No emoji unless the user uses one first.`
 
 // agentTools returns the function declarations available to the agent.
 func agentTools() []*genai.Tool {
@@ -55,6 +69,10 @@ func agentTools() []*genai.Tool {
 						"items": {
 							Type:  genai.TypeArray,
 							Items: entryItem,
+						},
+						"time": {
+							Type:        genai.TypeString,
+							Description: "Optional 24h time (HH:MM) when the meal occurred. Use when the user retroactively logs a meal (e.g. 'I had lunch at 12:30'). Omit to use the current time.",
 						},
 					},
 					Required: []string{"meal_type", "items"},
@@ -88,11 +106,38 @@ func agentTools() []*genai.Tool {
 			},
 			{
 				Name:        "log_stool",
-				Description: "Mark that a bowel movement occurred today, optionally with notes.",
+				Description: "Mark or unmark that a bowel movement occurred today, optionally with notes.",
 				Parameters: &genai.Schema{
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
-						"notes": {Type: genai.TypeString, Description: "Optional notes"},
+						"occurred": {Type: genai.TypeBoolean, Description: "True if a bowel movement occurred. Default true."},
+						"notes":    {Type: genai.TypeString, Description: "Optional notes"},
+					},
+				},
+			},
+			{
+				Name:        "log_hydration",
+				Description: "Set total water intake (in litres) for the current date. This replaces any prior value.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"litres": {Type: genai.TypeNumber, Description: "Total water intake for the day, in litres"},
+					},
+					Required: []string{"litres"},
+				},
+			},
+			{
+				Name:        "log_feeling",
+				Description: "Record a free-text 'feeling' note for the current date (mood, energy, digestion, sleep). Optionally include a 1–10 score.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"notes": {Type: genai.TypeString, Description: "Free-text feeling notes"},
+						"score": {Type: genai.TypeInteger, Description: "Optional feeling score from 1 (bad) to 10 (great)"},
+						"append": {
+							Type:        genai.TypeBoolean,
+							Description: "If true, append to existing notes; if false, replace. Default true.",
+						},
 					},
 				},
 			},
@@ -169,15 +214,31 @@ type AgentSession struct {
 
 // AgentContext describes the drawer state passed to the agent each turn.
 type AgentContext struct {
-	Date              string                 // YYYY-MM-DD currently being viewed
-	SelectedMeal      string                 // breakfast/lunch/etc or ""
-	CurrentEntries    []Entry                // entries in selected meal (for edit_meal)
-	YesterdayByMeal   map[string][]Entry     // for "same as yesterday's lunch"
-	Favorites         []string               // descriptions only — model can match by name
-	Profile           string                 // pre-formatted profile context
-	TodaysActivity    string                 // existing activity text for the date
-	TodaysStool       bool                   // already logged today
-	Extra             map[string]any         // future extensibility
+	Date              string             // YYYY-MM-DD currently being viewed
+	SelectedMeal      string             // breakfast/lunch/etc or ""
+	CurrentEntries    []Entry            // entries in selected meal (for edit_meal)
+	YesterdayByMeal   map[string][]Entry // for "same as yesterday's lunch"
+	TodayByMeal       map[string][]Entry // current day, all meals — for scaling/repeating without selecting
+	Favorites         []FavoriteRef      // model can match by name and use macros
+	Profile           string             // pre-formatted profile context
+	TodaysActivity    string             // existing activity text for the date
+	TodaysStool       bool               // already logged today
+	TodaysStoolNotes  string             // optional notes
+	TodaysHydration   float64            // litres, 0 = not set
+	TodaysFeeling     string             // free-text feeling notes
+	TodaysFeelingScore int                // 0 = not set, 1–10
+	Extra             map[string]any
+}
+
+// FavoriteRef is a minimal favorite shape for agent context.
+type FavoriteRef struct {
+	Description string
+	MealType    string
+	Calories    int
+	Protein     int
+	Carbs       int
+	Fat         int
+	Fiber       int
 }
 
 func formatAgentContext(ac AgentContext) string {
@@ -190,13 +251,26 @@ func formatAgentContext(ac AgentContext) string {
 		fmt.Fprintf(&b, "Today's date (user's local): %s\n", ac.Date)
 	}
 	if ac.SelectedMeal != "" {
-		fmt.Fprintf(&b, "Currently in drawer: %s\n", ac.SelectedMeal)
+		fmt.Fprintf(&b, "Currently editing: %s\n", ac.SelectedMeal)
 	}
 	if len(ac.CurrentEntries) > 0 {
-		b.WriteString("Current entries in this meal:\n")
+		b.WriteString("Current entries in the meal being edited:\n")
 		for _, e := range ac.CurrentEntries {
 			fmt.Fprintf(&b, "  - %s (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
 				e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber)
+		}
+	}
+	if len(ac.TodayByMeal) > 0 {
+		b.WriteString("Today's meals so far:\n")
+		for meal, entries := range ac.TodayByMeal {
+			if len(entries) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "  %s:\n", meal)
+			for _, e := range entries {
+				fmt.Fprintf(&b, "    - %s (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
+					e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber)
+			}
 		}
 	}
 	if len(ac.YesterdayByMeal) > 0 {
@@ -213,13 +287,31 @@ func formatAgentContext(ac AgentContext) string {
 		}
 	}
 	if len(ac.Favorites) > 0 {
-		b.WriteString("Available favorites: " + strings.Join(ac.Favorites, ", ") + "\n")
+		b.WriteString("Available favorites:\n")
+		for _, f := range ac.Favorites {
+			fmt.Fprintf(&b, "  - %s [%s] (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
+				f.Description, f.MealType, f.Calories, f.Protein, f.Carbs, f.Fat, f.Fiber)
+		}
 	}
 	if ac.TodaysActivity != "" {
 		fmt.Fprintf(&b, "Today's activity so far: %s\n", ac.TodaysActivity)
 	}
 	if ac.TodaysStool {
-		b.WriteString("Stool already logged for today.\n")
+		if ac.TodaysStoolNotes != "" {
+			fmt.Fprintf(&b, "Stool already logged for today (notes: %s).\n", ac.TodaysStoolNotes)
+		} else {
+			b.WriteString("Stool already logged for today.\n")
+		}
+	}
+	if ac.TodaysHydration > 0 {
+		fmt.Fprintf(&b, "Today's hydration so far: %.2fL\n", ac.TodaysHydration)
+	}
+	if ac.TodaysFeeling != "" || ac.TodaysFeelingScore > 0 {
+		fmt.Fprintf(&b, "Today's feeling: %s", ac.TodaysFeeling)
+		if ac.TodaysFeelingScore > 0 {
+			fmt.Fprintf(&b, " (%d/10)", ac.TodaysFeelingScore)
+		}
+		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

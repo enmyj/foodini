@@ -111,6 +111,8 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.POST("/insights", apiHandler.Insights)
 	apiGroup.GET("/insights/day", apiHandler.GetStoredDayInsights)
 	apiGroup.POST("/insights/day", apiHandler.DayInsights)
+	apiGroup.GET("/insights/snapshots", apiHandler.GetInsightSnapshots)
+	apiGroup.GET("/insights/by-trigger", apiHandler.GetInsightByTrigger)
 	apiGroup.GET("/suggestions/day", apiHandler.GetStoredDaySuggestions)
 	apiGroup.POST("/suggestions/day", apiHandler.DaySuggestions)
 	apiGroup.GET("/suggestions/meal", apiHandler.GetStoredMealSuggestion)

@@ -23,7 +23,7 @@ const (
 	insightsSheet  = "Insights"
 	favoritesSheet = "Favorites"
 
-	CurrentSchemaVersion = 9
+	CurrentSchemaVersion = 10
 )
 
 // FoodEntry is one row in the Food sheet.
@@ -164,13 +164,14 @@ func UserProfileFromRow(row []interface{}) UserProfile {
 }
 
 // InsightRecord stores a generated AI insight in the Insights sheet.
-// Schema: type | start_date | end_date | generated_at | insight
+// Schema: type | start_date | end_date | generated_at | insight | triggered_by
 type InsightRecord struct {
 	Type        string `json:"type"` // "day" or "week"
 	StartDate   string `json:"start_date"`
 	EndDate     string `json:"end_date"`
 	GeneratedAt string `json:"generated_at"` // UTC RFC3339
 	Insight     string `json:"insight"`
+	TriggeredBy string `json:"triggered_by,omitempty"` // food entry ID that anchored this snapshot (day insights only)
 }
 
 // FavoriteEntry is one row in the Favorites sheet.
@@ -310,18 +311,42 @@ func (s *Service) DeleteFavorite(ctx context.Context, id string) error {
 // SaveInsight appends an insight record to the Insights sheet.
 func (s *Service) SaveInsight(ctx context.Context, rec InsightRecord) error {
 	vr := &googlesheets.ValueRange{
-		Values: [][]interface{}{{rec.Type, rec.StartDate, rec.EndDate, rec.GeneratedAt, rec.Insight}},
+		Values: [][]interface{}{{rec.Type, rec.StartDate, rec.EndDate, rec.GeneratedAt, rec.Insight, rec.TriggeredBy}},
 	}
 	_, err := s.svc.Spreadsheets.Values.Append(
-		s.spreadsheetID, insightsSheet+"!A:E", vr,
+		s.spreadsheetID, insightsSheet+"!A:F", vr,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	return err
+}
+
+func insightFromRow(row []interface{}) InsightRecord {
+	str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+	rec := InsightRecord{}
+	if len(row) >= 1 {
+		rec.Type = str(row[0])
+	}
+	if len(row) >= 2 {
+		rec.StartDate = str(row[1])
+	}
+	if len(row) >= 3 {
+		rec.EndDate = str(row[2])
+	}
+	if len(row) >= 4 {
+		rec.GeneratedAt = str(row[3])
+	}
+	if len(row) >= 5 {
+		rec.Insight = str(row[4])
+	}
+	if len(row) >= 6 {
+		rec.TriggeredBy = str(row[5])
+	}
+	return rec
 }
 
 // GetInsight returns the most recently generated insight matching type+start+end,
 // or nil if none exists. Returns nil (no error) when the Insights sheet does not exist yet.
 func (s *Service) GetInsight(ctx context.Context, insightType, startDate, endDate string) (*InsightRecord, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, insightsSheet+"!A:E").Context(ctx).Do()
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, insightsSheet+"!A:F").Context(ctx).Do()
 	if err != nil {
 		var ge *googleapi.Error
 		if errors.As(err, &ge) && ge.Code == 400 {
@@ -336,13 +361,64 @@ func (s *Service) GetInsight(ctx context.Context, insightType, startDate, endDat
 		}
 		str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
 		if str(row[0]) == insightType && str(row[1]) == startDate && str(row[2]) == endDate {
-			latest = &InsightRecord{
-				Type:        str(row[0]),
-				StartDate:   str(row[1]),
-				EndDate:     str(row[2]),
-				GeneratedAt: str(row[3]),
-				Insight:     str(row[4]),
-			}
+			rec := insightFromRow(row)
+			latest = &rec
+		}
+	}
+	return latest, nil
+}
+
+// GetInsightSnapshotsByDate returns all day-type insight rows for the given date,
+// in order of generation. Used to discover which entries anchor snapshots so the
+// timeline can show per-meal bubbles. Returns nil (no error) if the sheet doesn't
+// exist yet.
+func (s *Service) GetInsightSnapshotsByDate(ctx context.Context, date string) ([]InsightRecord, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, insightsSheet+"!A:F").Context(ctx).Do()
+	if err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == 400 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := []InsightRecord{}
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 5 {
+			continue
+		}
+		str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+		if str(row[0]) != "day" || str(row[1]) != date || str(row[2]) != date {
+			continue
+		}
+		out = append(out, insightFromRow(row))
+	}
+	return out, nil
+}
+
+// GetInsightByTrigger returns the insight anchored to the given food entry ID.
+// Used to display per-meal "verdict at the time" insights on the timeline.
+// Returns nil (no error) if no anchor matches or the sheet doesn't exist yet.
+func (s *Service) GetInsightByTrigger(ctx context.Context, triggerEntryID string) (*InsightRecord, error) {
+	if triggerEntryID == "" {
+		return nil, nil
+	}
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, insightsSheet+"!A:F").Context(ctx).Do()
+	if err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == 400 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var latest *InsightRecord
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 6 {
+			continue
+		}
+		str := func(v interface{}) string { return fmt.Sprintf("%v", v) }
+		if str(row[5]) == triggerEntryID {
+			rec := insightFromRow(row)
+			latest = &rec
 		}
 	}
 	return latest, nil
@@ -461,10 +537,10 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 
 	// Insights sheet: headers row
 	insightHeaders := &googlesheets.ValueRange{
-		Values: [][]interface{}{{"type", "start_date", "end_date", "generated_at", "insight"}},
+		Values: [][]interface{}{{"type", "start_date", "end_date", "generated_at", "insight", "triggered_by"}},
 	}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, insightsSheet+"!A1:E1", insightHeaders,
+		created.SpreadsheetId, insightsSheet+"!A1:F1", insightHeaders,
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("insights headers: %w", err)
@@ -720,6 +796,32 @@ func MigrateV8toV9(ctx context.Context, ts oauth2.TokenSource, spreadsheetID str
 	}
 
 	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"9"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV9toV10 upgrades an existing spreadsheet from schema v9 to v10.
+// Adds a "triggered_by" column to the Insights sheet so day-level insights
+// can be anchored to the entry that triggered their generation.
+func MigrateV9toV10(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	insightHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"type", "start_date", "end_date", "generated_at", "insight", "triggered_by"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, insightsSheet+"!A1:F1", insightHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v9→v10 insights header: %w", err)
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"10"}}}
 	_, err = sheetsSvc.Spreadsheets.Values.Update(
 		spreadsheetID, metaSheet+"!A2", metaData,
 	).ValueInputOption("RAW").Context(ctx).Do()

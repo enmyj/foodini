@@ -34,10 +34,11 @@ type agentRequest struct {
 // AgentAction is one observable side-effect the agent performed during this turn.
 // The frontend uses these to refresh affected UI without re-fetching everything.
 type AgentAction struct {
-	Type    string             `json:"type"` // "meal_added" | "meal_edited" | "activity_updated" | "stool_logged" | "favorite_added"
+	Type    string             `json:"type"` // "meal_added" | "meal_edited" | "activity_updated" | "stool_logged" | "favorite_added" | "hydration_updated" | "feeling_updated"
 	Entries []sheets.FoodEntry `json:"entries,omitempty"`
 	Removed []string           `json:"removed_ids,omitempty"`
 	Date    string             `json:"date,omitempty"`
+	DayLog  *sheets.DayLog     `json:"day_log,omitempty"`
 }
 
 // agentResponse is the output of /api/agent for one user message.
@@ -89,10 +90,17 @@ func (h *Handler) Agent(c *echo.Context) error {
 	yEntries, _ := svc.GetFoodByDate(ctx, yesterday)
 	yesterdayByMeal := groupByMeal(yEntries)
 
+	tEntries, _ := svc.GetFoodByDate(ctx, targetDate)
+	todayByMeal := groupByMeal(tEntries)
+
 	favs, _ := svc.GetFavorites(ctx)
-	favDescs := make([]string, 0, len(favs))
+	favRefs := make([]gemini.FavoriteRef, 0, len(favs))
 	for _, f := range favs {
-		favDescs = append(favDescs, f.Description)
+		favRefs = append(favRefs, gemini.FavoriteRef{
+			Description: f.Description, MealType: f.MealType,
+			Calories: f.Calories, Protein: f.Protein, Carbs: f.Carbs,
+			Fat: f.Fat, Fiber: f.Fiber,
+		})
 	}
 
 	dayLog, _ := svc.GetActivity(ctx, targetDate)
@@ -111,14 +119,19 @@ func (h *Handler) Agent(c *echo.Context) error {
 	}
 
 	ac := gemini.AgentContext{
-		Date:            targetDate,
-		SelectedMeal:    req.Meal,
-		CurrentEntries:  current,
-		YesterdayByMeal: convertMealMap(yesterdayByMeal),
-		Favorites:       favDescs,
-		Profile:         profileCtx,
-		TodaysActivity:  dayLog.Activity,
-		TodaysStool:     dayLog.Poop,
+		Date:               targetDate,
+		SelectedMeal:       req.Meal,
+		CurrentEntries:     current,
+		YesterdayByMeal:    convertMealMap(yesterdayByMeal),
+		TodayByMeal:        convertMealMap(todayByMeal),
+		Favorites:          favRefs,
+		Profile:            profileCtx,
+		TodaysActivity:     dayLog.Activity,
+		TodaysStool:        dayLog.Poop,
+		TodaysStoolNotes:   dayLog.PoopNotes,
+		TodaysHydration:    dayLog.Hydration,
+		TodaysFeeling:      dayLog.FeelingNotes,
+		TodaysFeelingScore: dayLog.FeelingScore,
 	}
 
 	sessionKey := session.UserEmail + "|" + targetDate
@@ -196,6 +209,10 @@ func (ex *agentExecutor) execute(call gemini.AgentToolCall) map[string]any {
 		return ex.logActivity(call.Args)
 	case "log_stool":
 		return ex.logStool(call.Args)
+	case "log_hydration":
+		return ex.logHydration(call.Args)
+	case "log_feeling":
+		return ex.logFeeling(call.Args)
 	case "add_favorite":
 		return ex.addFavorite(call.Args)
 	case "read_log":
@@ -209,6 +226,7 @@ func (ex *agentExecutor) logMeal(args map[string]any) map[string]any {
 	var p struct {
 		MealType string              `json:"meal_type"`
 		Items    []gemini.AgentEntry `json:"items"`
+		Time     string              `json:"time"`
 	}
 	if err := gemini.MarshalToolArgs(args, &p); err != nil {
 		return map[string]any{"error": "invalid args: " + err.Error()}
@@ -217,6 +235,11 @@ func (ex *agentExecutor) logMeal(args map[string]any) map[string]any {
 		return map[string]any{"error": "items required"}
 	}
 	timeStr := sheets.TimeString(ex.now)
+	if t := strings.TrimSpace(p.Time); t != "" {
+		if parsed, err := time.Parse("15:04", t); err == nil {
+			timeStr = parsed.Format("15:04")
+		}
+	}
 	saved := make([]sheets.FoodEntry, 0, len(p.Items))
 	for _, it := range p.Items {
 		fe := sheets.FoodEntry{
@@ -346,18 +369,24 @@ func (ex *agentExecutor) logActivity(args map[string]any) map[string]any {
 		return map[string]any{"error": "sheet write: " + err.Error()}
 	}
 	ex.dayLog = dl
-	ex.actions = append(ex.actions, AgentAction{Type: "activity_updated", Date: ex.date})
+	dlCopy := dl
+	ex.actions = append(ex.actions, AgentAction{Type: "activity_updated", Date: ex.date, DayLog: &dlCopy})
 	return map[string]any{"status": "logged", "activity": dl.Activity}
 }
 
 func (ex *agentExecutor) logStool(args map[string]any) map[string]any {
 	var p struct {
-		Notes string `json:"notes"`
+		Occurred *bool  `json:"occurred"`
+		Notes    string `json:"notes"`
 	}
 	_ = gemini.MarshalToolArgs(args, &p)
 	dl := ex.dayLog
 	dl.Date = ex.date
-	dl.Poop = true
+	if p.Occurred == nil {
+		dl.Poop = true
+	} else {
+		dl.Poop = *p.Occurred
+	}
 	if strings.TrimSpace(p.Notes) != "" {
 		if dl.PoopNotes != "" {
 			dl.PoopNotes = dl.PoopNotes + "; " + p.Notes
@@ -369,7 +398,72 @@ func (ex *agentExecutor) logStool(args map[string]any) map[string]any {
 		return map[string]any{"error": "sheet write: " + err.Error()}
 	}
 	ex.dayLog = dl
-	ex.actions = append(ex.actions, AgentAction{Type: "stool_logged", Date: ex.date})
+	dlCopy := dl
+	ex.actions = append(ex.actions, AgentAction{Type: "stool_logged", Date: ex.date, DayLog: &dlCopy})
+	return map[string]any{"status": "logged", "occurred": dl.Poop}
+}
+
+func (ex *agentExecutor) logHydration(args map[string]any) map[string]any {
+	var p struct {
+		Litres float64 `json:"litres"`
+	}
+	if err := gemini.MarshalToolArgs(args, &p); err != nil {
+		return map[string]any{"error": "invalid args: " + err.Error()}
+	}
+	if p.Litres < 0 || p.Litres > 20 {
+		return map[string]any{"error": "litres out of range"}
+	}
+	dl := ex.dayLog
+	dl.Date = ex.date
+	dl.Hydration = p.Litres
+	if err := ex.svc.SetActivity(ex.ctx, dl); err != nil {
+		return map[string]any{"error": "sheet write: " + err.Error()}
+	}
+	ex.dayLog = dl
+	dlCopy := dl
+	ex.actions = append(ex.actions, AgentAction{Type: "hydration_updated", Date: ex.date, DayLog: &dlCopy})
+	return map[string]any{"status": "logged", "litres": dl.Hydration}
+}
+
+func (ex *agentExecutor) logFeeling(args map[string]any) map[string]any {
+	var p struct {
+		Notes  string `json:"notes"`
+		Score  *int   `json:"score"`
+		Append *bool  `json:"append"`
+	}
+	if err := gemini.MarshalToolArgs(args, &p); err != nil {
+		return map[string]any{"error": "invalid args: " + err.Error()}
+	}
+	dl := ex.dayLog
+	dl.Date = ex.date
+	notes := strings.TrimSpace(p.Notes)
+	if notes != "" {
+		if p.Append == nil || *p.Append {
+			if dl.FeelingNotes != "" {
+				dl.FeelingNotes = dl.FeelingNotes + "; " + notes
+			} else {
+				dl.FeelingNotes = notes
+			}
+		} else {
+			dl.FeelingNotes = notes
+		}
+	}
+	if p.Score != nil {
+		s := *p.Score
+		if s < 0 || s > 10 {
+			return map[string]any{"error": "score out of range"}
+		}
+		dl.FeelingScore = s
+	}
+	if notes == "" && p.Score == nil {
+		return map[string]any{"error": "notes or score required"}
+	}
+	if err := ex.svc.SetActivity(ex.ctx, dl); err != nil {
+		return map[string]any{"error": "sheet write: " + err.Error()}
+	}
+	ex.dayLog = dl
+	dlCopy := dl
+	ex.actions = append(ex.actions, AgentAction{Type: "feeling_updated", Date: ex.date, DayLog: &dlCopy})
 	return map[string]any{"status": "logged"}
 }
 
