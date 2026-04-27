@@ -1,6 +1,5 @@
 import type {
     AgentResponse,
-    ChatParseResponse,
     CoachChatResponse,
     CoachMessage,
     EntriesResponse,
@@ -103,38 +102,6 @@ export async function getLog(
     return apiFetchJson<LogResponse>(`/api/log${params}`);
 }
 
-export async function chat(
-    message: string | null,
-    date: string | null = null,
-    images: File[] | null = null,
-    meal: MealType | null = null,
-): Promise<ChatParseResponse> {
-    if (images?.length) {
-        const body = new FormData();
-        body.append("message", message ?? "");
-        if (date) body.append("date", date);
-        if (meal) body.append("meal", meal);
-        for (const image of images) {
-            body.append("images", image);
-        }
-        return apiFetchJson<ChatParseResponse>("/api/chat", {
-            method: "POST",
-            body,
-        });
-    }
-
-    const body: { message: string | null; date?: string; meal?: MealType } = {
-        message,
-    };
-    if (date) body.date = date;
-    if (meal) body.meal = meal;
-    return apiFetchJson<ChatParseResponse>("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-    });
-}
-
 export async function agent(
     message: string | null,
     options: {
@@ -185,27 +152,6 @@ export async function confirmChat(
     const body: { entries: EntryInput[]; date?: string } = { entries };
     if (date) body.date = date;
     return apiFetchJson<EntriesResponse>("/api/chat/confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-    });
-}
-
-export async function editChat(
-    message: string,
-    entries: Entry[],
-    date: string | null = null,
-    mealType: MealType | null = null,
-): Promise<EntriesResponse> {
-    const body: {
-        message: string;
-        entries: Entry[];
-        date?: string;
-        meal_type?: MealType;
-    } = { message, entries };
-    if (date) body.date = date;
-    if (mealType) body.meal_type = mealType;
-    return apiFetchJson<EntriesResponse>("/api/chat/edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

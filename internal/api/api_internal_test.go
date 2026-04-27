@@ -166,8 +166,8 @@ func TestFormatProfileContextIncludesAge(t *testing.T) {
 	}
 }
 
-func TestParseChatRequestJSON(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{
+func TestParseAgentRequestJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/agent", strings.NewReader(`{
 		"message":"banana and yogurt",
 		"date":"2026-04-06",
 		"meal":"breakfast",
@@ -175,9 +175,9 @@ func TestParseChatRequestJSON(t *testing.T) {
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 
-	got, err := parseChatRequest(req)
+	got, err := parseAgentRequest(req)
 	if err != nil {
-		t.Fatalf("parseChatRequest: %v", err)
+		t.Fatalf("parseAgentRequest: %v", err)
 	}
 	if got.Message != "banana and yogurt" || got.Date != "2026-04-06" || got.Meal != "breakfast" {
 		t.Fatalf("unexpected request: %+v", got)
@@ -193,7 +193,7 @@ func TestParseChatRequestJSON(t *testing.T) {
 	}
 }
 
-func TestParseChatRequestMultipart(t *testing.T) {
+func TestParseAgentRequestMultipart(t *testing.T) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField("message", "salad"); err != nil {
@@ -219,12 +219,12 @@ func TestParseChatRequestMultipart(t *testing.T) {
 		t.Fatalf("writer.Close: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/chat", &body)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	got, err := parseChatRequest(req)
+	got, err := parseAgentRequest(req)
 	if err != nil {
-		t.Fatalf("parseChatRequest: %v", err)
+		t.Fatalf("parseAgentRequest: %v", err)
 	}
 	if got.Message != "salad" || got.Date != "2026-04-06" || got.Meal != "lunch" {
 		t.Fatalf("unexpected request: %+v", got)
@@ -240,7 +240,7 @@ func TestParseChatRequestMultipart(t *testing.T) {
 	}
 }
 
-func TestParseChatRequestMultipartRejectsNonImage(t *testing.T) {
+func TestParseAgentRequestMultipartRejectsNonImage(t *testing.T) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	header := textproto.MIMEHeader{}
@@ -257,10 +257,10 @@ func TestParseChatRequestMultipartRejectsNonImage(t *testing.T) {
 		t.Fatalf("writer.Close: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/chat", &body)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	if _, err := parseChatRequest(req); err == nil {
+	if _, err := parseAgentRequest(req); err == nil {
 		t.Fatal("expected non-image multipart upload to fail")
 	}
 }

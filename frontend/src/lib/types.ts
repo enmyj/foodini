@@ -68,12 +68,6 @@ export interface LogResponse {
     end?: string;
 }
 
-export interface ChatParseResponse {
-    done: boolean;
-    entries?: Entry[];
-    message?: string | null;
-}
-
 export type AgentActionType =
     | "meal_added"
     | "meal_edited"

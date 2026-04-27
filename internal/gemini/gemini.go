@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"iter"
 	"log"
@@ -17,54 +16,6 @@ import (
 
 const geminiModel = "gemini-3-flash-preview"
 
-const systemPrompt = `You are a food tracking assistant. The user describes what they ate.
-
-Your job:
-1. Extract food items and estimate macros (calories, protein, carbs, fat, fiber in grams).
-2. If a photo is provided, estimate quantities from the image — do not ask about anything visible in the photo. If quantities are genuinely impossible to determine even from a photo, ask ONE short clarifying question — nothing more.
-3. Once you have enough information, return the entries.
-
-Rules:
-- meal_type must be one of: breakfast, snack, lunch, dinner, supplements
-- Use "supplements" for vitamins, protein powders, and other supplements (not regular food)
-- All numeric values are integers (round estimates are fine)
-- Multiple foods in one meal → multiple entries, same meal_type
-- Use reasonable common serving sizes for estimates
-- Include fiber (grams) as an estimated integer (0 if unknown/negligible)
-
-Response format:
-- If you need clarification: set "message" to your question, leave "entries" as empty array
-- If ready to log: set "message" to a brief confirmation like "Got it!", populate "entries" with the food items`
-
-// responseSchema defines the JSON structure for Gemini responses.
-var responseSchema = &genai.Schema{
-	Type: genai.TypeObject,
-	Properties: map[string]*genai.Schema{
-		"message": {
-			Type:        genai.TypeString,
-			Description: "A brief message to the user - either a clarifying question or confirmation",
-		},
-		"entries": {
-			Type:        genai.TypeArray,
-			Description: "Food entries to log (empty if asking a clarifying question)",
-			Items: &genai.Schema{
-				Type: genai.TypeObject,
-				Properties: map[string]*genai.Schema{
-					"meal_type":   {Type: genai.TypeString, Description: "One of: breakfast, snack, lunch, dinner, supplements"},
-					"description": {Type: genai.TypeString, Description: "Brief description of the food"},
-					"calories":    {Type: genai.TypeInteger},
-					"protein":     {Type: genai.TypeInteger, Description: "Grams of protein"},
-					"carbs":       {Type: genai.TypeInteger, Description: "Grams of carbohydrates"},
-					"fat":         {Type: genai.TypeInteger, Description: "Grams of fat"},
-					"fiber":       {Type: genai.TypeInteger, Description: "Grams of fiber"},
-				},
-				Required: []string{"meal_type", "description", "calories", "protein", "carbs", "fat", "fiber"},
-			},
-		},
-	},
-	Required: []string{"message", "entries"},
-}
-
 // Entry is a structured food log entry.
 type Entry struct {
 	MealType    string `json:"meal_type"`
@@ -74,12 +25,6 @@ type Entry struct {
 	Carbs       int    `json:"carbs"`
 	Fat         int    `json:"fat"`
 	Fiber       int    `json:"fiber"`
-}
-
-// Response is the structured response from Gemini.
-type Response struct {
-	Message string  `json:"message"`
-	Entries []Entry `json:"entries"`
 }
 
 var validMealTypes = map[string]bool{
@@ -131,12 +76,11 @@ type ImageData struct {
 	Data     []byte
 }
 
-// Service manages per-user Gemini conversation history in memory.
+// Service manages Gemini API access and per-user agent session state.
 type Service struct {
 	apiKey string
 	mu     sync.Mutex
-	convs  map[string][]*genai.Content // keyed by userEmail|date
-	caches map[string]*cacheRecord     // keyed by sha256(systemInstr)
+	caches map[string]*cacheRecord // keyed by sha256(systemInstr)
 
 	clientOnce sync.Once
 	client     *genai.Client
@@ -154,7 +98,6 @@ type cacheRecord struct {
 func NewService(apiKey string) *Service {
 	return &Service{
 		apiKey: apiKey,
-		convs:  make(map[string][]*genai.Content),
 		caches: make(map[string]*cacheRecord),
 	}
 }
@@ -181,15 +124,6 @@ func buildSystemInstruction(prompt string) *genai.Content {
 	}
 }
 
-func buildChatConfig(systemInstr string) *genai.GenerateContentConfig {
-	return &genai.GenerateContentConfig{
-		SystemInstruction: buildSystemInstruction(systemInstr),
-		ResponseMIMEType:  "application/json",
-		ResponseSchema:    responseSchema,
-		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelLow},
-	}
-}
-
 func buildTextConfig(systemInstr string, level genai.ThinkingLevel) *genai.GenerateContentConfig {
 	temp := float32(1.2)
 	return &genai.GenerateContentConfig{
@@ -197,132 +131,6 @@ func buildTextConfig(systemInstr string, level genai.ThinkingLevel) *genai.Gener
 		Temperature:       &temp,
 		ThinkingConfig:    &genai.ThinkingConfig{ThinkingLevel: level},
 	}
-}
-
-// Chat sends a user message (and optional image) and returns (message, entries, error).
-// If entries is non-empty, the response is ready for confirmation.
-// If entries is empty, message contains a clarifying question.
-func (s *Service) Chat(ctx context.Context, userEmail, date, message, profileCtx string, imgs []ImageData) (string, []Entry, error) {
-	client, err := s.getClient(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-
-	systemInstr := systemPrompt
-	if profileCtx != "" {
-		systemInstr = profileCtx + "\n\n" + systemPrompt
-	}
-
-	key := userEmail + "|" + date
-	s.mu.Lock()
-	history := s.convs[key]
-	s.mu.Unlock()
-
-	chatSession, err := client.Chats.Create(ctx, geminiModel, buildChatConfig(systemInstr), history)
-	if err != nil {
-		return "", nil, fmt.Errorf("gemini chat: %w", err)
-	}
-
-	var parts []genai.Part
-	for _, img := range imgs {
-		parts = append(parts, genai.Part{
-			InlineData: &genai.Blob{MIMEType: img.MIMEType, Data: img.Data},
-			MediaResolution: &genai.PartMediaResolution{
-				Level: genai.PartMediaResolutionLevelMediaResolutionLow,
-			},
-		})
-	}
-	if message != "" {
-		parts = append(parts, genai.Part{Text: message})
-	}
-
-	resp, err := chatSession.SendMessage(ctx, parts...)
-	if err != nil {
-		return "", nil, fmt.Errorf("gemini send: %w", err)
-	}
-
-	jsonStr := strings.TrimSpace(resp.Text())
-
-	var result Response
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return "", nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	for i, entry := range result.Entries {
-		if err := entry.Validate(); err != nil {
-			return "", nil, fmt.Errorf("entry %d: %w", i, err)
-		}
-	}
-
-	s.mu.Lock()
-	s.convs[key] = chatSession.History(true)
-	s.mu.Unlock()
-
-	return result.Message, result.Entries, nil
-}
-
-const editSystemPrompt = `You are editing an existing meal's food entries. The user's current entries are provided below.
-Apply the user's requested change and return the FULL updated entry list.
-
-Rules:
-- To remove an item, simply omit it from the response
-- To add an item, include it with the same meal_type
-- To modify an item, return it with updated values
-- meal_type must be one of: breakfast, snack, lunch, dinner, supplements
-- All numeric values are integers
-- Include fiber (grams) as an estimated integer (0 if unknown/negligible)
-- Keep descriptions under 500 characters
-
-Response format:
-- Set "message" to a brief summary of what changed (e.g. "Removed the toast, updated egg count to 2")
-- Set "entries" to the complete updated list of food items`
-
-// EditEntries sends existing entries + an edit instruction and returns the modified entry list.
-func (s *Service) EditEntries(ctx context.Context, entries []Entry, message, profileCtx string) (string, []Entry, error) {
-	client, err := s.getClient(ctx)
-	if err != nil {
-		return "", nil, err
-	}
-
-	systemInstr := editSystemPrompt
-	if profileCtx != "" {
-		systemInstr = profileCtx + "\n\n" + systemInstr
-	}
-
-	// Build the user message with current entries as context.
-	var b strings.Builder
-	b.WriteString("Current entries:\n")
-	for _, e := range entries {
-		fmt.Fprintf(&b, "- %s: %d cal, %dg protein, %dg carbs, %dg fat, %dg fiber (meal: %s)\n",
-			e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber, e.MealType)
-	}
-	b.WriteString("\nRequested change: " + message)
-
-	resp, err := client.Models.GenerateContent(ctx, geminiModel, []*genai.Content{
-		genai.NewContentFromText(b.String(), genai.RoleUser),
-	}, buildChatConfig(systemInstr))
-	if err != nil {
-		return "", nil, fmt.Errorf("gemini edit: %w", err)
-	}
-
-	jsonStr := strings.TrimSpace(resp.Text())
-	var result Response
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		return "", nil, fmt.Errorf("parse response: %w", err)
-	}
-	for i, entry := range result.Entries {
-		if err := entry.Validate(); err != nil {
-			return "", nil, fmt.Errorf("entry %d: %w", i, err)
-		}
-	}
-	return result.Message, result.Entries, nil
-}
-
-// ClearConversation discards in-progress conversation for a user on a given date.
-func (s *Service) ClearConversation(userEmail, date string) {
-	s.mu.Lock()
-	delete(s.convs, userEmail+"|"+date)
-	s.mu.Unlock()
 }
 
 const insightsSystemPrompt = `You are a nutrition coach reviewing a week of logged food and activity data. Your tone adapts to the user's knowledge level (see below) — from plain-spoken for beginners to precise and clinical for advanced users.

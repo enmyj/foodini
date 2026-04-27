@@ -549,6 +549,15 @@
         queryClient.invalidateQueries({ queryKey: queryKeys.events(currentDate) });
     }
 
+    function onSwitchMeal(meal: MealType): Entry[] | null {
+        const grouped = groupedByMeal(dayData?.entries);
+        const list = grouped[meal] ?? null;
+        drawerEditMealType = meal;
+        drawerEditEntries = list ?? null;
+        drawerMeal = meal;
+        return list && list.length ? list : null;
+    }
+
     function closeDrawer() {
         drawerOpen = false;
         drawerDate = null;
@@ -1243,6 +1252,7 @@
     {onEntriesAdded}
     {onEntriesEdited}
     {onEventChanged}
+    {onSwitchMeal}
     date={drawerDate}
     meal={drawerMeal}
     editEntries={drawerEditEntries}

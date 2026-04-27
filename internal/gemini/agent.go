@@ -52,7 +52,8 @@ Style:
 - No filler ("I'd be happy to..."). No emoji unless the user uses one first.`
 
 // agentTools returns the function declarations available to the agent.
-func agentTools() []*genai.Tool {
+// The schema is identical across calls, so build it once.
+var agentTools = sync.OnceValue(func() []*genai.Tool {
 	entryItem := &genai.Schema{
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
@@ -171,7 +172,7 @@ func agentTools() []*genai.Tool {
 			},
 		},
 	}}
-}
+})
 
 // AgentEntry mirrors a food item in tool args.
 type AgentEntry struct {
@@ -213,6 +214,8 @@ type AgentSession struct {
 }
 
 // AgentEvent is a minimal event shape for agent context.
+// Num is overloaded by Kind: workout=duration_min, water=millilitres,
+// feeling=score 1-10, stool=unused.
 type AgentEvent struct {
 	ID    string
 	Time  string

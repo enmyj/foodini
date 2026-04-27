@@ -5,7 +5,7 @@
     import { autosize } from "./autosize.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
-    import { EVENT_KINDS } from "./types.ts";
+    import { EVENT_KINDS, MEAL_ORDER } from "./types.ts";
     import type {
         AgentAction,
         Entry,
@@ -37,6 +37,7 @@
         onEntriesAdded,
         onEntriesEdited = null,
         onEventChanged = null,
+        onSwitchMeal = null,
         date = null,
         meal = null,
         editEntries = null,
@@ -51,6 +52,7 @@
             | ((entries: Entry[], mealType: MealType | null) => void)
             | null;
         onEventChanged?: ((change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) => void) | null;
+        onSwitchMeal?: ((meal: MealType) => Entry[] | null) | null;
         date?: string | null;
         meal?: MealType | null;
         editEntries?: Entry[] | null;
@@ -193,6 +195,7 @@
 
     let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
+    let mealPickerOpen = $state(false);
 
     const agentMutation = createMutation(() => ({
         mutationFn: ({
@@ -246,6 +249,7 @@
                 clearPendingImages();
                 firstSend = true;
                 deletingEntryIds = new Set();
+                mealPickerOpen = false;
                 if (editEvent) mode = "event";
                 else if (editEntries || meal) mode = "meal";
                 else if (initialMode) mode = initialMode;
@@ -275,6 +279,29 @@
             }
         });
     });
+
+    function selectMeal(m: MealType) {
+        mealPickerOpen = false;
+        if (m === mealType) return;
+        if (onSwitchMeal) {
+            const switched = onSwitchMeal(m);
+            entries = switched ? [...switched] : [];
+            mealType = m;
+            messages = [];
+            firstSend = true;
+            if (switched?.[0]?.time) entryTime = switched[0].time;
+        } else {
+            mealType = m;
+        }
+    }
+
+    function clearMeal() {
+        mealPickerOpen = false;
+        mealType = null;
+        entries = [];
+        messages = [];
+        firstSend = true;
+    }
 
     function pickMode(next: DrawerMode) {
         mode = next;
@@ -594,8 +621,34 @@
                     onblur={onEntryTimeBlur}
                     title="Time"
                 />
-                {#if mealType}
-                    <span class="meal-tag">{mealType}</span>
+                {#if mode === "meal"}
+                    <div class="meal-picker">
+                        <button
+                            class="meal-pill"
+                            class:active={mealType !== null}
+                            onclick={() => (mealPickerOpen = !mealPickerOpen)}
+                            aria-expanded={mealPickerOpen}
+                        >{mealType ?? "Meal"}</button>
+                        {#if mealPickerOpen}
+                            <div class="meal-menu" role="menu">
+                                {#each MEAL_ORDER as m}
+                                    <button
+                                        class="meal-menu-item"
+                                        class:selected={mealType === m}
+                                        onclick={() => selectMeal(m)}
+                                        role="menuitem"
+                                    >{m}</button>
+                                {/each}
+                                {#if mealType !== null}
+                                    <button
+                                        class="meal-menu-item clear"
+                                        onclick={() => clearMeal()}
+                                        role="menuitem"
+                                    >Clear</button>
+                                {/if}
+                            </div>
+                        {/if}
+                    </div>
                 {/if}
             </div>
             <div class="top-right">
@@ -1013,15 +1066,84 @@
         min-width: 0;
     }
 
-    .meal-tag {
-        font-size: 0.7rem;
-        text-transform: capitalize;
-        background: var(--paper-3);
-        color: var(--ink);
-        padding: 0.2rem 0.55rem;
+    .meal-picker {
+        position: relative;
+        display: inline-block;
+    }
+
+    .meal-pill {
+        background: none;
+        border: 1px solid var(--rule-3);
         border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.75rem;
+        padding: 0.25rem 0.7rem;
+        cursor: pointer;
+        font-family: inherit;
         font-weight: 500;
-        letter-spacing: 0.02em;
+        text-transform: capitalize;
+        touch-action: manipulation;
+        white-space: nowrap;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+
+    .meal-pill.active {
+        border-color: var(--ink-2);
+        color: var(--ink-2);
+        background: var(--paper-2);
+    }
+
+    @media (hover: hover) {
+        .meal-pill:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .meal-menu {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        z-index: 5;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        display: flex;
+        flex-direction: column;
+        min-width: 8rem;
+        padding: 0.25rem;
+    }
+
+    .meal-menu-item {
+        background: none;
+        border: none;
+        text-align: left;
+        padding: 0.4rem 0.65rem;
+        font-family: inherit;
+        font-size: 0.8rem;
+        color: var(--ink);
+        cursor: pointer;
+        border-radius: var(--r-sm);
+        text-transform: capitalize;
+    }
+
+    .meal-menu-item.selected {
+        background: var(--paper-2);
+        font-weight: 600;
+    }
+
+    .meal-menu-item.clear {
+        color: var(--mute);
+        border-top: 1px solid var(--rule);
+        margin-top: 0.15rem;
+        padding-top: 0.45rem;
+    }
+
+    @media (hover: hover) {
+        .meal-menu-item:hover {
+            background: var(--paper-2);
+        }
     }
 
     .top-right {

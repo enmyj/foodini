@@ -345,10 +345,13 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 
 	var removed []string
 	for _, e := range ex.currentEntries {
-		if !usedIDs[e.ID] {
-			_ = ex.svc.DeleteFood(ex.ctx, e.ID)
-			removed = append(removed, e.ID)
+		if usedIDs[e.ID] {
+			continue
 		}
+		if err := ex.svc.DeleteFood(ex.ctx, e.ID); err != nil {
+			return map[string]any{"error": "sheet delete: " + err.Error()}
+		}
+		removed = append(removed, e.ID)
 	}
 
 	// Update local state so subsequent tool calls see the new entries.
@@ -498,11 +501,11 @@ func (ex *agentExecutor) deleteEvent(args map[string]any) map[string]any {
 	if err := gemini.MarshalToolArgs(args, &p); err != nil {
 		return map[string]any{"error": "invalid args: " + err.Error()}
 	}
-	if _, idx, ok := ex.findEvent(p.ID); ok {
-		ex.todaysEvents = append(ex.todaysEvents[:idx], ex.todaysEvents[idx+1:]...)
-	}
 	if err := ex.svc.DeleteEvent(ex.ctx, p.ID); err != nil {
 		return map[string]any{"error": "delete: " + err.Error()}
+	}
+	if _, idx, ok := ex.findEvent(p.ID); ok {
+		ex.todaysEvents = append(ex.todaysEvents[:idx], ex.todaysEvents[idx+1:]...)
 	}
 	ex.actions = append(ex.actions, AgentAction{Type: "event_deleted", Date: ex.date, EventID: p.ID})
 	return map[string]any{"status": "deleted"}
