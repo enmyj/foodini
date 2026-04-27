@@ -57,7 +57,7 @@ export function appendEntriesToLogCache(
     if (!log) {
         return {
             entries: newEntries,
-            daily_logs: [],
+            events: [],
         };
     }
     return {

@@ -8,13 +8,25 @@
     let {
         active,
         date,
+        initialInput = "",
+        onInputConsumed = null,
     }: {
         active: boolean;
         date: string;
+        initialInput?: string;
+        onInputConsumed?: (() => void) | null;
     } = $props();
 
     let messages = $state<CoachMessage[]>([]);
     let input = $state("");
+
+    $effect(() => {
+        if (initialInput) {
+            input = initialInput;
+            onInputConsumed?.();
+            setTimeout(() => inputEl?.focus(), 60);
+        }
+    });
     let sending = $state(false);
     let streaming = $state(false);
     let weeks = $state(1);

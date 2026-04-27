@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/googleapi"
@@ -18,13 +19,65 @@ import (
 const (
 	foodSheet      = "Food"
 	activitySheet  = "Activity"
+	eventsSheet    = "Events"
 	metaSheet      = "Meta"
 	profileSheet   = "Profile"
 	insightsSheet  = "Insights"
 	favoritesSheet = "Favorites"
 
-	CurrentSchemaVersion = 10
+	CurrentSchemaVersion = 12
 )
+
+// Event kinds. Each maps to a row in the Events sheet.
+const (
+	EventKindWorkout = "workout"
+	EventKindStool   = "stool"
+	EventKindWater   = "water"
+	EventKindFeeling = "feeling"
+)
+
+// Event is one row in the Events sheet — a timestamped non-meal entry on the
+// day timeline. Schema: id | date | time | kind | text | num | notes
+//   - workout : text=description,           num=optional duration_min
+//   - stool   : text=optional description,  num=unused
+//   - water   : text=unused,                num=millilitres
+//   - feeling : text=mood notes,            num=score 1-10 (0 = unset)
+type Event struct {
+	ID    string  `json:"id"`
+	Date  string  `json:"date"`
+	Time  string  `json:"time"`
+	Kind  string  `json:"kind"`
+	Text  string  `json:"text"`
+	Num   float64 `json:"num"`
+	Notes string  `json:"notes"`
+}
+
+func (e Event) ToRow() []interface{} {
+	return []interface{}{
+		e.ID, e.Date, e.Time, e.Kind, e.Text,
+		strconv.FormatFloat(e.Num, 'f', -1, 64), e.Notes,
+	}
+}
+
+func EventFromRow(row []interface{}) (*Event, error) {
+	if len(row) < 4 {
+		return nil, fmt.Errorf("event row has %d columns, need at least 4", len(row))
+	}
+	str := func(i int) string {
+		if i >= len(row) {
+			return ""
+		}
+		return fmt.Sprintf("%v", row[i])
+	}
+	fnum := func(i int) float64 {
+		f, _ := strconv.ParseFloat(str(i), 64)
+		return f
+	}
+	return &Event{
+		ID: str(0), Date: str(1), Time: str(2), Kind: str(3),
+		Text: str(4), Num: fnum(5), Notes: str(6),
+	}, nil
+}
 
 // FoodEntry is one row in the Food sheet.
 type FoodEntry struct {
@@ -481,6 +534,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 		Sheets: []*googlesheets.Sheet{
 			{Properties: &googlesheets.SheetProperties{Title: foodSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: activitySheet}},
+			{Properties: &googlesheets.SheetProperties{Title: eventsSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: metaSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: insightsSheet}},
@@ -511,6 +565,16 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("activity headers: %w", err)
+	}
+
+	eventHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"id", "date", "time", "kind", "text", "num", "notes"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, eventsSheet+"!A1:G1", eventHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("events headers: %w", err)
 	}
 
 	// Meta sheet: A1 = header "schema_version", A2 = value
@@ -828,9 +892,302 @@ func MigrateV9toV10(ctx context.Context, ts oauth2.TokenSource, spreadsheetID st
 	return err
 }
 
+// MigrateV10toV11 adds the Events sheet and fans the per-day Activity rows
+// out into individual events at 12:00. The Activity sheet is left in place so
+// the migration is reversible if needed; nothing reads from it after v11.
+func MigrateV10toV11(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			AddSheet: &googlesheets.AddSheetRequest{
+				Properties: &googlesheets.SheetProperties{Title: eventsSheet},
+			},
+		}},
+	}).Context(ctx).Do()
+
+	eventHeaders := &googlesheets.ValueRange{
+		Values: [][]interface{}{{"id", "date", "time", "kind", "text", "num", "notes"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, eventsSheet+"!A1:G1", eventHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v10→v11 events header: %w", err)
+	}
+
+	// Skip the activity-fanout if events already exist — this migration is
+	// being re-run after the schema bump. Idempotency guard added after a
+	// crash-mid-migration produced doubled events for some users.
+	existing, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, eventsSheet+"!A:G").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v10→v11 read events: %w", err)
+	}
+	if len(existing.Values) > 1 {
+		metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"11"}}}
+		_, err = sheetsSvc.Spreadsheets.Values.Update(
+			spreadsheetID, metaSheet+"!A2", metaData,
+		).ValueInputOption("RAW").Context(ctx).Do()
+		return err
+	}
+
+	resp, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v10→v11 read activity: %w", err)
+	}
+
+	const noon = "12:00"
+	var rows [][]interface{}
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 1 {
+			continue
+		}
+		dl := DayLogFromRow(row)
+		if dl.Date == "" {
+			continue
+		}
+		mk := func(kind, text string, num float64) []interface{} {
+			return Event{
+				ID: uuid.NewString(), Date: dl.Date, Time: noon,
+				Kind: kind, Text: text, Num: num,
+			}.ToRow()
+		}
+		if strings.TrimSpace(dl.Activity) != "" {
+			rows = append(rows, mk(EventKindWorkout, dl.Activity, 0))
+		}
+		if dl.Poop {
+			rows = append(rows, mk(EventKindStool, dl.PoopNotes, 0))
+		}
+		if dl.Hydration > 0 {
+			rows = append(rows, mk(EventKindWater, "", dl.Hydration*1000))
+		}
+		if dl.FeelingScore > 0 || strings.TrimSpace(dl.FeelingNotes) != "" {
+			rows = append(rows, mk(EventKindFeeling, dl.FeelingNotes, float64(dl.FeelingScore)))
+		}
+	}
+	if len(rows) > 0 {
+		_, err = sheetsSvc.Spreadsheets.Values.Append(
+			spreadsheetID, eventsSheet+"!A:G",
+			&googlesheets.ValueRange{Values: rows},
+		).ValueInputOption("RAW").Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("migrate v10→v11 append events: %w", err)
+		}
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"11"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// MigrateV11toV12 deduplicates the Events sheet. A bug in earlier MigrateV10toV11
+// runs (no idempotency guard) caused some users to have every fanned-out activity
+// event appended twice. This pass deletes any event rows whose
+// date+time+kind+text+num signature matches a row above them, keeping the first.
+func MigrateV11toV12(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+
+	ss, err := sheetsSvc.Spreadsheets.Get(spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("migrate v11→v12 get spreadsheet: %w", err)
+	}
+	var sheetID int64 = -1
+	for _, sh := range ss.Sheets {
+		if sh.Properties.Title == eventsSheet {
+			sheetID = sh.Properties.SheetId
+			break
+		}
+	}
+
+	if sheetID >= 0 {
+		resp, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, eventsSheet+"!A:G").Context(ctx).Do()
+		if err != nil {
+			return fmt.Errorf("migrate v11→v12 read events: %w", err)
+		}
+		seen := map[string]bool{}
+		var dupRows []int // 0-based row indices to delete
+		str := func(row []interface{}, i int) string {
+			if i >= len(row) {
+				return ""
+			}
+			return fmt.Sprintf("%v", row[i])
+		}
+		for i, row := range resp.Values {
+			if i == 0 || len(row) < 4 {
+				continue
+			}
+			sig := str(row, 1) + "|" + str(row, 2) + "|" + str(row, 3) + "|" + str(row, 4) + "|" + str(row, 5)
+			if seen[sig] {
+				dupRows = append(dupRows, i)
+				continue
+			}
+			seen[sig] = true
+		}
+		// Delete bottom-up so earlier indices stay valid.
+		if len(dupRows) > 0 {
+			reqs := make([]*googlesheets.Request, 0, len(dupRows))
+			for j := len(dupRows) - 1; j >= 0; j-- {
+				idx := dupRows[j]
+				reqs = append(reqs, &googlesheets.Request{
+					DeleteDimension: &googlesheets.DeleteDimensionRequest{
+						Range: &googlesheets.DimensionRange{
+							SheetId:    sheetID,
+							Dimension:  "ROWS",
+							StartIndex: int64(idx),
+							EndIndex:   int64(idx + 1),
+						},
+					},
+				})
+			}
+			_, err := sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{Requests: reqs}).Context(ctx).Do()
+			if err != nil {
+				return fmt.Errorf("migrate v11→v12 dedupe: %w", err)
+			}
+		}
+	}
+
+	metaData := &googlesheets.ValueRange{Values: [][]interface{}{{"12"}}}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", metaData,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
 // MigrateSpreadsheet is an alias kept for backwards compatibility; calls MigrateV1toV2.
 func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
 	return MigrateV1toV2(ctx, ts, spreadsheetID)
+}
+
+// AppendEvent appends an event row.
+func (s *Service) AppendEvent(ctx context.Context, e Event) error {
+	vr := &googlesheets.ValueRange{Values: [][]interface{}{e.ToRow()}}
+	_, err := s.svc.Spreadsheets.Values.Append(
+		s.spreadsheetID, eventsSheet+"!A:G", vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// GetEventsByDate returns all events for a given date (YYYY-MM-DD).
+func (s *Service) GetEventsByDate(ctx context.Context, date string) ([]Event, error) {
+	return s.getEventsFiltered(ctx, func(d string) bool { return d == date })
+}
+
+// GetEventsByDateRange returns events where start <= date <= end.
+func (s *Service) GetEventsByDateRange(ctx context.Context, start, end string) ([]Event, error) {
+	return s.getEventsFiltered(ctx, func(d string) bool { return d >= start && d <= end })
+}
+
+func (s *Service) getEventsFiltered(ctx context.Context, keep func(string) bool) ([]Event, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, eventsSheet+"!A:G").Context(ctx).Do()
+	if err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == 400 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var out []Event
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 4 {
+			continue
+		}
+		if !keep(fmt.Sprintf("%v", row[1])) {
+			continue
+		}
+		e, err := EventFromRow(row)
+		if err != nil {
+			continue
+		}
+		out = append(out, *e)
+	}
+	return out, nil
+}
+
+// UpdateEvent replaces the event row with the given ID.
+func (s *Service) UpdateEvent(ctx context.Context, id string, updated Event) error {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, eventsSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return err
+	}
+	rowNum := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowNum = i + 1
+			break
+		}
+	}
+	if rowNum < 0 {
+		return fmt.Errorf("event %q not found", id)
+	}
+	vr := &googlesheets.ValueRange{Values: [][]interface{}{updated.ToRow()}}
+	_, err = s.svc.Spreadsheets.Values.Update(
+		s.spreadsheetID,
+		fmt.Sprintf("%s!A%d:G%d", eventsSheet, rowNum, rowNum),
+		vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+// DeleteEvent removes the event row with the given ID.
+func (s *Service) DeleteEvent(ctx context.Context, id string) error {
+	ss, err := s.svc.Spreadsheets.Get(s.spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get spreadsheet: %w", err)
+	}
+	var sheetID int64 = -1
+	for _, sh := range ss.Sheets {
+		if sh.Properties.Title == eventsSheet {
+			sheetID = sh.Properties.SheetId
+			break
+		}
+	}
+	if sheetID < 0 {
+		return fmt.Errorf("events sheet not found")
+	}
+
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, eventsSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get ids: %w", err)
+	}
+	rowIdx := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		return fmt.Errorf("event %q not found", id)
+	}
+
+	req := &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			DeleteDimension: &googlesheets.DeleteDimensionRequest{
+				Range: &googlesheets.DimensionRange{
+					SheetId:    sheetID,
+					Dimension:  "ROWS",
+					StartIndex: int64(rowIdx),
+					EndIndex:   int64(rowIdx + 1),
+				},
+			},
+		}},
+	}
+	_, err = s.svc.Spreadsheets.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do()
+	return err
 }
 
 // FindExistingSpreadsheet searches the user's Drive for a previously-created

@@ -46,20 +46,26 @@ export interface Favorite extends EntryInput {
     id: string;
 }
 
-export interface DailyLog {
+export const EVENT_KINDS = ["workout", "stool", "water", "feeling"] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+export interface LogEvent {
+    id: string;
     date: string;
-    activity?: string | null;
-    feeling_score?: number | null;
-    feeling_notes?: string | null;
-    poop?: boolean | null;
-    poop_notes?: string | null;
-    hydration?: number | null;
+    time: string;
+    kind: EventKind;
+    text?: string;
+    num?: number;
+    notes?: string;
 }
 
 export interface LogResponse {
     entries: Entry[];
-    daily_logs: DailyLog[];
+    events: LogEvent[];
     spreadsheet_url?: string;
+    date?: string;
+    start?: string;
+    end?: string;
 }
 
 export interface ChatParseResponse {
@@ -71,18 +77,18 @@ export interface ChatParseResponse {
 export type AgentActionType =
     | "meal_added"
     | "meal_edited"
-    | "activity_updated"
-    | "stool_logged"
-    | "favorite_added"
-    | "hydration_updated"
-    | "feeling_updated";
+    | "event_added"
+    | "event_edited"
+    | "event_deleted"
+    | "favorite_added";
 
 export interface AgentAction {
     type: AgentActionType;
     entries?: Entry[];
     removed_ids?: string[];
     date?: string;
-    day_log?: DailyLog;
+    event?: LogEvent;
+    event_id?: string;
 }
 
 export interface AgentResponse {
@@ -114,16 +120,7 @@ export interface FavoritesResponse {
     favorites: Favorite[];
 }
 
-export interface ActivityPayload {
-    activity: string;
-    feeling_score: number;
-    feeling_notes: string;
-    poop: boolean;
-    poop_notes: string;
-    hydration: number;
-}
-
-export type ActivityResponse = Partial<DailyLog>;
+export type LogEventInput = Omit<LogEvent, "id">;
 
 export interface Profile {
     gender?: string | null;
@@ -157,7 +154,7 @@ export interface WeekDay {
     date: string;
     future: boolean;
     entries: Entry[];
-    dayLog: DailyLog | null;
+    events: LogEvent[];
 }
 
 export interface WeekGroup {

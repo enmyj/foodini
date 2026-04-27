@@ -112,7 +112,7 @@ func (h *Handler) buildCoachContext(ctx context.Context, svc *sheets.Service, st
 	if err != nil {
 		return "", err
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(ctx, start, end)
+	dailyLogs, err := svc.GetEventsByDateRange(ctx, start, end)
 	if err != nil {
 		return "", err
 	}

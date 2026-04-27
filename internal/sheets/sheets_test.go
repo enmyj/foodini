@@ -170,8 +170,63 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 9 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 9", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 12 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 12", sheets.CurrentSchemaVersion)
+	}
+}
+
+func TestEventToRow_Workout(t *testing.T) {
+	e := sheets.Event{
+		ID: "evt-1", Date: "2026-04-25", Time: "07:30",
+		Kind: sheets.EventKindWorkout, Text: "ran 5k", Num: 30,
+	}
+	row := e.ToRow()
+	if len(row) != 7 {
+		t.Fatalf("want 7 cols, got %d", len(row))
+	}
+	if row[3] != sheets.EventKindWorkout {
+		t.Errorf("kind: got %v", row[3])
+	}
+	if row[4] != "ran 5k" {
+		t.Errorf("text: got %v", row[4])
+	}
+	if row[5] != "30" {
+		t.Errorf("num: got %v, want 30", row[5])
+	}
+}
+
+func TestEventFromRow_Water(t *testing.T) {
+	row := []interface{}{"evt-2", "2026-04-25", "10:15", "water", "", "500", ""}
+	e, err := sheets.EventFromRow(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Kind != sheets.EventKindWater {
+		t.Errorf("kind: got %q", e.Kind)
+	}
+	if e.Num != 500 {
+		t.Errorf("num: got %v, want 500", e.Num)
+	}
+}
+
+func TestEventRoundTrip(t *testing.T) {
+	in := sheets.Event{
+		ID: "x", Date: "2026-04-25", Time: "12:00",
+		Kind: sheets.EventKindFeeling, Text: "tired", Num: 4, Notes: "post-lunch",
+	}
+	out, err := sheets.EventFromRow(in.ToRow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *out != in {
+		t.Errorf("round-trip mismatch: got %+v want %+v", *out, in)
+	}
+}
+
+func TestEventFromRow_TooShort(t *testing.T) {
+	_, err := sheets.EventFromRow([]interface{}{"a", "b"})
+	if err == nil {
+		t.Error("expected error for short row")
 	}
 }
 

@@ -7,20 +7,22 @@
         fetchStoredInsight,
         fetchStoredDayInsight,
         fetchStoredWeekSuggestions,
-        fetchMealSuggestion,
         fetchInsightSnapshots,
         fetchInsightByTrigger,
         generateDayInsights,
         generateInsights,
         generateWeekSuggestions,
-        generateMealSuggestion,
+        deleteEvent,
+        patchEvent,
+        patchEntry,
     } from "./api.ts";
     import type { InsightSnapshot } from "./api.ts";
     import type { ApiError } from "./api.ts";
     import EntryRow from "./EntryRow.svelte";
     import ChatDrawer from "./ChatDrawer.svelte";
     import CoachChat from "./CoachChat.svelte";
-    import ActivityNote from "./ActivityNote.svelte";
+    import { EVENT_KINDS } from "./types.ts";
+    import type { EventKind } from "./types.ts";
     import { appendEntriesToLogCache, removeEntryFromLogCache, replaceMealEntriesInLogCache, updateEntryInLogCache } from "./cache.ts";
     import { addDays, formatDateNav, formatTimeShort, getMonday, todayStr } from "./date.ts";
     import ProfilePanel from "./ProfilePanel.svelte";
@@ -33,8 +35,8 @@
     import ThemeToggle from "./ThemeToggle.svelte";
     import { MEAL_ORDER } from "./types.ts";
     import type {
-        DailyLog,
         Entry,
+        LogEvent,
         Favorite,
         InsightPanelState,
         LogResponse,
@@ -52,13 +54,13 @@
     let currentDate = $state(todayStr());
     let menuOpen = $state(false);
     let drawerOpen = $state(false);
-    let activityRefreshKey = $state(0);
     let drawerDate = $state<string | null>(null);
     let drawerMeal = $state<MealType | null>(null);
     let drawerEditEntries = $state<Entry[] | null>(null);
     let drawerEditMealType = $state<MealType | null>(null);
+    let drawerInitialMode = $state<"meal" | "event" | null>(null);
     let dateInputEl = $state<HTMLInputElement | null>(null);
-    let mealSuggestions = $state<Record<string, InsightPanelState>>({});
+    let coachPrefill = $state("");
 
     let dayInsight = $state<InsightPanelState | null>(null);
     let dayInsightExpanded = $state(false);
@@ -179,31 +181,125 @@
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
 
-    // Time-sorted timeline of meals that have entries. Each item is one meal type
-    // present today, sorted by its earliest entry's time. Untimed entries sort last.
-    let timelineMeals = $derived.by<{ meal: MealType; entries: Entry[]; firstTime: string }[]>(() => {
+    type TimelineItem =
+        | { kind: "meal"; meal: MealType; entries: Entry[]; time: string }
+        | { kind: "event"; event: LogEvent; time: string };
+
+    // Unified time-sorted timeline interleaving meals (each meal type as one row,
+    // anchored to its earliest entry time) and events. Untimed entries sort last.
+    let timelineItems = $derived.by<TimelineItem[]>(() => {
         const grouped = groupedByMeal(dayData?.entries);
-        const items: { meal: MealType; entries: Entry[]; firstTime: string }[] = [];
+        const items: TimelineItem[] = [];
         for (const meal of MEAL_ORDER) {
             const entries = grouped[meal] ?? [];
             if (entries.length === 0) continue;
-            // earliest time within this meal anchors the row
             let firstTime = "99:99";
             for (const e of entries) {
                 const t = e.time ?? "";
                 if (t && t < firstTime) firstTime = t;
             }
-            items.push({ meal, entries, firstTime });
+            items.push({ kind: "meal", meal, entries, time: firstTime });
         }
-        items.sort((a, b) => a.firstTime.localeCompare(b.firstTime));
+        for (const ev of dayData?.events ?? []) {
+            items.push({ kind: "event", event: ev, time: ev.time || "99:99" });
+        }
+        items.sort((a, b) => a.time.localeCompare(b.time));
         return items;
     });
+
+    const MEAL_DOT_COLORS: Record<MealType, string> = {
+        breakfast: "#d6a04c",
+        lunch: "#c97a3e",
+        snack: "#7a99c4",
+        dinner: "#b8533f",
+        supplements: "#9a7ab8",
+    };
+
+    const EVENT_DOT_COLORS: Record<EventKind, string> = {
+        workout: "#7aa57a",
+        stool: "#b08a5b",
+        water: "#6da3c0",
+        feeling: "#c08aa8",
+    };
+
+    const EVENT_KIND_LABELS: Record<EventKind, string> = {
+        workout: "Workout",
+        stool: "Bowel",
+        water: "Water",
+        feeling: "Feeling",
+    };
+
+    function describeEvent(ev: LogEvent): string {
+        switch (ev.kind) {
+            case "workout":
+                return ev.text || "Workout";
+            case "stool":
+                return ev.text || "Bowel movement";
+            case "water":
+                return `${Math.round(ev.num ?? 0)} ml`;
+            case "feeling":
+                return `${ev.num ?? 0}/10${ev.text ? ` — ${ev.text}` : ""}`;
+        }
+    }
+
+    async function handleDeleteEvent(ev: LogEvent) {
+        try {
+            await deleteEvent(ev.id);
+        } catch (e) {
+            showError(e, "Failed to delete event.");
+            return;
+        }
+        if (ev.date === currentDate) {
+            queryClient.setQueryData<LogResponse>(
+                queryKeys.logDay(currentDate),
+                (old) =>
+                    old
+                        ? { ...old, events: old.events.filter((e) => e.id !== ev.id) }
+                        : old,
+            );
+            dayInsightStale = true;
+        }
+        queryClient.invalidateQueries({ queryKey: queryKeys.events(ev.date) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.log() });
+    }
 
     let emptyMeals = $derived<MealType[]>(
         MEAL_ORDER.filter(
             (m) => (groupedByMeal(dayData?.entries)[m]?.length ?? 0) === 0,
         ),
     );
+
+    let nextSuggestableMeal = $derived<MealType | null>(
+        emptyMeals.find((m) => m !== "supplements") ?? null,
+    );
+
+    async function retimeEvent(ev: LogEvent, newTime: string) {
+        if (!newTime || newTime === ev.time) return;
+        try {
+            const updated = await patchEvent(ev.id, { ...ev, time: newTime });
+            onEventChanged({ updated });
+        } catch (e) {
+            showError(e, "Failed to update time.");
+        }
+    }
+
+    async function retimeMeal(meal: MealType, entries: Entry[], newTime: string) {
+        if (!newTime) return;
+        try {
+            const updated = await Promise.all(
+                entries.map((e) => patchEntry(e.id, { ...e, time: newTime })),
+            );
+            onEntriesEdited(updated, meal);
+        } catch (e) {
+            showError(e, "Failed to update time.");
+        }
+    }
+
+    function suggestNextMeal() {
+        if (!nextSuggestableMeal) return;
+        coachPrefill = `Suggest a ${nextSuggestableMeal} for today.`;
+        view = "coach";
+    }
 
     let triggerEntryIds = $derived<Set<string>>(
         new Set(insightSnapshots.map((s) => s.triggered_by).filter(Boolean)),
@@ -291,7 +387,6 @@
             dayInsight = null;
             dayInsightExpanded = false;
             dayInsightFresh = readFresh(currentDate);
-            mealSuggestions = {};
             insightSnapshots = [];
             mealInsightCache = {};
             openMealInsightFor = null;
@@ -341,13 +436,13 @@
 
     function weekGroups(data: LogResponse | null, numWeeks = 8): WeekGroup[] {
         if (!data) return [];
-        const { entries = [], daily_logs = [] } = data;
-        const byDate: Record<string, { entries: Entry[]; dayLog: LogResponse["daily_logs"][number] | null }> = {};
+        const { entries = [], events = [] } = data;
+        const byDate: Record<string, { entries: Entry[]; events: LogEvent[] }> = {};
         for (const e of entries) {
-            (byDate[e.date] ??= { entries: [], dayLog: null }).entries.push(e);
+            (byDate[e.date] ??= { entries: [], events: [] }).entries.push(e);
         }
-        for (const l of daily_logs) {
-            (byDate[l.date] ??= { entries: [], dayLog: null }).dayLog = l;
+        for (const ev of events) {
+            (byDate[ev.date] ??= { entries: [], events: [] }).events.push(ev);
         }
 
         const today = todayStr();
@@ -362,8 +457,8 @@
                     date,
                     future,
                     ...(future
-                        ? { entries: [], dayLog: null }
-                        : (byDate[date] ?? { entries: [], dayLog: null })),
+                        ? { entries: [], events: [] }
+                        : (byDate[date] ?? { entries: [], events: [] })),
                 };
             });
             const sunday = addDays(monday, 6);
@@ -393,6 +488,7 @@
         drawerEditMealType = meal;
         drawerDate = currentDate;
         drawerMeal = meal;
+        drawerInitialMode = "meal";
         drawerOpen = true;
     }
 
@@ -436,17 +532,10 @@
         );
     }
 
-    function openActivityDrawer() {
-        drawerDate = currentDate;
-        drawerMeal = null;
-        drawerEditEntries = null;
-        drawerEditMealType = null;
-        drawerOpen = true;
-    }
-
-    function onDayLogUpdated(_dayLog: DailyLog) {
-        activityRefreshKey++;
+    function onEventChanged(_change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) {
         dayInsightStale = true;
+        queryClient.invalidateQueries({ queryKey: queryKeys.logDay(currentDate) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.events(currentDate) });
     }
 
     function closeDrawer() {
@@ -455,6 +544,7 @@
         drawerMeal = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
+        drawerInitialMode = null;
         if (dayInsightStale && view === "day") {
             dayInsightStale = false;
             const currentLog = queryClient.getQueryData<LogResponse>(
@@ -485,65 +575,6 @@
         if (addedDate === currentDate) {
             const mealsAdded = new Set(newEntries.map((e) => e.meal_type));
             collapsedMeals = new Set([...collapsedMeals, ...mealsAdded]);
-        }
-    }
-
-    // --- Meal suggestions (for empty meals) ---
-
-    async function toggleMealSuggestion(meal: MealType, date: string) {
-        const key = `${date}|${meal}`;
-        const cur = mealSuggestions[key];
-        if (cur?.open && cur?.text) {
-            mealSuggestions = { ...mealSuggestions, [key]: { ...cur, open: false } };
-            return;
-        }
-        if (cur?.text) {
-            mealSuggestions = { ...mealSuggestions, [key]: { ...cur, open: true } };
-            return;
-        }
-        mealSuggestions = {
-            ...mealSuggestions,
-            [key]: { loading: true, text: null, error: null, open: true, generatedAt: null },
-        };
-        try {
-            const stored = await fetchMealSuggestion(date, meal);
-            if (stored.suggestion) {
-                mealSuggestions = {
-                    ...mealSuggestions,
-                    [key]: { loading: false, text: stored.suggestion, error: null, open: true, generatedAt: stored.generated_at ?? null },
-                };
-                return;
-            }
-            const res = await generateMealSuggestion(date, meal);
-            mealSuggestions = {
-                ...mealSuggestions,
-                [key]: { loading: false, text: res.suggestion ?? null, error: null, open: true, generatedAt: res.generated_at ?? null },
-            };
-        } catch {
-            mealSuggestions = {
-                ...mealSuggestions,
-                [key]: { loading: false, text: null, error: "Could not load suggestion", open: true, generatedAt: null },
-            };
-        }
-    }
-
-    async function regenMealSuggestion(meal: MealType, date: string) {
-        const key = `${date}|${meal}`;
-        mealSuggestions = {
-            ...mealSuggestions,
-            [key]: { loading: true, text: null, error: null, open: true, generatedAt: null },
-        };
-        try {
-            const res = await generateMealSuggestion(date, meal);
-            mealSuggestions = {
-                ...mealSuggestions,
-                [key]: { loading: false, text: res.suggestion ?? null, error: null, open: true, generatedAt: res.generated_at ?? null },
-            };
-        } catch {
-            mealSuggestions = {
-                ...mealSuggestions,
-                [key]: { loading: false, text: null, error: "Could not load suggestion", open: true, generatedAt: null },
-            };
         }
     }
 
@@ -901,7 +932,7 @@
                         type="date"
                         class="date-input-hidden"
                         value={currentDate}
-                        onchange={(e: Event) => {
+                        onchange={(e) => {
                             const target = e.currentTarget as HTMLInputElement;
                             if (target.value) currentDate = target.value;
                         }}
@@ -976,161 +1007,164 @@
                 />
             </div>
         {/if}
-        {#each timelineMeals as item (item.meal)}
-            {@const meal = item.meal}
-            {@const group = item.entries}
-            {@const collapsed = collapsedMeals.has(meal)}
-            {@const mt = totals(group)}
-            {@const macrosOpen = expandedMealMacros.has(meal)}
-            {@const hasAnchor = group.some((e) => triggerEntryIds.has(e.id))}
-            {@const insightOpen = openMealInsightFor === meal}
-            {@const triggerId = insightOpen ? latestTriggerForMeal(group) : null}
-            {@const mealInsight = triggerId ? mealInsightCache[triggerId] : null}
-            <section class="event-row" class:expanded={!collapsed}>
-                <div class="event-head">
-                    <button
-                        class="event-toggle"
-                        onclick={() => {
-                            collapsedMeals = collapsed
-                                ? new Set([...collapsedMeals].filter((m) => m !== meal))
-                                : new Set([...collapsedMeals, meal]);
-                        }}
-                        aria-expanded={!collapsed}
-                    >
-                        {#if item.firstTime !== "99:99"}
-                            <span class="event-time">{formatTimeShort(item.firstTime)}</span>
-                        {/if}
-                        <span class="event-name">{meal}</span>
-                        <span class="event-caret" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
-                    </button>
-                    {#if hasAnchor}
-                        <button
-                            class="meal-insight-bubble"
-                            class:active={insightOpen}
-                            aria-label="Insight at this point"
-                            title="Insight at this point in the day"
-                            onclick={() => toggleMealInsight(meal, group)}
-                            >💡</button
-                        >
-                    {/if}
-                    <button
-                        class="meal-macros-pill"
-                        class:active={macrosOpen}
-                        aria-expanded={macrosOpen}
-                        onclick={() => {
-                            const next = new Set(expandedMealMacros);
-                            if (macrosOpen) next.delete(meal);
-                            else next.add(meal);
-                            expandedMealMacros = next;
-                        }}
-                    >
-                        {#if macrosOpen}
-                            <span>{mt.calories} cal</span>
-                            <span>{mt.protein}g P</span>
-                            <span>{mt.carbs}g C</span>
-                            <span>{mt.fat}g F</span>
-                            <span>{mt.fiber}g Fb</span>
-                        {:else}
-                            {mt.calories} cal
-                        {/if}
-                    </button>
-                    <button
-                        class="meal-action-btn"
-                        onclick={() => openEditDrawer(meal, group)}
-                        >Edit</button
-                    >
-                </div>
-                {#if insightOpen && mealInsight}
-                    <div class="meal-insight-panel">
-                        <InsightPanel
-                            loading={mealInsight.loading}
-                            error={mealInsight.error}
-                            text={mealInsight.text}
-                            generatedAt={mealInsight.generatedAt}
+        <div class="day-timeline">
+        {#each timelineItems as item (item.kind === "meal" ? `m-${item.meal}` : `e-${item.event.id}`)}
+            {#if item.kind === "meal"}
+                {@const meal = item.meal}
+                {@const group = item.entries}
+                {@const collapsed = collapsedMeals.has(meal)}
+                {@const mt = totals(group)}
+                {@const macrosOpen = expandedMealMacros.has(meal)}
+                {@const hasAnchor = group.some((e) => triggerEntryIds.has(e.id))}
+                {@const insightOpen = openMealInsightFor === meal}
+                {@const triggerId = insightOpen ? latestTriggerForMeal(group) : null}
+                {@const mealInsight = triggerId ? mealInsightCache[triggerId] : null}
+                <section class="tl-row event-row" class:expanded={!collapsed}>
+                    <span class="tl-dot" style="background:{MEAL_DOT_COLORS[meal]}" aria-hidden="true"></span>
+                    <div class="event-head">
+                        <input
+                            type="time"
+                            class="meal-time-input"
+                            title="Tap to retime this meal"
+                            value={item.time !== "99:99" ? item.time : ""}
+                            onblur={(e) => {
+                                const v = (e.currentTarget as HTMLInputElement).value;
+                                const orig = item.time !== "99:99" ? item.time : "";
+                                if (v && v !== orig) retimeMeal(meal, group, v);
+                            }}
                         />
-                    </div>
-                {/if}
-                {#if !collapsed}
-                    <div class="event-body">
-                        {#each group as entry (entry.id)}
-                            <EntryRow
-                                {entry}
-                                onUpdate={handleUpdate}
-                                onDelete={handleDelete}
-                                onFavorite={handleFavoriteEntry}
-                                isFavorited={favoritedDescs.has(
-                                    normalizeFavoriteKey(entry.description),
-                                )}
-                            />
-                        {/each}
                         <button
-                            class="add-row"
+                            class="event-toggle"
                             onclick={() => {
-                                drawerMeal = meal;
-                                drawerDate = currentDate;
-                                drawerEditEntries = null;
-                                drawerEditMealType = null;
-                                drawerOpen = true;
-                            }}>+ add item</button
+                                collapsedMeals = collapsed
+                                    ? new Set([...collapsedMeals].filter((m) => m !== meal))
+                                    : new Set([...collapsedMeals, meal]);
+                            }}
+                            aria-expanded={!collapsed}
+                        >
+                            <span class="event-name">{meal}</span>
+                            <span class="event-caret" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+                        </button>
+                        {#if hasAnchor}
+                            <button
+                                class="meal-insight-bubble"
+                                class:active={insightOpen}
+                                aria-label="Insight at this point"
+                                title="Insight at this point in the day"
+                                onclick={() => toggleMealInsight(meal, group)}
+                                >💡</button
+                            >
+                        {/if}
+                        <button
+                            class="meal-macros-pill"
+                            class:active={macrosOpen}
+                            aria-expanded={macrosOpen}
+                            onclick={() => {
+                                const next = new Set(expandedMealMacros);
+                                if (macrosOpen) next.delete(meal);
+                                else next.add(meal);
+                                expandedMealMacros = next;
+                            }}
+                        >
+                            {#if macrosOpen}
+                                <span>{mt.calories} cal</span>
+                                <span>{mt.protein}g P</span>
+                                <span>{mt.carbs}g C</span>
+                                <span>{mt.fat}g F</span>
+                                <span>{mt.fiber}g Fb</span>
+                            {:else}
+                                {mt.calories} cal
+                            {/if}
+                        </button>
+                        <button
+                            class="meal-action-btn"
+                            onclick={() => openEditDrawer(meal, group)}
+                            >Edit</button
                         >
                     </div>
-                {/if}
-            </section>
-        {/each}
-
-        {#if emptyMeals.length > 0}
-            <div class="missing-row">
-                <span class="missing-label">missing</span>
-                {#each emptyMeals as meal}
-                    {@const miKey = `${currentDate}|${meal}`}
-                    {@const ms = mealSuggestions[miKey]}
-                    <button
-                        class="missing-pill"
-                        class:active={ms?.open}
-                        onclick={() => {
-                            if (meal === "supplements") {
-                                drawerMeal = meal;
-                                drawerDate = currentDate;
-                                drawerEditEntries = null;
-                                drawerEditMealType = null;
-                                drawerOpen = true;
-                            } else {
-                                toggleMealSuggestion(meal, currentDate);
-                            }
-                        }}
-                        >{meal}</button
-                    >
-                {/each}
-            </div>
-            {#each emptyMeals as meal}
-                {@const miKey = `${currentDate}|${meal}`}
-                {@const ms = mealSuggestions[miKey]}
-                {#if ms?.open}
-                    <div class="missing-suggestion">
-                        <div class="missing-suggestion-head">{meal} suggestion</div>
-                        <InsightPanel
-                            loading={ms.loading}
-                            error={ms.error}
-                            text={ms.text}
-                            generatedAt={ms.generatedAt}
-                            variant="suggestion"
-                            onRegenerate={() => regenMealSuggestion(meal, currentDate)}
+                    {#if insightOpen && mealInsight}
+                        <div class="meal-insight-panel">
+                            <InsightPanel
+                                loading={mealInsight.loading}
+                                error={mealInsight.error}
+                                text={mealInsight.text}
+                                generatedAt={mealInsight.generatedAt}
+                            />
+                        </div>
+                    {/if}
+                    {#if !collapsed}
+                        <div class="event-body">
+                            {#each group as entry (entry.id)}
+                                <EntryRow
+                                    {entry}
+                                    onUpdate={handleUpdate}
+                                    onDelete={handleDelete}
+                                    onFavorite={handleFavoriteEntry}
+                                    isFavorited={favoritedDescs.has(
+                                        normalizeFavoriteKey(entry.description),
+                                    )}
+                                />
+                            {/each}
+                            <button
+                                class="add-row"
+                                onclick={() => {
+                                    drawerMeal = meal;
+                                    drawerDate = currentDate;
+                                    drawerEditEntries = null;
+                                    drawerEditMealType = null;
+                                    drawerInitialMode = "meal";
+                                    drawerOpen = true;
+                                }}>+ add item</button
+                            >
+                        </div>
+                    {/if}
+                </section>
+            {:else}
+                {@const ev = item.event}
+                <section class="tl-row tl-event">
+                    <span class="tl-dot" style="background:{EVENT_DOT_COLORS[ev.kind]}" aria-hidden="true"></span>
+                    <div class="event-head">
+                        <input
+                            type="time"
+                            class="meal-time-input tl-event-time"
+                            title="Tap to retime"
+                            value={ev.time ?? ""}
+                            onblur={(e) => {
+                                const v = (e.currentTarget as HTMLInputElement).value;
+                                if (v && v !== (ev.time ?? "")) retimeEvent(ev, v);
+                            }}
                         />
+                        <span class="event-name">{EVENT_KIND_LABELS[ev.kind]}</span>
+                        <span class="tl-event-text">{describeEvent(ev)}</span>
+                        <button
+                            class="tl-event-del"
+                            onclick={() => handleDeleteEvent(ev)}
+                            aria-label="Delete event"
+                            title="Delete">×</button
+                        >
                     </div>
-                {/if}
-            {/each}
-        {/if}
+                </section>
+            {/if}
+        {/each}
+        </div>
 
-        <ActivityNote
-            date={currentDate}
-            onOpen={openActivityDrawer}
-            refreshKey={activityRefreshKey}
-        />
+        {#if nextSuggestableMeal}
+            <div class="suggest-row">
+                <button class="suggest-btn" onclick={suggestNextMeal}>
+                    Suggest {nextSuggestableMeal} →
+                </button>
+            </div>
+        {/if}
     {:else if view === "favorites"}
         <FavoritesView onLoad={syncFavoritedDescs} />
     {:else if view === "coach"}
         <div class="coach-pane">
-            <CoachChat active={view === "coach"} date={currentDate} />
+            <CoachChat
+                active={view === "coach"}
+                date={currentDate}
+                initialInput={coachPrefill}
+                onInputConsumed={() => (coachPrefill = "")}
+            />
         </div>
     {:else if view === "profile"}
         <ProfilePanel onClose={closeProfile} />
@@ -1166,9 +1200,10 @@
         drawerMeal = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
+        drawerInitialMode = null;
         drawerOpen = true;
     }}
-    aria-label="Add food"
+    aria-label="Add"
 >
     <svg
         width="22"
@@ -1192,11 +1227,12 @@
     onClose={closeDrawer}
     {onEntriesAdded}
     {onEntriesEdited}
-    {onDayLogUpdated}
+    {onEventChanged}
     date={drawerDate}
     meal={drawerMeal}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
+    initialMode={drawerInitialMode}
 />
 
 <style>
@@ -1487,13 +1523,73 @@ section {
         margin: 0.6rem 0;
     }
 
-    .event-row {
-        border-top: 1px solid var(--rule);
-        padding: 0.4rem 0;
+    .day-timeline {
+        position: relative;
+        padding-left: 1.25rem;
+        margin: 0.5rem 0;
     }
 
-    .event-row:last-of-type {
-        border-bottom: 1px solid var(--rule);
+    .day-timeline::before {
+        content: "";
+        position: absolute;
+        left: 0.35rem;
+        top: 0.6rem;
+        bottom: 0.6rem;
+        width: 1px;
+        background: var(--rule);
+    }
+
+    .tl-row {
+        position: relative;
+        margin: 0;
+    }
+
+    .tl-dot {
+        position: absolute;
+        left: -1.05rem;
+        top: 0.95rem;
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        z-index: 1;
+        box-shadow: 0 0 0 3px var(--paper);
+    }
+
+    .tl-event .event-head {
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+
+    .tl-event-time {
+        min-width: 3.2rem;
+    }
+
+    .tl-event-text {
+        font-size: var(--t-body-sm);
+        color: var(--ink);
+        flex: 1;
+        min-width: 0;
+    }
+
+    .tl-event-del {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 1.1rem;
+        cursor: pointer;
+        padding: 0 0.4rem;
+        line-height: 1;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .tl-event-del:hover {
+            color: var(--mute);
+        }
+    }
+
+    .tl-row {
+        padding: 0.4rem 0;
     }
 
     .event-head {
@@ -1508,9 +1604,9 @@ section {
         font-family: inherit;
         cursor: pointer;
         display: inline-flex;
-        align-items: baseline;
+        align-items: center;
         gap: 0.45rem;
-        padding: 0.3rem 0;
+        padding: 0;
         flex: 1;
         min-width: 0;
         text-align: left;
@@ -1518,12 +1614,34 @@ section {
         color: inherit;
     }
 
-    .event-time {
+    .meal-time-input {
         font-size: 0.72rem;
         color: var(--mute-2);
         font-variant-numeric: tabular-nums;
         font-weight: 500;
-        min-width: 3.2rem;
+        font-family: inherit;
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        padding: 0.15rem 0.5rem;
+        cursor: pointer;
+        touch-action: manipulation;
+        width: auto;
+        min-width: 0;
+        appearance: none;
+        -webkit-appearance: none;
+    }
+
+    .meal-time-input::-webkit-calendar-picker-indicator {
+        display: none;
+        -webkit-appearance: none;
+    }
+
+    @media (hover: hover) {
+        .meal-time-input:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
     }
 
     .event-name {
@@ -1579,69 +1697,6 @@ section {
 
     .meal-insight-panel {
         margin: 0.4rem 0 0.2rem;
-    }
-
-    /* Missing-meals strip */
-    .missing-row {
-        display: flex;
-        align-items: center;
-        gap: 0.35rem;
-        flex-wrap: wrap;
-        padding: 0.5rem 0;
-        margin-top: 0.4rem;
-    }
-
-    .missing-label {
-        font-size: 0.7rem;
-        color: var(--mute-3);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-weight: 600;
-        margin-right: 0.25rem;
-    }
-
-    .missing-pill {
-        background: none;
-        border: 1px dashed var(--rule-4);
-        border-radius: var(--r-pill);
-        color: var(--mute);
-        font-size: 0.7rem;
-        padding: 0.18rem 0.55rem;
-        cursor: pointer;
-        font-family: inherit;
-        letter-spacing: 0.02em;
-        text-transform: capitalize;
-        font-weight: 500;
-        white-space: nowrap;
-        touch-action: manipulation;
-        transition: border-color 0.12s, color 0.12s, background 0.12s;
-    }
-
-    .missing-pill.active {
-        border-style: solid;
-        border-color: var(--ink-2);
-        color: var(--ink-2);
-        background: var(--paper-2);
-    }
-
-    @media (hover: hover) {
-        .missing-pill:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .missing-suggestion {
-        margin: 0.35rem 0;
-    }
-
-    .missing-suggestion-head {
-        font-size: var(--t-micro);
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--mute-2);
-        font-weight: 600;
-        margin-bottom: 0.2rem;
     }
 
     .meal-action-btn {
@@ -1833,6 +1888,35 @@ section {
 
     .day-insights-panel {
         margin-bottom: 1.25rem;
+    }
+
+    .suggest-row {
+        display: flex;
+        justify-content: center;
+        margin-top: 1.25rem;
+    }
+
+    .suggest-btn {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-family: inherit;
+        font-size: 0.78rem;
+        letter-spacing: 0.02em;
+        padding: 0.4rem 0.9rem;
+        cursor: pointer;
+        text-transform: capitalize;
+        touch-action: manipulation;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+
+    @media (hover: hover) {
+        .suggest-btn:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+            background: var(--paper-2);
+        }
     }
 
     /* FAB + shared actions */

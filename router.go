@@ -100,8 +100,10 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
 
 	apiGroup.GET("/log", apiHandler.GetLog)
-	apiGroup.GET("/activity", apiHandler.GetActivity)
-	apiGroup.PUT("/activity", apiHandler.PutActivity)
+	apiGroup.GET("/events", apiHandler.GetEvents)
+	apiGroup.POST("/events", apiHandler.PostEvent)
+	apiGroup.PATCH("/events/:id", apiHandler.PatchEvent)
+	apiGroup.DELETE("/events/:id", apiHandler.DeleteEvent)
 	apiGroup.POST("/chat", apiHandler.Chat, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
 	apiGroup.POST("/chat/edit", apiHandler.EditChat)

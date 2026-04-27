@@ -48,7 +48,7 @@ func (h *Handler) Insights(c *echo.Context) error {
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Start, req.End)
+	dailyLogs, err := svc.GetEventsByDateRange(ctx, req.Start, req.End)
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
@@ -105,7 +105,7 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Date, req.Date)
+	dailyLogs, err := svc.GetEventsByDateRange(ctx, req.Date, req.Date)
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
@@ -400,7 +400,7 @@ func (h *Handler) WeekSuggestions(c *echo.Context) error {
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
-	dailyLogs, err := svc.GetActivityByDateRange(ctx, req.Start, req.End)
+	dailyLogs, err := svc.GetEventsByDateRange(ctx, req.Start, req.End)
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
@@ -588,14 +588,35 @@ func addDaysStr(dateStr string, n int) string {
 	return t.AddDate(0, 0, n).Format("2006-01-02")
 }
 
-func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog) string {
+func formatEvent(b *strings.Builder, e sheets.Event, indent string) {
+	switch e.Kind {
+	case sheets.EventKindWorkout:
+		fmt.Fprintf(b, "%s[%s] Workout: %s\n", indent, e.Time, e.Text)
+	case sheets.EventKindStool:
+		if e.Text != "" {
+			fmt.Fprintf(b, "%s[%s] Bowel movement: %s\n", indent, e.Time, e.Text)
+		} else {
+			fmt.Fprintf(b, "%s[%s] Bowel movement\n", indent, e.Time)
+		}
+	case sheets.EventKindWater:
+		fmt.Fprintf(b, "%s[%s] Water: %dml\n", indent, e.Time, int(e.Num))
+	case sheets.EventKindFeeling:
+		fmt.Fprintf(b, "%s[%s] Feeling: %d/10", indent, e.Time, int(e.Num))
+		if e.Text != "" {
+			fmt.Fprintf(b, " — %s", e.Text)
+		}
+		b.WriteString("\n")
+	}
+}
+
+func buildWeekSummary(start, end string, entries []sheets.FoodEntry, events []sheets.Event) string {
 	byDate := map[string][]sheets.FoodEntry{}
 	for _, e := range entries {
 		byDate[e.Date] = append(byDate[e.Date], e)
 	}
-	logByDate := map[string]sheets.DayLog{}
-	for _, l := range dailyLogs {
-		logByDate[l.Date] = l
+	evByDate := map[string][]sheets.Event{}
+	for _, e := range events {
+		evByDate[e.Date] = append(evByDate[e.Date], e)
 	}
 
 	var b strings.Builder
@@ -605,7 +626,6 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 	for !cur.After(endT) {
 		date := cur.Format("2006-01-02")
 		dayEntries := byDate[date]
-		log := logByDate[date]
 		fmt.Fprintf(&b, "%s (%s):\n", date, cur.Weekday())
 		if len(dayEntries) == 0 {
 			fmt.Fprintf(&b, "  No food logged\n")
@@ -623,20 +643,8 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 				fmt.Fprintf(&b, "  - [%s] %s: %d cal\n", e.MealType, e.Description, e.Calories)
 			}
 		}
-		if log.Activity != "" {
-			fmt.Fprintf(&b, "  Activity: %s\n", log.Activity)
-		}
-		if log.Poop {
-			fmt.Fprintf(&b, "  Bowel movement: yes\n")
-			if log.PoopNotes != "" {
-				fmt.Fprintf(&b, "  Notes: %s\n", log.PoopNotes)
-			}
-		}
-		if log.Hydration > 0 {
-			fmt.Fprintf(&b, "  Water: %.1fL\n", log.Hydration)
-		}
-		if log.FeelingScore > 0 {
-			fmt.Fprintf(&b, "  Feeling: %d/10\n", log.FeelingScore)
+		for _, ev := range evByDate[date] {
+			formatEvent(&b, ev, "  ")
 		}
 		fmt.Fprintln(&b)
 		cur = cur.AddDate(0, 0, 1)
@@ -644,13 +652,8 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, dailyLogs [
 	return b.String()
 }
 
-func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets.DayLog, inProgress bool) string {
-	logByDate := map[string]sheets.DayLog{}
-	for _, l := range dailyLogs {
-		logByDate[l.Date] = l
-	}
+func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Event, inProgress bool) string {
 	t, _ := time.Parse("2006-01-02", date)
-	log := logByDate[date]
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Day: %s (%s)\n", date, t.Weekday())
@@ -676,23 +679,11 @@ func buildDaySummary(date string, entries []sheets.FoodEntry, dailyLogs []sheets
 			fmt.Fprintf(&b, "  - [%s] %s: %d cal\n", e.MealType, e.Description, e.Calories)
 		}
 	}
-	if log.Activity != "" {
-		fmt.Fprintf(&b, "Activity: %s\n", log.Activity)
-	}
-	if log.Poop {
-		fmt.Fprintf(&b, "Bowel movement: yes\n")
-		if log.PoopNotes != "" {
-			fmt.Fprintf(&b, "Notes: %s\n", log.PoopNotes)
+	for _, ev := range events {
+		if ev.Date != date {
+			continue
 		}
-	}
-	if log.Hydration > 0 {
-		fmt.Fprintf(&b, "Water: %.1fL\n", log.Hydration)
-	}
-	if log.FeelingScore > 0 {
-		fmt.Fprintf(&b, "Feeling: %d/10\n", log.FeelingScore)
-		if log.FeelingNotes != "" {
-			fmt.Fprintf(&b, "Feeling notes: %s\n", log.FeelingNotes)
-		}
+		formatEvent(&b, ev, "")
 	}
 	return b.String()
 }

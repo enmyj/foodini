@@ -30,6 +30,7 @@
     let editCarbs = $state(0);
     let editFat = $state(0);
     let editFiber = $state(0);
+    let editTime = $state("");
     let saving = $state(false);
     let deleting = $state(false);
     let favoriting = $state(false);
@@ -54,6 +55,7 @@
         editCarbs = entry.carbs;
         editFat = entry.fat;
         editFiber = entry.fiber ?? 0;
+        editTime = entry.time ?? "";
         modalOpen = true;
     }
 
@@ -70,6 +72,7 @@
                 carbs: editCarbs,
                 fat: editFat,
                 fiber: editFiber,
+                time: editTime,
             };
             const saved = await saveMutation.mutateAsync(updated);
             onUpdate(saved);
@@ -169,14 +172,20 @@
             ></textarea>
         </label>
 
-        <label class="field">
-            <span class="label">Meal</span>
-            <select bind:value={editMeal} disabled={saving}>
-                {#each MEALS as m}
-                    <option value={m}>{m}</option>
-                {/each}
-            </select>
-        </label>
+        <div class="row-fields">
+            <label class="field">
+                <span class="label">Meal</span>
+                <select bind:value={editMeal} disabled={saving}>
+                    {#each MEALS as m}
+                        <option value={m}>{m}</option>
+                    {/each}
+                </select>
+            </label>
+            <label class="field">
+                <span class="label">Time</span>
+                <input type="time" bind:value={editTime} disabled={saving} />
+            </label>
+        </div>
 
         <div class="num-grid">
             <label class="field">
@@ -413,6 +422,17 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 0.75rem;
         margin-bottom: 1rem;
+    }
+
+    .row-fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .row-fields .field {
+        margin-bottom: 0;
     }
 
     .num-grid .field {

@@ -1,17 +1,21 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { agent, deleteEntry, patchEntry } from "./api.ts";
+    import { addEvent, agent, deleteEntry, patchEntry } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
+    import { EVENT_KINDS } from "./types.ts";
     import type {
         AgentAction,
-        DailyLog,
         Entry,
+        EventKind,
+        LogEvent,
         MealType,
         PendingImage,
     } from "./types.ts";
+
+    type DrawerMode = "meal" | "event";
 
     type EditableEntryField =
         | "calories"
@@ -32,11 +36,12 @@
         onClose,
         onEntriesAdded,
         onEntriesEdited = null,
-        onDayLogUpdated = null,
+        onEventChanged = null,
         date = null,
         meal = null,
         editEntries = null,
         editMealType = null,
+        initialMode = null,
     }: {
         open: boolean;
         onClose: () => void;
@@ -44,12 +49,81 @@
         onEntriesEdited?:
             | ((entries: Entry[], mealType: MealType | null) => void)
             | null;
-        onDayLogUpdated?: ((dayLog: DailyLog) => void) | null;
+        onEventChanged?: ((change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) => void) | null;
         date?: string | null;
         meal?: MealType | null;
         editEntries?: Entry[] | null;
         editMealType?: MealType | null;
+        initialMode?: DrawerMode | null;
     } = $props();
+
+    let mode = $state<DrawerMode | null>(null);
+    let mealTime = $state("");
+    let eventKind = $state<EventKind | null>(null);
+    let eventTime = $state("");
+    let eventText = $state("");
+    let eventWaterMl = $state(250);
+    let eventFeelingScore = $state(7);
+    let eventSaving = $state(false);
+
+    const EVENT_KIND_LABELS: Record<EventKind, string> = {
+        workout: "Activity",
+        stool: "Stool",
+        water: "Water",
+        feeling: "Feeling",
+    };
+
+    function nowHHMM(): string {
+        const d = new Date();
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+
+    function resetEventForm() {
+        eventKind = null;
+        eventTime = "";
+        eventText = "";
+        eventWaterMl = 250;
+        eventFeelingScore = 7;
+        eventSaving = false;
+    }
+
+    function selectEventKind(kind: EventKind) {
+        eventKind = kind;
+        eventTime = nowHHMM();
+        eventText = "";
+        eventWaterMl = 250;
+        eventFeelingScore = 7;
+    }
+
+    async function saveEvent() {
+        if (!eventKind || eventSaving) return;
+        const time = eventTime || nowHHMM();
+        const text = eventText.trim();
+        const payload: {
+            date: string;
+            time: string;
+            kind: EventKind;
+            text?: string;
+            num?: number;
+        } = { date: selectedDate, time, kind: eventKind };
+        if (eventKind === "water") payload.num = Math.max(0, Math.round(eventWaterMl));
+        else if (eventKind === "feeling") {
+            payload.num = Math.max(1, Math.min(10, Math.round(eventFeelingScore)));
+            if (text) payload.text = text;
+        } else {
+            if (text) payload.text = text;
+        }
+        eventSaving = true;
+        try {
+            const saved = await addEvent(payload);
+            if (onEventChanged) onEventChanged({ added: saved });
+            onClose();
+        } catch (err) {
+            showError(err, "Failed to save event.");
+        } finally {
+            eventSaving = false;
+        }
+    }
 
     let selectedDate = $state("");
     let drawerEl = $state<HTMLDivElement | null>(null);
@@ -76,6 +150,7 @@
             date,
             images,
             meal,
+            time,
             currentEntries,
             reset,
         }: {
@@ -83,12 +158,14 @@
             date: string;
             images: File[] | null;
             meal: MealType | null;
+            time: string | null;
             currentEntries: Entry[] | null;
             reset: boolean;
         }) =>
             agent(message, {
                 date,
                 meal,
+                time,
                 images,
                 currentEntries,
                 reset,
@@ -119,7 +196,12 @@
                 clearPendingImages();
                 firstSend = true;
                 deletingEntryIds = new Set();
-                setTimeout(() => inputEl?.focus(), 60);
+                if (editEntries || meal) mode = "meal";
+                else if (initialMode) mode = initialMode;
+                else mode = null;
+                resetEventForm();
+                mealTime = editEntries?.[0]?.time || nowHHMM();
+                if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
             } else {
                 selectedDate = "";
                 mealType = null;
@@ -128,9 +210,16 @@
                 input = "";
                 clearPendingImages();
                 deletingEntryIds = new Set();
+                mode = null;
+                resetEventForm();
             }
         });
     });
+
+    function pickMode(next: DrawerMode) {
+        mode = next;
+        if (next === "meal") setTimeout(() => inputEl?.focus(), 60);
+    }
 
     $effect(() => {
         const len = messages.length;
@@ -269,6 +358,7 @@
                 date: selectedDate,
                 images: imgs,
                 meal: mealType,
+                time: mealTime || null,
                 currentEntries: entries.length ? [...entries] : null,
                 reset: firstSend,
             });
@@ -304,14 +394,12 @@
             }
             if (onEntriesEdited)
                 onEntriesEdited(action.entries, editedMeal ?? null);
-        } else if (
-            action.type === "activity_updated" ||
-            action.type === "stool_logged" ||
-            action.type === "hydration_updated" ||
-            action.type === "feeling_updated"
-        ) {
-            if (action.day_log && onDayLogUpdated)
-                onDayLogUpdated(action.day_log);
+        } else if (action.type === "event_added" && action.event) {
+            if (onEventChanged) onEventChanged({ added: action.event });
+        } else if (action.type === "event_edited" && action.event) {
+            if (onEventChanged) onEventChanged({ updated: action.event });
+        } else if (action.type === "event_deleted" && action.event_id) {
+            if (onEventChanged) onEventChanged({ deletedId: action.event_id });
         }
     }
 
@@ -379,22 +467,25 @@
                 const m = a.entries?.[0]?.meal_type ?? "";
                 return `Updated ${m || "meal"} — ${n} item${n === 1 ? "" : "s"} (${cal} cal)`;
             }
-            case "activity_updated":
-                return a.day_log?.activity
-                    ? `Activity: ${a.day_log.activity}`
-                    : "Activity updated";
-            case "stool_logged":
-                return a.day_log?.poop ? "Stool logged" : "Stool unmarked";
-            case "hydration_updated":
-                return `Hydration: ${a.day_log?.hydration ?? 0}L`;
-            case "feeling_updated": {
-                const notes = a.day_log?.feeling_notes ?? "";
-                const score = a.day_log?.feeling_score ?? 0;
-                if (notes && score) return `Feeling: ${notes} (${score}/10)`;
-                if (notes) return `Feeling: ${notes}`;
-                if (score) return `Feeling: ${score}/10`;
-                return "Feeling logged";
+            case "event_added":
+            case "event_edited": {
+                const ev = a.event;
+                if (!ev) return a.type === "event_added" ? "Event added" : "Event updated";
+                const verb = a.type === "event_added" ? "Logged" : "Updated";
+                switch (ev.kind) {
+                    case "workout":
+                        return `${verb} workout: ${ev.text ?? ""}`.trim();
+                    case "stool":
+                        return `${verb} bowel movement${ev.text ? `: ${ev.text}` : ""}`;
+                    case "water":
+                        return `${verb} water: ${Math.round(ev.num ?? 0)}ml`;
+                    case "feeling":
+                        return `${verb} feeling: ${ev.num ?? 0}/10${ev.text ? ` — ${ev.text}` : ""}`;
+                }
+                return `${verb} event`;
             }
+            case "event_deleted":
+                return "Event deleted";
             case "favorite_added":
                 return "Saved to favorites";
             default:
@@ -434,6 +525,14 @@
                 {/if}
             </div>
             <div class="top-right">
+                {#if mode === "meal"}
+                    <input
+                        class="date-input time-input"
+                        type="time"
+                        bind:value={mealTime}
+                        title="Time for this meal"
+                    />
+                {/if}
                 <input
                     class="date-input"
                     type="date"
@@ -444,7 +543,83 @@
             </div>
         </div>
 
-        {#if entries.length > 0}
+        {#if mode === null}
+            <div class="mode-picker">
+                <p class="mode-prompt">What would you like to log?</p>
+                <div class="mode-bubbles">
+                    <button class="mode-bubble" onclick={() => pickMode("meal")}>
+                        <span class="mode-bubble-emoji">🍽️</span>
+                        <span class="mode-bubble-label">Meal</span>
+                        <span class="mode-bubble-hint">food, drink</span>
+                    </button>
+                    <button class="mode-bubble" onclick={() => pickMode("event")}>
+                        <span class="mode-bubble-emoji">📋</span>
+                        <span class="mode-bubble-label">Event</span>
+                        <span class="mode-bubble-hint">activity, water, stool, feeling</span>
+                    </button>
+                </div>
+            </div>
+        {:else if mode === "event"}
+            <div class="event-form">
+                <div class="kind-bubbles">
+                    {#each EVENT_KINDS as k}
+                        <button
+                            class="kind-bubble"
+                            class:active={eventKind === k}
+                            onclick={() => selectEventKind(k)}
+                        >{EVENT_KIND_LABELS[k]}</button>
+                    {/each}
+                </div>
+                {#if eventKind}
+                    <div class="event-fields">
+                        <label class="field-row">
+                            <span class="field-label">Time</span>
+                            <input type="time" bind:value={eventTime} />
+                        </label>
+                        {#if eventKind === "water"}
+                            <label class="field-row">
+                                <span class="field-label">Amount (ml)</span>
+                                <input type="number" min="0" max="5000" step="50" bind:value={eventWaterMl} />
+                            </label>
+                            <div class="quick-pills">
+                                {#each [125, 250, 500, 750, 1000] as ml}
+                                    <button class="quick-pill" onclick={() => (eventWaterMl = ml)}>{ml}ml</button>
+                                {/each}
+                            </div>
+                        {:else if eventKind === "feeling"}
+                            <label class="field-row">
+                                <span class="field-label">Score (1-10)</span>
+                                <div class="slider-wrap">
+                                    <input type="range" min="1" max="10" step="1" bind:value={eventFeelingScore} />
+                                    <span class="slider-val">{eventFeelingScore}</span>
+                                </div>
+                            </label>
+                            <label class="field-row stacked">
+                                <span class="field-label">Note (optional)</span>
+                                <textarea rows="2" bind:value={eventText} placeholder="energy, mood, anything notable"></textarea>
+                            </label>
+                        {:else if eventKind === "stool"}
+                            <label class="field-row stacked">
+                                <span class="field-label">Note (optional)</span>
+                                <textarea rows="2" bind:value={eventText} placeholder="consistency, urgency, etc."></textarea>
+                            </label>
+                        {:else if eventKind === "workout"}
+                            <label class="field-row stacked">
+                                <span class="field-label">What did you do?</span>
+                                <textarea rows="3" bind:value={eventText} placeholder="e.g. 30min run, bench 3×8 @135"></textarea>
+                            </label>
+                        {/if}
+                        <div class="event-actions">
+                            <button class="event-save" onclick={saveEvent} disabled={eventSaving}>
+                                {eventSaving ? "Saving…" : "Save"}
+                            </button>
+                        </div>
+                    </div>
+                {/if}
+            </div>
+        {/if}
+
+        {#snippet entriesCard()}
             <div class="result-card" class:dimmed={sending}>
                 {#each entries as entry, i}
                     <div
@@ -551,15 +726,16 @@
                     </div>
                 {/each}
             </div>
-        {/if}
+        {/snippet}
 
+        {#if mode === "meal"}
         <div class="messages" bind:this={scrollEl}>
             {#if messages.length === 0}
                 <p class="empty">
                     {#if entries.length > 0}
                         Tweak this meal, scale it, or add more.
                     {:else}
-                        What did you eat? Or log activity, stool, water, how you feel.
+                        What did you eat?
                     {/if}
                 </p>
             {/if}
@@ -601,6 +777,9 @@
                         <span></span><span></span><span></span>
                     </div>
                 </div>
+            {/if}
+            {#if entries.length > 0}
+                {@render entriesCard()}
             {/if}
         </div>
 
@@ -692,6 +871,7 @@
                 >
             </div>
         </div>
+        {/if}
     </div>
 {/if}
 
@@ -842,6 +1022,256 @@
         .date-input {
             padding: 0.3rem 0.4rem;
             font-size: 0.7rem;
+        }
+    }
+
+    /* --- Mode picker --- */
+    .mode-picker {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2rem 0.5rem;
+        flex: 1;
+        justify-content: center;
+    }
+
+    .mode-prompt {
+        font-size: var(--t-body);
+        color: var(--mute);
+        margin: 0;
+    }
+
+    .mode-bubbles {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .mode-bubble {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-md);
+        padding: 1.1rem 1.4rem;
+        cursor: pointer;
+        font-family: inherit;
+        color: var(--ink);
+        min-width: 9rem;
+        transition: border-color 0.12s, background 0.12s, transform 0.08s;
+        touch-action: manipulation;
+    }
+
+    .mode-bubble:active {
+        transform: scale(0.98);
+    }
+
+    @media (hover: hover) {
+        .mode-bubble:hover {
+            border-color: var(--ink-2);
+            background: var(--paper-2);
+        }
+    }
+
+    .mode-bubble-emoji {
+        font-size: 1.75rem;
+        line-height: 1;
+    }
+
+    .mode-bubble-label {
+        font-size: var(--t-body-sm);
+        font-weight: 600;
+    }
+
+    .mode-bubble-hint {
+        font-size: var(--t-meta);
+        color: var(--mute-2);
+    }
+
+    /* --- Event form --- */
+    .event-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 0.5rem 0 0.25rem;
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .kind-bubbles {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+
+    .kind-bubble {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: var(--t-body-sm);
+        padding: 0.4rem 0.85rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 500;
+        touch-action: manipulation;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+
+    .kind-bubble.active {
+        border-color: var(--ink-2);
+        color: var(--ink-2);
+        background: var(--paper-2);
+    }
+
+    @media (hover: hover) {
+        .kind-bubble:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .event-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+    }
+
+    .field-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .field-row.stacked {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+    }
+
+    .field-label {
+        font-size: var(--t-meta);
+        color: var(--mute);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+        min-width: 5.5rem;
+    }
+
+    .field-row input[type="time"],
+    .field-row input[type="number"] {
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.45rem 0.65rem;
+        font-family: inherit;
+        font-size: var(--t-body-sm);
+        color: var(--ink);
+        background: var(--paper);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .field-row input[type="number"] {
+        width: 6rem;
+    }
+
+    .field-row textarea {
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.5rem 0.65rem;
+        font-family: inherit;
+        font-size: var(--t-body-sm);
+        background: var(--paper);
+        color: var(--ink);
+        resize: vertical;
+    }
+
+    .quick-pills {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        margin-left: 5.5rem;
+    }
+
+    .quick-pill {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: var(--t-meta);
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+        font-family: inherit;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .quick-pill:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .slider-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        flex: 1;
+    }
+
+    .slider-wrap input[type="range"] {
+        flex: 1;
+    }
+
+    .slider-val {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        color: var(--ink);
+        min-width: 1.5rem;
+        text-align: right;
+    }
+
+    .event-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.5rem;
+    }
+
+    .event-save {
+        background: var(--ink-2);
+        color: var(--paper);
+        border: none;
+        border-radius: var(--r-sm);
+        padding: 0.55rem 1.4rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.5rem;
+    }
+
+    .event-save:disabled {
+        opacity: 0.45;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .event-save:not(:disabled):hover {
+            background: var(--ink);
+        }
+    }
+
+    @media (max-width: 480px) {
+        .field-label {
+            min-width: 4.5rem;
+            font-size: 0.65rem;
+        }
+        .quick-pills {
+            margin-left: 4.5rem;
         }
     }
 
