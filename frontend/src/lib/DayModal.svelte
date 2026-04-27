@@ -1,11 +1,11 @@
 <script lang="ts">
   import { MEAL_ORDER } from './types.ts'
-  import type { DailyLog, Entry, MealEntriesMap } from './types.ts'
+  import type { Entry, LogEvent, MealEntriesMap } from './types.ts'
 
   interface DayModalDay {
     date: string
     entries: Entry[]
-    dayLog?: DailyLog | null
+    events?: LogEvent[] | null
   }
 
   let {
@@ -79,35 +79,14 @@
     {/if}
   </div>
 
-  {#if day.dayLog?.activity}
+  {#if day.events?.length}
     <div class="modal-section">
-      <h3>Activity</h3>
-      <p>{day.dayLog.activity}</p>
-    </div>
-  {/if}
-
-  {#if day.dayLog?.feeling_notes || day.dayLog?.feeling_score}
-    <div class="modal-section">
-      <h3>Feeling</h3>
-      <p>
-        {#if day.dayLog.feeling_notes}{day.dayLog.feeling_notes}{:else}{day.dayLog.feeling_score}/10{/if}
-      </p>
-    </div>
-  {/if}
-
-  {#if day.dayLog?.poop || day.dayLog?.poop_notes}
-    <div class="modal-section">
-      <h3>Stool</h3>
-      <p>
-        {day.dayLog.poop ? 'Yes' : 'No'}{#if day.dayLog.poop_notes} — {day.dayLog.poop_notes}{/if}
-      </p>
-    </div>
-  {/if}
-
-  {#if day.dayLog?.hydration}
-    <div class="modal-section">
-      <h3>Water</h3>
-      <p>{day.dayLog.hydration} L</p>
+      <h3>Events</h3>
+      {#each day.events as ev}
+        <p>
+          [{ev.time}] <strong>{ev.kind}</strong>{#if ev.text} — {ev.text}{/if}{#if ev.kind === 'water'} ({Math.round(ev.num ?? 0)}ml){:else if ev.kind === 'feeling' && ev.num} ({ev.num}/10){/if}
+        </p>
+      {/each}
     </div>
   {/if}
 </div>

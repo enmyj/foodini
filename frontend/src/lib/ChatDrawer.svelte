@@ -1,161 +1,177 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { chat, confirmChat, editChat, patchEntry, deleteEntry, getActivity, putActivity, getFavorites } from "./api.ts";
+    import { addEvent, agent, deleteEntry, patchEntry } from "./api.ts";
     import { autosize } from "./autosize.ts";
-    import ChatDrawerActivityForm from "./ChatDrawerActivityForm.svelte";
-    import CoachChat from "./CoachChat.svelte";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
-    import { MEAL_ORDER } from "./types.ts";
+    import { EVENT_KINDS } from "./types.ts";
     import type {
-        ActivityField,
-        DrawerTab,
+        AgentAction,
         Entry,
-        EntryInput,
-        Favorite,
-        MealEntriesMap,
+        EventKind,
+        LogEvent,
         MealType,
         PendingImage,
     } from "./types.ts";
 
-    type EditableEntryField = "calories" | "protein" | "carbs" | "fat" | "fiber";
+    type DrawerMode = "meal" | "event";
+
+    type EditableEntryField =
+        | "calories"
+        | "protein"
+        | "carbs"
+        | "fat"
+        | "fiber";
+
+    interface ChatMsg {
+        role: "user" | "agent" | "action";
+        text?: string;
+        previewUrls?: string[];
+        action?: AgentAction;
+    }
 
     let {
         open,
         onClose,
         onEntriesAdded,
         onEntriesEdited = null,
+        onEventChanged = null,
         date = null,
         meal = null,
-        initialTab = "food",
-        initialField = null,
         editEntries = null,
         editMealType = null,
-        mealEntriesByMeal = {},
-        yesterdayByMeal = {},
-        mealIsEmpty = true,
+        initialMode = null,
     }: {
         open: boolean;
         onClose: () => void;
         onEntriesAdded: (entries: Entry[]) => void;
-        onEntriesEdited?: ((entries: Entry[], mealType: MealType | null) => void) | null;
+        onEntriesEdited?:
+            | ((entries: Entry[], mealType: MealType | null) => void)
+            | null;
+        onEventChanged?: ((change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) => void) | null;
         date?: string | null;
         meal?: MealType | null;
-        initialTab?: DrawerTab;
-        initialField?: ActivityField | null;
         editEntries?: Entry[] | null;
         editMealType?: MealType | null;
-        mealEntriesByMeal?: MealEntriesMap;
-        yesterdayByMeal?: MealEntriesMap;
-        mealIsEmpty?: boolean;
+        initialMode?: DrawerMode | null;
     } = $props();
 
-    const MEALS = [...MEAL_ORDER];
+    let mode = $state<DrawerMode | null>(null);
+    let mealTime = $state("");
+    let eventKind = $state<EventKind | null>(null);
+    let eventTime = $state("");
+    let eventText = $state("");
+    let eventWaterMl = $state(250);
+    let eventFeelingScore = $state(7);
+    let eventSaving = $state(false);
 
-    function guessMealForNow(): MealType {
-        const h = new Date().getHours();
-        if (h < 10) return "breakfast";
-        if (h < 14) return "lunch";
-        if (h < 16) return "snack";
-        if (h < 21) return "dinner";
-        return "snack";
+    const EVENT_KIND_LABELS: Record<EventKind, string> = {
+        workout: "Activity",
+        stool: "Stool",
+        water: "Water",
+        feeling: "Feeling",
+    };
+
+    function nowHHMM(): string {
+        const d = new Date();
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     }
 
-    // Shared
-    let tab = $state<DrawerTab>("food");
+    function resetEventForm() {
+        eventKind = null;
+        eventTime = "";
+        eventText = "";
+        eventWaterMl = 250;
+        eventFeelingScore = 7;
+        eventSaving = false;
+    }
+
+    function selectEventKind(kind: EventKind) {
+        eventKind = kind;
+        eventTime = nowHHMM();
+        eventText = "";
+        eventWaterMl = 250;
+        eventFeelingScore = 7;
+    }
+
+    async function saveEvent() {
+        if (!eventKind || eventSaving) return;
+        const time = eventTime || nowHHMM();
+        const text = eventText.trim();
+        const payload: {
+            date: string;
+            time: string;
+            kind: EventKind;
+            text?: string;
+            num?: number;
+        } = { date: selectedDate, time, kind: eventKind };
+        if (eventKind === "water") payload.num = Math.max(0, Math.round(eventWaterMl));
+        else if (eventKind === "feeling") {
+            payload.num = Math.max(1, Math.min(10, Math.round(eventFeelingScore)));
+            if (text) payload.text = text;
+        } else {
+            if (text) payload.text = text;
+        }
+        eventSaving = true;
+        try {
+            const saved = await addEvent(payload);
+            if (onEventChanged) onEventChanged({ added: saved });
+            onClose();
+        } catch (err) {
+            showError(err, "Failed to save event.");
+        } finally {
+            eventSaving = false;
+        }
+    }
+
     let selectedDate = $state("");
     let drawerEl = $state<HTMLDivElement | null>(null);
-
-    // Food
-    let input = $state("");
-    let sending = $state(false);
-    let clarifyingQuestion = $state<string | null>(null);
-    let pendingImages = $state<PendingImage[]>([]);
-    let selectedMeal = $state<MealType | null>(null);
+    let scrollEl = $state<HTMLDivElement | null>(null);
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let fileInputEl = $state<HTMLInputElement | null>(null);
-    let mealError = $state(false);
 
-    // Entries — always initialised (empty [] for new meals, pre-filled for edits)
+    let input = $state("");
+    let sending = $state(false);
+    let pendingImages = $state<PendingImage[]>([]);
+
+    let messages = $state<ChatMsg[]>([]);
     let entries = $state<Entry[]>([]);
-    let favorites = $state<Favorite[] | null>(null);
-    let openAction = $state<"repeat" | "favs" | null>(null);
-    let mealsExpanded = $state(false);
-    let favSearch = $state("");
+    let mealType = $state<MealType | null>(null);
+    let firstSend = $state(true);
     let deletingEntryIds = $state<Set<string>>(new Set());
 
-    let hasEntries = $derived(entries.length > 0);
-    let yesterdayMeals = $derived(
-        (Object.keys(yesterdayByMeal) as MealType[]).filter((m) => (yesterdayByMeal[m]?.length ?? 0) > 0),
-    );
-    let filteredFavs = $derived.by(() => {
-        if (!favorites || !favSearch.trim()) return favorites ?? [];
-        const q = favSearch.toLowerCase();
-        return favorites.filter((f) => f.description.toLowerCase().includes(q));
-    });
-
-    let activityText = $state("");
-    let feelingNotes = $state("");
-    let poop = $state(false);
-    let poopNotes = $state("");
-    let hydration = $state("");
-    let activitySaving = $state(false);
-    let activityLoadedFor = $state<string | null>(null);
-
-    // Drag-to-dismiss
     let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
 
-    const saveActivityMutation = createMutation(() => ({
-        mutationFn: ({
-            date,
-            payload,
-        }: {
-            date: string;
-            payload: Parameters<typeof putActivity>[1];
-        }) => putActivity(date, payload),
-        onError: (err) => showError(err, "Failed to save activity."),
-    }));
-
-    const chatMutation = createMutation(() => ({
+    const agentMutation = createMutation(() => ({
         mutationFn: ({
             message,
             date,
             images,
             meal,
+            time,
+            currentEntries,
+            reset,
         }: {
             message: string;
             date: string;
             images: File[] | null;
-            meal: MealType;
-        }) => chat(message, date, images, meal),
+            meal: MealType | null;
+            time: string | null;
+            currentEntries: Entry[] | null;
+            reset: boolean;
+        }) =>
+            agent(message, {
+                date,
+                meal,
+                time,
+                images,
+                currentEntries,
+                reset,
+            }),
         onError: (err) =>
             showError(err, "Something went wrong. Please try again."),
-    }));
-
-    const confirmChatMutation = createMutation(() => ({
-        mutationFn: ({
-            entries,
-            date,
-        }: {
-            entries: EntryInput[];
-            date: string;
-        }) => confirmChat(entries, date),
-    }));
-
-    const editChatMutation = createMutation(() => ({
-        mutationFn: ({
-            message,
-            entries,
-            date,
-            mealType,
-        }: {
-            message: string;
-            entries: Entry[];
-            date: string;
-            mealType: MealType | null;
-        }) => editChat(message, entries, date, mealType),
     }));
 
     const patchEntryMutation = createMutation(() => ({
@@ -167,24 +183,64 @@
         mutationFn: (id: string) => deleteEntry(id),
     }));
 
-    function onDragStart(e: TouchEvent) {
-        const target = e.target;
-        const tag = target instanceof HTMLElement ? target.tagName : "";
-        const touch = e.touches[0];
-        if (
-            tag === "TEXTAREA" ||
-            tag === "INPUT" ||
-            tag === "BUTTON" ||
-            tag === "SELECT"
-        )
-            return;
-        if (!touch) return;
-        // Don't hijack touches that start inside a scrollable region —
-        // the user is trying to scroll content, not dismiss the drawer.
-        if (target instanceof HTMLElement && isInsideScrollable(target)) return;
-        dragStartY = touch.clientY;
-        dragCurrentY = 0;
-        if (drawerEl) drawerEl.style.transition = "none";
+    $effect(() => {
+        const isOpen = open;
+        untrack(() => {
+            if (isOpen) {
+                selectedDate = date || todayStr();
+                mealType = editMealType ?? meal ?? null;
+                entries = editEntries ? [...editEntries] : [];
+                messages = [];
+                input = "";
+                sending = false;
+                clearPendingImages();
+                firstSend = true;
+                deletingEntryIds = new Set();
+                if (editEntries || meal) mode = "meal";
+                else if (initialMode) mode = initialMode;
+                else mode = null;
+                resetEventForm();
+                mealTime = editEntries?.[0]?.time || nowHHMM();
+                if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
+            } else {
+                selectedDate = "";
+                mealType = null;
+                entries = [];
+                messages = [];
+                input = "";
+                clearPendingImages();
+                deletingEntryIds = new Set();
+                mode = null;
+                resetEventForm();
+            }
+        });
+    });
+
+    function pickMode(next: DrawerMode) {
+        mode = next;
+        if (next === "meal") setTimeout(() => inputEl?.focus(), 60);
+    }
+
+    $effect(() => {
+        const len = messages.length;
+        if (!len || !scrollEl) return;
+        queueMicrotask(() => {
+            scrollEl?.scrollTo({
+                top: scrollEl.scrollHeight,
+                behavior: "smooth",
+            });
+        });
+    });
+
+    function revokePreview(url: string): void {
+        if (typeof url === "string" && url.startsWith("blob:")) {
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    function clearPendingImages() {
+        for (const img of pendingImages) revokePreview(img.previewUrl);
+        pendingImages = [];
     }
 
     function isInsideScrollable(el: HTMLElement): boolean {
@@ -201,6 +257,24 @@
             node = node.parentElement;
         }
         return false;
+    }
+
+    function onDragStart(e: TouchEvent) {
+        const target = e.target;
+        const tag = target instanceof HTMLElement ? target.tagName : "";
+        const touch = e.touches[0];
+        if (
+            tag === "TEXTAREA" ||
+            tag === "INPUT" ||
+            tag === "BUTTON" ||
+            tag === "SELECT"
+        )
+            return;
+        if (!touch) return;
+        if (target instanceof HTMLElement && isInsideScrollable(target)) return;
+        dragStartY = touch.clientY;
+        dragCurrentY = 0;
+        if (drawerEl) drawerEl.style.transition = "none";
     }
 
     function onDragMove(e: TouchEvent) {
@@ -228,125 +302,7 @@
         dragCurrentY = 0;
     }
 
-    function revokePreview(url: string): void {
-        if (typeof url === "string" && url.startsWith("blob:")) {
-            URL.revokeObjectURL(url);
-        }
-    }
-
-    function clearPendingImages() {
-        for (const img of pendingImages) {
-            revokePreview(img.previewUrl);
-        }
-        pendingImages = [];
-    }
-
-    function entriesForMeal(mealType: MealType | null): Entry[] {
-        return mealType ? [...(mealEntriesByMeal[mealType] ?? [])] : [];
-    }
-
-    function chooseMeal(mealType: MealType): void {
-        const nextMeal = selectedMeal === mealType ? null : mealType;
-        const useEditSeed = editEntries && nextMeal === editMealType;
-        selectedMeal = nextMeal;
-        entries = useEditSeed ? [...editEntries!] : entriesForMeal(nextMeal);
-        clarifyingQuestion = null;
-        openAction = null;
-        deletingEntryIds = new Set();
-        if (nextMeal) mealsExpanded = false;
-    }
-
-    // Only re-run when `open` changes — read props via untrack so edits
-    // during the session (e.g. onEntriesEdited resetting parent state) don't
-    // re-initialize the drawer.
-    $effect(() => {
-        const isOpen = open;
-        untrack(() => {
-            if (isOpen) {
-                tab = initialTab;
-                selectedDate = date || todayStr();
-                selectedMeal = editMealType ?? meal ?? guessMealForNow();
-                clearPendingImages();
-                input = "";
-                sending = false;
-                clarifyingQuestion = null;
-                entries = editEntries ? [...editEntries] : entriesForMeal(selectedMeal);
-                mealsExpanded = false;
-                openAction = null;
-                favSearch = "";
-                deletingEntryIds = new Set();
-                if (!favorites) {
-                    getFavorites().then((res) => { favorites = res.favorites ?? []; }).catch(() => {});
-                }
-            } else {
-                tab = "food";
-                selectedDate = "";
-                selectedMeal = null;
-                clearPendingImages();
-                input = "";
-                clarifyingQuestion = null;
-                entries = [];
-                openAction = null;
-                favSearch = "";
-                deletingEntryIds = new Set();
-                activityText = "";
-                feelingNotes = "";
-                poop = false;
-                poopNotes = "";
-                hydration = "";
-                activitySaving = false;
-                activityLoadedFor = null;
-            }
-        });
-    });
-
-    $effect(() => {
-        if (
-            open &&
-            tab === "activity" &&
-            selectedDate &&
-            selectedDate !== activityLoadedFor
-        ) {
-            loadActivity(selectedDate);
-        }
-    });
-
-    async function loadActivity(d: string): Promise<void> {
-        activityLoadedFor = d;
-        try {
-            const res = await getActivity(d);
-            activityText = res.activity ?? "";
-            feelingNotes = res.feeling_notes ?? "";
-            poop = res.poop ?? false;
-            poopNotes = res.poop_notes ?? "";
-            hydration = res.hydration ? String(res.hydration) : "";
-        } catch (err) {
-            showError(err, "Failed to load activity.");
-        }
-    }
-
-    async function saveActivity() {
-        activitySaving = true;
-        try {
-            await saveActivityMutation.mutateAsync({
-                date: selectedDate,
-                payload: {
-                    activity: activityText,
-                    feeling_score: 0,
-                    feeling_notes: feelingNotes,
-                    poop,
-                    poop_notes: poopNotes,
-                    hydration: hydration ? parseFloat(hydration) : 0,
-                },
-            });
-            onClose();
-        } catch {
-        } finally {
-            activitySaving = false;
-        }
-    }
-
-    async function onFileSelected(e: Event): Promise<void> {
+    function onFileSelected(e: Event): void {
         const target = e.currentTarget as HTMLInputElement;
         const files = Array.from(target.files ?? []);
         if (!files.length) return;
@@ -371,72 +327,81 @@
         fileInputEl?.click();
     }
 
-    async function sendEdit(): Promise<void> {
-        if (sending) return;
-        if (!selectedMeal || !entries.length) return;
-        const text = input.trim();
-        if (!text) return;
-        input = "";
-        clarifyingQuestion = null;
-        sending = true;
-        try {
-            const res = await editChatMutation.mutateAsync({
-                message: text,
-                entries: [...entries],
-                date: selectedDate,
-                mealType: selectedMeal,
-            });
-            if (res.entries) {
-                entries = res.entries;
-                if (onEntriesEdited) onEntriesEdited(res.entries, selectedMeal);
-            }
-        } catch (err) {
-            showError(err, "Failed to apply edit.");
-        } finally {
-            sending = false;
-        }
-    }
-
     async function send(): Promise<void> {
         if (sending) return;
-        if (!selectedMeal) {
-            mealError = true;
-            setTimeout(() => {
-                mealError = false;
-            }, 600);
-            return;
-        }
-        const imgs = pendingImages.length
-            ? pendingImages.map((img) => img.file)
-            : null;
         const text = input.trim();
-        if (!imgs && !text) return;
+        const sentImages = pendingImages;
+        const imgs = sentImages.length ? sentImages.map((i) => i.file) : null;
+        if (!text && !imgs) return;
 
+        const previewUrls = sentImages.map((i) => i.previewUrl);
+        pendingImages = [];
+
+        const userMsg: ChatMsg = { role: "user", previewUrls };
+        if (text) userMsg.text = text;
+        messages = [...messages, userMsg];
         input = "";
-        clarifyingQuestion = null;
-        clearPendingImages();
         sending = true;
 
+        await sendAgent(text, imgs, sentImages);
+        sending = false;
+    }
+
+    async function sendAgent(
+        text: string,
+        imgs: File[] | null,
+        sentImages: PendingImage[],
+    ): Promise<void> {
         try {
-            const res = await chatMutation.mutateAsync({
+            const res = await agentMutation.mutateAsync({
                 message: text,
                 date: selectedDate,
                 images: imgs,
-                meal: selectedMeal,
+                meal: mealType,
+                time: mealTime || null,
+                currentEntries: entries.length ? [...entries] : null,
+                reset: firstSend,
             });
-            sending = false;
-            if (res.done && res.entries?.length) {
-                entries = [...entries, ...res.entries];
-                onEntriesAdded(res.entries);
-            } else if (!res.done) {
-                clarifyingQuestion = res.message || "Need more details.";
+            firstSend = false;
+            for (const action of res.actions ?? []) {
+                applyAgentAction(action);
+                messages = [...messages, { role: "action", action }];
+            }
+            if (res.message) {
+                messages = [...messages, { role: "agent", text: res.message }];
             }
         } catch {
-            sending = false;
+            // mutation onError already surfaced toast
+        } finally {
+            for (const img of sentImages) revokePreview(img.previewUrl);
         }
     }
 
-    // --- Entry editing functions ---
+    function applyAgentAction(action: AgentAction) {
+        if (action.type === "meal_added" && action.entries?.length) {
+            const addedMeal = action.entries[0]?.meal_type ?? null;
+            if (mealType === null && addedMeal) {
+                mealType = addedMeal;
+                entries = [...action.entries];
+            } else if (mealType && addedMeal === mealType) {
+                entries = [...entries, ...action.entries];
+            }
+            onEntriesAdded(action.entries);
+        } else if (action.type === "meal_edited" && action.entries) {
+            const editedMeal = action.entries[0]?.meal_type ?? mealType;
+            if (mealType && editedMeal === mealType) {
+                entries = action.entries;
+            }
+            if (onEntriesEdited)
+                onEntriesEdited(action.entries, editedMeal ?? null);
+        } else if (action.type === "event_added" && action.event) {
+            if (onEventChanged) onEventChanged({ added: action.event });
+        } else if (action.type === "event_edited" && action.event) {
+            if (onEventChanged) onEventChanged({ updated: action.event });
+        } else if (action.type === "event_deleted" && action.event_id) {
+            if (onEventChanged) onEventChanged({ deletedId: action.event_id });
+        }
+    }
 
     async function editInlineEntry(
         index: number,
@@ -446,14 +411,14 @@
         const entry = entries[index];
         if (!entry) return;
         const updated: Entry = { ...entry, [field]: value };
-        entries = entries.map((e, i) => i === index ? updated : e);
+        entries = entries.map((e, i) => (i === index ? updated : e));
         try {
             const saved = await patchEntryMutation.mutateAsync({
                 id: updated.id,
                 entry: updated,
             });
-            entries = entries.map((e) => e.id === saved.id ? saved : e);
-            if (onEntriesEdited) onEntriesEdited(entries, selectedMeal);
+            entries = entries.map((e) => (e.id === saved.id ? saved : e));
+            if (onEntriesEdited) onEntriesEdited(entries, mealType);
         } catch (err) {
             showError(err, "Failed to save change.");
         }
@@ -467,7 +432,7 @@
             await deleteEntryMutation.mutateAsync(entry.id);
             const nextEntries = entries.filter((e) => e.id !== entry.id);
             entries = nextEntries;
-            if (onEntriesEdited) onEntriesEdited(nextEntries, selectedMeal);
+            if (onEntriesEdited) onEntriesEdited(nextEntries, mealType);
         } catch (err) {
             showError(err, "Failed to delete entry.");
         } finally {
@@ -477,86 +442,56 @@
         }
     }
 
-    async function addFavoriteToMeal(fav: Favorite): Promise<void> {
-        if (!selectedMeal) return;
-        const input_: EntryInput[] = [{
-            meal_type: selectedMeal,
-            description: fav.description,
-            calories: fav.calories,
-            protein: fav.protein,
-            carbs: fav.carbs,
-            fat: fav.fat,
-            fiber: fav.fiber ?? 0,
-        }];
-        let res: Awaited<ReturnType<typeof confirmChat>>;
-        try {
-            res = await confirmChatMutation.mutateAsync({
-                entries: input_,
-                date: selectedDate,
-            });
-        } catch (err) {
-            showError(err, "Failed to add favorite.");
-            return;
-        }
-        if (res.entries?.length) {
-            entries = [...entries, ...res.entries];
-            openAction = null;
-            try {
-                onEntriesAdded(res.entries);
-            } catch (err) {
-                console.error("onEntriesAdded failed:", err);
-            }
-        }
-    }
-
-    async function repeatYesterday(fromEntries: Entry[]): Promise<void> {
-        if (!fromEntries.length || !selectedMeal) return;
-        sending = true;
-        const input_: EntryInput[] = fromEntries.map((e) => ({
-            meal_type: selectedMeal!,
-            description: e.description,
-            calories: e.calories,
-            protein: e.protein,
-            carbs: e.carbs,
-            fat: e.fat,
-            fiber: e.fiber ?? 0,
-        }));
-        let res: Awaited<ReturnType<typeof confirmChat>>;
-        try {
-            res = await confirmChatMutation.mutateAsync({
-                entries: input_,
-                date: selectedDate,
-            });
-        } catch (err) {
-            sending = false;
-            showError(err, "Failed to repeat yesterday's meal.");
-            return;
-        }
-        sending = false;
-        if (res.entries?.length) {
-            entries = [...entries, ...res.entries];
-            try {
-                onEntriesAdded(res.entries);
-            } catch (err) {
-                console.error("onEntriesAdded failed:", err);
-            }
-        }
-    }
-
     function numberValueFromEvent(e: FocusEvent): number {
         const target = e.currentTarget as HTMLInputElement;
         return Number(target.value);
     }
 
-    function onDone() {
-        if (tab === "activity") {
-            saveActivity();
-        } else {
-            onClose();
+    function actionLabel(a: AgentAction): string {
+        switch (a.type) {
+            case "meal_added": {
+                const n = a.entries?.length ?? 0;
+                const cal = (a.entries ?? []).reduce(
+                    (s, e) => s + (e.calories ?? 0),
+                    0,
+                );
+                const m = a.entries?.[0]?.meal_type ?? "";
+                return `Added ${n} item${n === 1 ? "" : "s"}${m ? ` to ${m}` : ""} (${cal} cal)`;
+            }
+            case "meal_edited": {
+                const n = a.entries?.length ?? 0;
+                const cal = (a.entries ?? []).reduce(
+                    (s, e) => s + (e.calories ?? 0),
+                    0,
+                );
+                const m = a.entries?.[0]?.meal_type ?? "";
+                return `Updated ${m || "meal"} — ${n} item${n === 1 ? "" : "s"} (${cal} cal)`;
+            }
+            case "event_added":
+            case "event_edited": {
+                const ev = a.event;
+                if (!ev) return a.type === "event_added" ? "Event added" : "Event updated";
+                const verb = a.type === "event_added" ? "Logged" : "Updated";
+                switch (ev.kind) {
+                    case "workout":
+                        return `${verb} workout: ${ev.text ?? ""}`.trim();
+                    case "stool":
+                        return `${verb} bowel movement${ev.text ? `: ${ev.text}` : ""}`;
+                    case "water":
+                        return `${verb} water: ${Math.round(ev.num ?? 0)}ml`;
+                    case "feeling":
+                        return `${verb} feeling: ${ev.num ?? 0}/10${ev.text ? ` — ${ev.text}` : ""}`;
+                }
+                return `${verb} event`;
+            }
+            case "event_deleted":
+                return "Event deleted";
+            case "favorite_added":
+                return "Saved to favorites";
+            default:
+                return "";
         }
     }
-
-    let doneLabel = $derived(tab === "activity" && activitySaving ? "Saving…" : "Done");
 
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -564,7 +499,6 @@
             send();
         }
     }
-
 </script>
 
 {#if open}
@@ -584,314 +518,359 @@
             <span class="handle-bar"></span>
         </button>
 
-        <!-- Tab switcher + date + done -->
         <div class="drawer-top">
-            <div class="tabs">
-                <button
-                    class="tab-btn"
-                    class:active={tab === "food"}
-                    onclick={() => (tab = "food")}>Food</button
-                >
-                <button
-                    class="tab-btn"
-                    class:active={tab === "activity"}
-                    onclick={() => (tab = "activity")}>Activity</button
-                >
-                <button
-                    class="tab-btn"
-                    class:active={tab === "coach"}
-                    onclick={() => (tab = "coach")}>Coach</button
-                >
+            <div class="top-left">
+                {#if mealType}
+                    <span class="meal-tag">{mealType}</span>
+                {/if}
             </div>
             <div class="top-right">
+                {#if mode === "meal"}
+                    <input
+                        class="date-input time-input"
+                        type="time"
+                        bind:value={mealTime}
+                        title="Time for this meal"
+                    />
+                {/if}
                 <input
                     class="date-input"
                     type="date"
                     bind:value={selectedDate}
                     max={todayStr()}
                 />
-                <button
-                    class="done-btn"
-                    onclick={onDone}
-                    disabled={tab === "activity" && activitySaving}
-                    >{doneLabel}</button
-                >
+                <button class="done-btn" onclick={onClose}>Done</button>
             </div>
         </div>
 
-        {#if tab === "food"}
-            <!-- Meal header — always visible so users can switch meals -->
-            <div class="meal-pills-wrap" class:shake={mealError} class:collapsed={!mealsExpanded && !!selectedMeal}>
-                <button
-                    type="button"
-                    class="meal-toggle"
-                    onclick={() => (mealsExpanded = !mealsExpanded)}
-                    aria-expanded={mealsExpanded}
-                >{selectedMeal ?? "meal"} <span class="meal-toggle-arrow" aria-hidden="true">{mealsExpanded ? "▾" : "▸"}</span></button>
-                <div class="meal-pills">
-                    {#each MEALS as m}
-                        <button
-                            class="meal-pill"
-                            class:selected={selectedMeal === m}
-                            onclick={() => chooseMeal(m)}
-                            >{m}</button
-                        >
-                    {/each}
+        {#if mode === null}
+            <div class="mode-picker">
+                <p class="mode-prompt">What would you like to log?</p>
+                <div class="mode-bubbles">
+                    <button class="mode-bubble" onclick={() => pickMode("meal")}>
+                        <span class="mode-bubble-emoji">🍽️</span>
+                        <span class="mode-bubble-label">Meal</span>
+                        <span class="mode-bubble-hint">food, drink</span>
+                    </button>
+                    <button class="mode-bubble" onclick={() => pickMode("event")}>
+                        <span class="mode-bubble-emoji">📋</span>
+                        <span class="mode-bubble-label">Event</span>
+                        <span class="mode-bubble-hint">activity, water, stool, feeling</span>
+                    </button>
                 </div>
             </div>
-
-            {#if selectedMeal && (yesterdayMeals.length > 0 || (favorites && favorites.length > 0))}
-                <div class="action-pills">
-                    {#if yesterdayMeals.length > 0}
+        {:else if mode === "event"}
+            <div class="event-form">
+                <div class="kind-bubbles">
+                    {#each EVENT_KINDS as k}
                         <button
-                            class="action-pill"
-                            class:active={openAction === "repeat"}
-                            onclick={() => (openAction = openAction === "repeat" ? null : "repeat")}
-                            disabled={sending}
-                            >Repeat</button
-                        >
-                    {/if}
-                    {#if favorites && favorites.length > 0}
-                        <button
-                            class="action-pill"
-                            class:active={openAction === "favs"}
-                            onclick={() => (openAction = openAction === "favs" ? null : "favs")}
-                            >Favorites</button
-                        >
-                    {/if}
+                            class="kind-bubble"
+                            class:active={eventKind === k}
+                            onclick={() => selectEventKind(k)}
+                        >{EVENT_KIND_LABELS[k]}</button>
+                    {/each}
                 </div>
-                {#if openAction === "repeat"}
-                    <div class="action-panel action-panel--equal">
-                        {#each yesterdayMeals as m}
-                            <button
-                                class="scale-pill"
-                                onclick={() => { openAction = null; repeatYesterday(yesterdayByMeal[m] ?? []); }}
-                                disabled={sending}
-                                >{m}</button
-                            >
-                        {/each}
+                {#if eventKind}
+                    <div class="event-fields">
+                        <label class="field-row">
+                            <span class="field-label">Time</span>
+                            <input type="time" bind:value={eventTime} />
+                        </label>
+                        {#if eventKind === "water"}
+                            <label class="field-row">
+                                <span class="field-label">Amount (ml)</span>
+                                <input type="number" min="0" max="5000" step="50" bind:value={eventWaterMl} />
+                            </label>
+                            <div class="quick-pills">
+                                {#each [125, 250, 500, 750, 1000] as ml}
+                                    <button class="quick-pill" onclick={() => (eventWaterMl = ml)}>{ml}ml</button>
+                                {/each}
+                            </div>
+                        {:else if eventKind === "feeling"}
+                            <label class="field-row">
+                                <span class="field-label">Score (1-10)</span>
+                                <div class="slider-wrap">
+                                    <input type="range" min="1" max="10" step="1" bind:value={eventFeelingScore} />
+                                    <span class="slider-val">{eventFeelingScore}</span>
+                                </div>
+                            </label>
+                            <label class="field-row stacked">
+                                <span class="field-label">Note (optional)</span>
+                                <textarea rows="2" bind:value={eventText} placeholder="energy, mood, anything notable"></textarea>
+                            </label>
+                        {:else if eventKind === "stool"}
+                            <label class="field-row stacked">
+                                <span class="field-label">Note (optional)</span>
+                                <textarea rows="2" bind:value={eventText} placeholder="consistency, urgency, etc."></textarea>
+                            </label>
+                        {:else if eventKind === "workout"}
+                            <label class="field-row stacked">
+                                <span class="field-label">What did you do?</span>
+                                <textarea rows="3" bind:value={eventText} placeholder="e.g. 30min run, bench 3×8 @135"></textarea>
+                            </label>
+                        {/if}
+                        <div class="event-actions">
+                            <button class="event-save" onclick={saveEvent} disabled={eventSaving}>
+                                {eventSaving ? "Saving…" : "Save"}
+                            </button>
+                        </div>
                     </div>
-                {:else if openAction === "favs"}
-                    <div class="action-panel fav-panel">
-                        <input
-                            class="fav-search"
-                            type="text"
-                            placeholder="Search favorites…"
-                            bind:value={favSearch}
-                        />
-                        <div class="fav-list">
-                            {#each filteredFavs.slice(0, 8) as fav}
-                                <button class="fav-item" onclick={() => addFavoriteToMeal(fav)} disabled={sending}>
-                                    <span class="fav-desc">{fav.description}</span>
-                                    <span class="fav-cal">{fav.calories} cal</span>
-                                </button>
-                            {/each}
-                            {#if filteredFavs.length === 0}
-                                <span class="fav-empty">No favorites found</span>
+                {/if}
+            </div>
+        {/if}
+
+        {#snippet entriesCard()}
+            <div class="result-card" class:dimmed={sending}>
+                {#each entries as entry, i}
+                    <div
+                        class="card-entry"
+                        class:dimmed={deletingEntryIds.has(entry.id)}
+                    >
+                        <div class="card-entry-head">
+                            <div class="card-desc">{entry.description}</div>
+                            <button
+                                class="entry-delete"
+                                class:deleting={deletingEntryIds.has(entry.id)}
+                                onclick={() => deleteEntry_(i)}
+                                disabled={deletingEntryIds.has(entry.id)}
+                                aria-label={deletingEntryIds.has(entry.id)
+                                    ? "Deleting…"
+                                    : "Delete entry"}
+                                >{#if deletingEntryIds.has(entry.id)}<span
+                                        class="entry-spinner"
+                                        aria-hidden="true"
+                                    ></span>{:else}✕{/if}</button
+                            >
+                        </div>
+                        <div class="card-macros">
+                            <span class="macro-field">
+                                <input
+                                    type="number"
+                                    value={entry.calories}
+                                    onblur={(e: FocusEvent) =>
+                                        editInlineEntry(
+                                            i,
+                                            "calories",
+                                            numberValueFromEvent(e),
+                                        )}
+                                    disabled={sending ||
+                                        deletingEntryIds.has(entry.id)}
+                                />
+                                <span class="macro-label">cal</span>
+                            </span>
+                            <span class="macro-sep">·</span>
+                            <span class="macro-field">
+                                <input
+                                    type="number"
+                                    value={entry.protein}
+                                    onblur={(e: FocusEvent) =>
+                                        editInlineEntry(
+                                            i,
+                                            "protein",
+                                            numberValueFromEvent(e),
+                                        )}
+                                    disabled={sending ||
+                                        deletingEntryIds.has(entry.id)}
+                                />
+                                <span class="macro-label">P</span>
+                            </span>
+                            <span class="macro-sep">·</span>
+                            <span class="macro-field">
+                                <input
+                                    type="number"
+                                    value={entry.carbs}
+                                    onblur={(e: FocusEvent) =>
+                                        editInlineEntry(
+                                            i,
+                                            "carbs",
+                                            numberValueFromEvent(e),
+                                        )}
+                                    disabled={sending ||
+                                        deletingEntryIds.has(entry.id)}
+                                />
+                                <span class="macro-label">C</span>
+                            </span>
+                            <span class="macro-sep">·</span>
+                            <span class="macro-field">
+                                <input
+                                    type="number"
+                                    value={entry.fat}
+                                    onblur={(e: FocusEvent) =>
+                                        editInlineEntry(
+                                            i,
+                                            "fat",
+                                            numberValueFromEvent(e),
+                                        )}
+                                    disabled={sending ||
+                                        deletingEntryIds.has(entry.id)}
+                                />
+                                <span class="macro-label">F</span>
+                            </span>
+                            <span class="macro-sep">·</span>
+                            <span class="macro-field">
+                                <input
+                                    type="number"
+                                    value={entry.fiber ?? 0}
+                                    onblur={(e: FocusEvent) =>
+                                        editInlineEntry(
+                                            i,
+                                            "fiber",
+                                            numberValueFromEvent(e),
+                                        )}
+                                    disabled={sending ||
+                                        deletingEntryIds.has(entry.id)}
+                                />
+                                <span class="macro-label">Fb</span>
+                            </span>
+                        </div>
+                    </div>
+                {/each}
+            </div>
+        {/snippet}
+
+        {#if mode === "meal"}
+        <div class="messages" bind:this={scrollEl}>
+            {#if messages.length === 0}
+                <p class="empty">
+                    {#if entries.length > 0}
+                        Tweak this meal, scale it, or add more.
+                    {:else}
+                        What did you eat?
+                    {/if}
+                </p>
+            {/if}
+            {#each messages as msg, i (i)}
+                {#if msg.role === "user"}
+                    <div class="msg user">
+                        <div class="bubble">
+                            {#if msg.previewUrls?.length}
+                                <div class="msg-thumbs">
+                                    {#each msg.previewUrls as url}
+                                        <img
+                                            class="msg-thumb"
+                                            src={url}
+                                            alt=""
+                                        />
+                                    {/each}
+                                </div>
+                            {/if}
+                            {#if msg.text}
+                                <div class="msg-text">{msg.text}</div>
                             {/if}
                         </div>
                     </div>
+                {:else if msg.role === "agent"}
+                    <div class="msg model">
+                        <div class="bubble">{msg.text}</div>
+                    </div>
+                {:else if msg.role === "action" && msg.action}
+                    <div class="msg action">
+                        <div class="action-bubble">
+                            {actionLabel(msg.action)}
+                        </div>
+                    </div>
                 {/if}
+            {/each}
+            {#if sending}
+                <div class="msg model">
+                    <div class="bubble typing">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
             {/if}
+            {#if entries.length > 0}
+                {@render entriesCard()}
+            {/if}
+        </div>
 
-            <!-- Content area -->
-            <div class="content-area">
-                <!-- Existing entries with inline editing -->
-                {#if hasEntries}
-                    <div class="result-card" class:dimmed={sending}>
-                        {#each entries as entry, i}
-                            <div class="card-entry" class:dimmed={deletingEntryIds.has(entry.id)}>
-                                <div class="card-entry-head">
-                                    <div class="card-desc">{entry.description}</div>
-                                    <button
-                                        class="entry-delete"
-                                        class:deleting={deletingEntryIds.has(entry.id)}
-                                        onclick={() => deleteEntry_(i)}
-                                        disabled={deletingEntryIds.has(entry.id)}
-                                        aria-label={deletingEntryIds.has(entry.id) ? "Deleting…" : "Delete entry"}
-                                        >{#if deletingEntryIds.has(entry.id)}<span class="entry-spinner" aria-hidden="true"></span>{:else}✕{/if}</button
-                                    >
-                                </div>
-                                <div class="card-macros">
-                                    <span class="macro-field">
-                                        <input type="number" value={entry.calories}
-                                            onblur={(e: FocusEvent) => editInlineEntry(i, "calories", numberValueFromEvent(e))}
-                                            disabled={sending || deletingEntryIds.has(entry.id)} />
-                                        <span class="macro-label">cal</span>
-                                    </span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field">
-                                        <input type="number" value={entry.protein}
-                                            onblur={(e: FocusEvent) => editInlineEntry(i, "protein", numberValueFromEvent(e))}
-                                            disabled={sending || deletingEntryIds.has(entry.id)} />
-                                        <span class="macro-label">P</span>
-                                    </span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field">
-                                        <input type="number" value={entry.carbs}
-                                            onblur={(e: FocusEvent) => editInlineEntry(i, "carbs", numberValueFromEvent(e))}
-                                            disabled={sending || deletingEntryIds.has(entry.id)} />
-                                        <span class="macro-label">C</span>
-                                    </span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field">
-                                        <input type="number" value={entry.fat}
-                                            onblur={(e: FocusEvent) => editInlineEntry(i, "fat", numberValueFromEvent(e))}
-                                            disabled={sending || deletingEntryIds.has(entry.id)} />
-                                        <span class="macro-label">F</span>
-                                    </span>
-                                    <span class="macro-sep">·</span>
-                                    <span class="macro-field">
-                                        <input type="number" value={entry.fiber ?? 0}
-                                            onblur={(e: FocusEvent) => editInlineEntry(i, "fiber", numberValueFromEvent(e))}
-                                            disabled={sending || deletingEntryIds.has(entry.id)} />
-                                        <span class="macro-label">Fb</span>
-                                    </span>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-                {/if}
+        <input
+            bind:this={fileInputEl}
+            type="file"
+            accept="image/*"
+            multiple
+            class="file-input"
+            onchange={onFileSelected}
+        />
 
-                <!-- Skeleton (only when loading with no entries yet) -->
-                {#if sending && !hasEntries}
-                    <div class="skeleton-card">
-                        <div class="skeleton-entry">
-                            <div class="sk-line" style="width: 62%"></div>
-                            <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
-                        </div>
-                        <div class="skeleton-entry">
-                            <div class="sk-line" style="width: 45%"></div>
-                            <div class="sk-line" style="width: 80%; margin-top: 0.4rem; opacity: 0.6"></div>
-                        </div>
-                    </div>
-                {/if}
-
-                {#if clarifyingQuestion}
-                    <p class="clarifying">{clarifyingQuestion}</p>
-                {/if}
-            </div>
-
-            <input
-                bind:this={fileInputEl}
-                type="file"
-                accept="image/*"
-                multiple
-                class="file-input"
-                onchange={onFileSelected}
-            />
-
-            <!-- Bottom controls -->
-            {#if selectedMeal && (!sending || hasEntries)}
-                {#if pendingImages.length}
-                    <div class="thumb-strip">
-                        {#each pendingImages as img, i}
-                            <div class="thumb">
-                                <img src={img.previewUrl} alt="Photo {i + 1}" />
-                                <button
-                                    class="thumb-remove"
-                                    onclick={() => removeImage(i)}
-                                    aria-label="Remove photo">✕</button
-                                >
-                            </div>
-                        {/each}
-                        <button
-                            class="thumb-add"
-                            onclick={openFilePicker}
-                            aria-label="Add another photo"
-                        >
-                            <svg
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                ><line x1="12" y1="5" x2="12" y2="19" /><line
-                                    x1="5"
-                                    y1="12"
-                                    x2="19"
-                                    y2="12"
-                                /></svg
+        <div class="composer">
+            {#if pendingImages.length}
+                <div class="thumb-strip">
+                    {#each pendingImages as img, i}
+                        <div class="thumb">
+                            <img src={img.previewUrl} alt="Photo {i + 1}" />
+                            <button
+                                class="thumb-remove"
+                                onclick={() => removeImage(i)}
+                                aria-label="Remove photo">✕</button
                             >
-                        </button>
-                    </div>
-                {/if}
-                <div class="input-row">
+                        </div>
+                    {/each}
                     <button
-                        class="attach-btn"
+                        class="thumb-add"
                         onclick={openFilePicker}
-                        disabled={sending}
-                        aria-label="Attach photo"
+                        aria-label="Add another photo"
                     >
                         <svg
-                            width="20"
-                            height="20"
+                            width="18"
+                            height="18"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.75"
+                            stroke-width="2"
                             stroke-linecap="round"
                             stroke-linejoin="round"
-                            ><path
-                                d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
-                            /><circle cx="12" cy="13" r="4" /></svg
+                            ><line x1="12" y1="5" x2="12" y2="19" /><line
+                                x1="5"
+                                y1="12"
+                                x2="19"
+                                y2="12"
+                            /></svg
                         >
                     </button>
-                    <textarea
-                        class="text-entry composer-input"
-                        bind:this={inputEl}
-                        use:autosize
-                        bind:value={input}
-                        onkeydown={onKeyDown}
-                        placeholder={hasEntries ? "Add more, or “fix” to correct…" : "What did you eat?"}
-                        rows="1"
-                        disabled={sending}
-                    ></textarea>
                 </div>
-                {#if hasEntries}
-                    <div class="action-row">
-                        <button
-                            class="fix-btn"
-                            onclick={sendEdit}
-                            disabled={sending || !input.trim() || pendingImages.length > 0}
-                            title="Apply edit to existing entries (e.g. ‘actually 2 tortillas’)"
-                            >Fix</button
-                        >
-                        <button
-                            class="add-btn"
-                            onclick={send}
-                            disabled={sending ||
-                                (!input.trim() && !pendingImages.length)}
-                            >Add</button
-                        >
-                    </div>
-                {:else}
-                    <div class="action-row">
-                        <button
-                            class="add-btn"
-                            onclick={send}
-                            disabled={sending ||
-                                (!input.trim() && !pendingImages.length)}
-                            >Send</button
-                        >
-                    </div>
-                {/if}
             {/if}
-        {:else if tab === "activity"}
-            <ChatDrawerActivityForm
-                active={open && tab === "activity"}
-                {initialField}
-                bind:activityText
-                bind:feelingNotes
-                bind:poop
-                bind:poopNotes
-                bind:hydration
-            />
-        {:else}
-            <CoachChat active={open && tab === "coach"} date={selectedDate} />
+            <div class="input-row">
+                <button
+                    class="attach-btn"
+                    onclick={openFilePicker}
+                    disabled={sending}
+                    aria-label="Attach photo"
+                >
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        ><path
+                            d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+                        /><circle cx="12" cy="13" r="4" /></svg
+                    >
+                </button>
+                <textarea
+                    class="text-entry composer-input"
+                    bind:this={inputEl}
+                    use:autosize
+                    bind:value={input}
+                    onkeydown={onKeyDown}
+                    placeholder={entries.length
+                        ? "Tweak this meal, or add more…"
+                        : "What did you eat?"}
+                    rows="1"
+                    disabled={sending}
+                ></textarea>
+                <button
+                    class="send-btn"
+                    onclick={send}
+                    disabled={sending ||
+                        (!input.trim() && !pendingImages.length)}
+                    >Send</button
+                >
+            </div>
+        </div>
         {/if}
     </div>
 {/if}
@@ -918,8 +897,8 @@
         display: flex;
         flex-direction: column;
         width: min(100%, 640px);
-        height: min(78vh, 620px);
-        height: min(78dvh, 620px);
+        height: min(82vh, 720px);
+        height: min(82dvh, 720px);
         max-height: calc(100dvh - 0.5rem);
         padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
         transition: transform 0.2s ease;
@@ -956,63 +935,32 @@
         }
     }
 
-    /* --- Top header row (tabs + date + done) --- */
     .drawer-top {
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: 0.5rem;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
+        flex-wrap: wrap;
     }
 
-    .tabs {
+    .top-left {
         display: flex;
-        gap: 0.25rem;
-        flex-shrink: 1;
+        align-items: center;
+        gap: 0.35rem;
+        flex-wrap: wrap;
         min-width: 0;
     }
 
-    .tab-btn {
-        background: none;
-        border: none;
-        border-radius: var(--r-pill);
-        padding: 0.4rem 0.9rem;
-        font-size: var(--t-body-sm);
-        font-weight: 500;
-        color: var(--mute);
-        cursor: pointer;
-        font-family: inherit;
-        min-height: 2.75rem;
-    }
-
-    @media (max-width: 480px) {
-        .drawer {
-            padding-left: 1rem;
-            padding-right: 1rem;
-        }
-        .tabs {
-            gap: 0.1rem;
-        }
-        .tab-btn {
-            padding: 0.4rem 0.55rem;
-            font-size: var(--t-meta);
-        }
-        .top-right {
-            gap: 0.35rem;
-        }
-        .done-btn {
-            padding: 0.35rem 0.65rem;
-            font-size: var(--t-meta);
-        }
-        .date-input {
-            padding: 0.3rem 0.4rem;
-            font-size: 0.7rem;
-        }
-    }
-
-    .tab-btn.active {
-        background: var(--paper-4);
+    .meal-tag {
+        font-size: 0.7rem;
+        text-transform: capitalize;
+        background: var(--paper-3);
         color: var(--ink);
+        padding: 0.2rem 0.55rem;
+        border-radius: var(--r-pill);
+        font-weight: 500;
+        letter-spacing: 0.02em;
     }
 
     .top-right {
@@ -1035,18 +983,17 @@
         white-space: nowrap;
     }
 
+    .done-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
     @media (hover: hover) {
         .done-btn:not(:disabled):hover {
             background: var(--ink);
         }
     }
 
-    .done-btn:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
-
-    /* --- Date input --- */
     .date-input {
         border: 1px solid var(--rule-4);
         border-radius: var(--r-sm);
@@ -1063,156 +1010,276 @@
         border-color: var(--ink-2);
     }
 
-    @keyframes shake {
-        0%,
-        100% {
-            transform: translateX(0);
+    @media (max-width: 480px) {
+        .drawer {
+            padding-left: 1rem;
+            padding-right: 1rem;
         }
-        20% {
-            transform: translateX(-6px);
+        .done-btn {
+            padding: 0.35rem 0.65rem;
+            font-size: var(--t-meta);
         }
-        40% {
-            transform: translateX(6px);
-        }
-        60% {
-            transform: translateX(-4px);
-        }
-        80% {
-            transform: translateX(4px);
+        .date-input {
+            padding: 0.3rem 0.4rem;
+            font-size: 0.7rem;
         }
     }
 
-    .meal-pills-wrap.shake {
-        animation: shake 0.5s ease;
+    /* --- Mode picker --- */
+    .mode-picker {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2rem 0.5rem;
+        flex: 1;
+        justify-content: center;
     }
 
-    /* --- Meal pills --- */
-    .meal-pills-wrap {
-        margin-bottom: 0.75rem;
+    .mode-prompt {
+        font-size: var(--t-body);
+        color: var(--mute);
+        margin: 0;
     }
 
-    .meal-pills {
+    .mode-bubbles {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .mode-bubble {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-md);
+        padding: 1.1rem 1.4rem;
+        cursor: pointer;
+        font-family: inherit;
+        color: var(--ink);
+        min-width: 9rem;
+        transition: border-color 0.12s, background 0.12s, transform 0.08s;
+        touch-action: manipulation;
+    }
+
+    .mode-bubble:active {
+        transform: scale(0.98);
+    }
+
+    @media (hover: hover) {
+        .mode-bubble:hover {
+            border-color: var(--ink-2);
+            background: var(--paper-2);
+        }
+    }
+
+    .mode-bubble-emoji {
+        font-size: 1.75rem;
+        line-height: 1;
+    }
+
+    .mode-bubble-label {
+        font-size: var(--t-body-sm);
+        font-weight: 600;
+    }
+
+    .mode-bubble-hint {
+        font-size: var(--t-meta);
+        color: var(--mute-2);
+    }
+
+    /* --- Event form --- */
+    .event-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 0.5rem 0 0.25rem;
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .kind-bubbles {
         display: flex;
         gap: 0.4rem;
         flex-wrap: wrap;
     }
 
-    .meal-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.3rem;
+    .kind-bubble {
         background: none;
         border: 1px solid var(--rule-3);
         border-radius: var(--r-pill);
         color: var(--mute);
-        font-family: inherit;
-        font-size: 0.72rem;
-        letter-spacing: 0.02em;
-        padding: 0.2rem 0.6rem;
+        font-size: var(--t-body-sm);
+        padding: 0.4rem 0.85rem;
         cursor: pointer;
-        text-transform: capitalize;
+        font-family: inherit;
         font-weight: 500;
-        min-height: 0;
-        white-space: nowrap;
+        touch-action: manipulation;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
     }
 
-    .meal-toggle-arrow {
-        color: var(--mute-3);
-        font-size: 0.7rem;
-    }
-
-    .meal-pills-wrap.collapsed .meal-pills {
-        display: none;
-    }
-    .meal-pills-wrap.collapsed .meal-toggle {
+    .kind-bubble.active {
         border-color: var(--ink-2);
         color: var(--ink-2);
         background: var(--paper-2);
     }
-    .meal-pills-wrap:not(.collapsed) .meal-toggle {
-        margin-bottom: 0.4rem;
-    }
-
-    .meal-pill {
-        padding: 0.2rem 0.6rem;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        background: none;
-        font-family: inherit;
-        font-size: 0.72rem;
-        letter-spacing: 0.02em;
-        color: var(--ink-mute);
-        cursor: pointer;
-        white-space: nowrap;
-        touch-action: manipulation;
-        font-weight: 500;
-        min-height: 0;
-    }
 
     @media (hover: hover) {
-        .meal-pill:hover:not(:disabled) {
+        .kind-bubble:hover {
             border-color: var(--ink-2);
             color: var(--ink-2);
         }
     }
 
-    .meal-pill.selected {
-        background: var(--ink-2);
-        border-color: var(--ink-2);
-        color: var(--paper);
+    .event-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
     }
 
-    /* --- Content area --- */
-    .content-area {
+    .field-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .field-row.stacked {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+    }
+
+    .field-label {
+        font-size: var(--t-meta);
+        color: var(--mute);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+        min-width: 5.5rem;
+    }
+
+    .field-row input[type="time"],
+    .field-row input[type="number"] {
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.45rem 0.65rem;
+        font-family: inherit;
+        font-size: var(--t-body-sm);
+        color: var(--ink);
+        background: var(--paper);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .field-row input[type="number"] {
+        width: 6rem;
+    }
+
+    .field-row textarea {
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.5rem 0.65rem;
+        font-family: inherit;
+        font-size: var(--t-body-sm);
+        background: var(--paper);
+        color: var(--ink);
+        resize: vertical;
+    }
+
+    .quick-pills {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        margin-left: 5.5rem;
+    }
+
+    .quick-pill {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: var(--t-meta);
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+        font-family: inherit;
+        touch-action: manipulation;
+    }
+
+    @media (hover: hover) {
+        .quick-pill:hover {
+            border-color: var(--ink-2);
+            color: var(--ink-2);
+        }
+    }
+
+    .slider-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
         flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        margin-bottom: 0.75rem;
-        padding: 0.25rem 0;
     }
 
-    /* --- Skeleton --- */
-    @keyframes shimmer {
-        0% {
-            background-position: -200% 0;
+    .slider-wrap input[type="range"] {
+        flex: 1;
+    }
+
+    .slider-val {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        color: var(--ink);
+        min-width: 1.5rem;
+        text-align: right;
+    }
+
+    .event-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 0.5rem;
+    }
+
+    .event-save {
+        background: var(--ink-2);
+        color: var(--paper);
+        border: none;
+        border-radius: var(--r-sm);
+        padding: 0.55rem 1.4rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.5rem;
+    }
+
+    .event-save:disabled {
+        opacity: 0.45;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .event-save:not(:disabled):hover {
+            background: var(--ink);
         }
-        100% {
-            background-position: 200% 0;
+    }
+
+    @media (max-width: 480px) {
+        .field-label {
+            min-width: 4.5rem;
+            font-size: 0.65rem;
+        }
+        .quick-pills {
+            margin-left: 4.5rem;
         }
     }
 
-    /* Hairline ledger: no surrounding box */
-    .skeleton-card {
-        border-top: 1px solid var(--rule);
-        border-bottom: 1px solid var(--rule);
-    }
-
-    .skeleton-entry {
-        padding: 0.75rem 0;
-        border-bottom: 1px solid var(--rule);
-    }
-
-    .skeleton-entry:last-child {
-        border-bottom: none;
-    }
-
-    .sk-line {
-        height: 12px;
-        border-radius: 6px;
-        background: linear-gradient(
-            90deg,
-            var(--rule-2) 25%,
-            var(--paper-2) 50%,
-            var(--rule-2) 75%
-        );
-        background-size: 200% 100%;
-        animation: shimmer 1.4s ease-in-out infinite;
-    }
-
-    /* --- Result ledger (hairlines, not boxes) --- */
+    /* --- Result ledger --- */
     .result-card {
         border-top: 1px solid var(--rule);
         border-bottom: 1px solid var(--rule);
+        margin-bottom: 0.5rem;
         transition: opacity 0.15s;
     }
 
@@ -1221,7 +1288,7 @@
     }
 
     .card-entry {
-        padding: 0.65rem 0;
+        padding: 0.55rem 0;
         border-bottom: 1px solid var(--rule);
         display: flex;
         flex-direction: column;
@@ -1234,6 +1301,13 @@
 
     .card-entry:last-child {
         border-bottom: none;
+    }
+
+    .card-entry-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 0.5rem;
     }
 
     .card-desc {
@@ -1299,44 +1373,191 @@
         margin: 0 0.1rem;
     }
 
-    /* --- Action row (Fix / Add) --- */
-    .action-row {
-        display: flex;
-        gap: 0.5rem;
-        margin-top: 0.5rem;
+    .entry-delete {
+        background: none;
+        border: none;
+        color: var(--mute-4);
+        font-size: 0.75rem;
+        cursor: pointer;
+        padding: 0.1rem 0.2rem;
+        line-height: 1;
+        flex-shrink: 0;
+        min-width: 0;
+        min-height: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.25rem;
+        height: 1.25rem;
     }
 
-    .action-row > button {
+    .entry-delete.deleting {
+        opacity: 1;
+        cursor: default;
+    }
+
+    .entry-spinner {
+        width: 0.75rem;
+        height: 0.75rem;
+        border: 1.5px solid var(--rule-3);
+        border-top-color: var(--ink-2);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @media (hover: hover) {
+        .entry-delete:hover {
+            color: var(--danger, #c00);
+        }
+    }
+
+    /* --- Messages --- */
+    .messages {
         flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
+        margin-bottom: 0.5rem;
     }
 
-    /* --- Clarifying question --- */
-    .clarifying {
-        font-size: var(--t-body-sm);
-        color: var(--ink-mute);
-        margin: 0 0 0.75rem;
-        line-height: 1.45;
-        padding: 0.6rem 0.75rem;
-        background: var(--paper-3);
+    .empty {
+        font-size: var(--t-meta);
+        color: var(--mute-2);
+        text-align: center;
+        margin: 1rem 0;
+        line-height: 1.5;
+    }
+
+    .msg {
+        display: flex;
+        max-width: 100%;
+    }
+
+    .msg.user {
+        justify-content: flex-end;
+    }
+
+    .msg.model {
+        justify-content: flex-start;
+    }
+
+    .msg.action {
+        justify-content: center;
+    }
+
+    .bubble {
+        max-width: 85%;
+        padding: 0.55rem 0.8rem;
         border-radius: var(--r-md);
+        font-size: var(--t-body-sm);
+        line-height: 1.5;
+        white-space: pre-line;
+        overflow-wrap: break-word;
+        word-break: break-word;
+    }
+
+    .msg.user .bubble {
+        background: var(--ink-2);
+        color: var(--paper);
+        border-bottom-right-radius: var(--r-sm);
+    }
+
+    .msg.model .bubble {
+        background: var(--paper-2);
+        color: var(--ink);
+        border-bottom-left-radius: var(--r-sm);
+    }
+
+    .bubble :global(strong) {
+        font-weight: 600;
+    }
+
+    .msg-thumbs {
+        display: flex;
+        gap: 0.3rem;
+        margin-bottom: 0.3rem;
+        flex-wrap: wrap;
+    }
+
+    .msg-thumb {
+        width: 60px;
+        height: 60px;
+        border-radius: var(--r-sm);
+        object-fit: cover;
+        display: block;
+    }
+
+    .msg-text {
+        white-space: pre-line;
+    }
+
+    .action-bubble {
+        font-size: var(--t-meta);
+        color: var(--mute);
+        background: var(--paper-3);
+        padding: 0.3rem 0.7rem;
+        border-radius: var(--r-pill);
+        font-style: italic;
+    }
+
+    .typing {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+    }
+
+    .typing span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--mute-3);
+        animation: bounce 1.2s infinite ease-in-out;
+    }
+
+    .typing span:nth-child(2) {
+        animation-delay: 0.15s;
+    }
+
+    .typing span:nth-child(3) {
+        animation-delay: 0.3s;
+    }
+
+    @keyframes bounce {
+        0%,
+        80%,
+        100% {
+            transform: translateY(0);
+            opacity: 0.5;
+        }
+        40% {
+            transform: translateY(-4px);
+            opacity: 1;
+        }
+    }
+
+    /* --- Composer --- */
+    .composer {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
 
     .file-input {
         display: none;
     }
 
-    button:focus-visible,
-    input:focus-visible,
-    textarea:focus-visible {
-        outline: 2px solid var(--ink-2);
-        outline-offset: 2px;
-    }
-
-    /* --- Thumbnail strip --- */
     .thumb-strip {
         display: flex;
         gap: 0.5rem;
-        margin-bottom: 0.5rem;
         overflow-x: auto;
         padding: 2px 0;
     }
@@ -1399,7 +1620,6 @@
         }
     }
 
-    /* --- Input row --- */
     .input-row {
         display: flex;
         gap: 0.5rem;
@@ -1432,6 +1652,7 @@
             color: var(--ink-2);
         }
     }
+
     .attach-btn:disabled {
         opacity: 0.35;
         cursor: default;
@@ -1454,7 +1675,7 @@
         border-color: var(--ink-2);
     }
 
-    button {
+    .send-btn {
         padding: 0.6rem 1rem;
         background: var(--ink-2);
         color: var(--paper);
@@ -1467,225 +1688,15 @@
         min-height: 2.75rem;
     }
 
-    button:disabled {
+    .send-btn:disabled {
         opacity: 0.35;
         cursor: default;
     }
 
-    .fix-btn {
-        background: none;
-        color: var(--ink-2);
-        border: 1px solid var(--rule-4);
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+        outline: 2px solid var(--ink-2);
+        outline-offset: 2px;
     }
-
-    @media (hover: hover) {
-        .fix-btn:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            background: var(--paper-2);
-        }
-    }
-
-    /* --- Action pills --- */
-    .action-pills {
-        display: flex;
-        gap: 0.4rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .action-pill {
-        background: none;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        color: var(--mute);
-        font-size: 0.72rem;
-        padding: 0.2rem 0.65rem;
-        cursor: pointer;
-        touch-action: manipulation;
-        font-family: inherit;
-        font-weight: 500;
-        letter-spacing: 0.02em;
-        white-space: nowrap;
-        min-height: 0;
-        min-width: 0;
-        transition:
-            border-color 0.12s,
-            color 0.12s,
-            background 0.12s;
-    }
-
-    .action-pill.active {
-        border-color: var(--ink-2);
-        color: var(--ink-2);
-        background: var(--paper-2);
-    }
-
-    @media (hover: hover) {
-        .action-pill:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .action-panel {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-        margin-bottom: 0.5rem;
-    }
-
-    .action-panel.fav-panel {
-        flex-direction: column;
-    }
-
-    .action-panel--equal .scale-pill {
-        flex: 1 1 0;
-        text-align: center;
-    }
-
-    .scale-pill {
-        background: none;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        padding: 0.2rem 0.65rem;
-        font-size: 0.72rem;
-        letter-spacing: 0.02em;
-        color: var(--mute);
-        cursor: pointer;
-        font-family: inherit;
-        font-weight: 500;
-        touch-action: manipulation;
-        min-height: 0;
-        white-space: nowrap;
-    }
-
-    @media (hover: hover) {
-        .scale-pill:hover:not(:disabled) {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .scale-pill:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
-
-    .card-entry-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 0.5rem;
-    }
-
-    .entry-delete {
-        background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 0.75rem;
-        cursor: pointer;
-        padding: 0.1rem 0.2rem;
-        line-height: 1;
-        flex-shrink: 0;
-        min-width: 0;
-        min-height: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.25rem;
-        height: 1.25rem;
-    }
-
-    .entry-delete.deleting {
-        opacity: 1;
-        cursor: default;
-    }
-
-    .entry-spinner {
-        width: 0.75rem;
-        height: 0.75rem;
-        border: 1.5px solid var(--rule-3);
-        border-top-color: var(--ink-2);
-        border-radius: 50%;
-        animation: spin 0.7s linear infinite;
-    }
-
-    @keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-
-    @media (hover: hover) {
-        .entry-delete:hover {
-            color: var(--danger, #c00);
-        }
-    }
-
-    .fav-search {
-        width: 100%;
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        padding: 0.4rem 0.6rem;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        background: var(--paper);
-        color: var(--ink);
-        margin-bottom: 0.35rem;
-    }
-
-    .fav-search:focus {
-        outline: none;
-        border-color: var(--ink-2);
-    }
-
-    .fav-list {
-        max-height: 140px;
-        overflow-y: auto;
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-    }
-
-    .fav-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-        background: none;
-        border: none;
-        border-bottom: 1px solid var(--rule);
-        padding: 0.45rem 0.6rem;
-        font-family: inherit;
-        font-size: var(--t-meta);
-        color: var(--ink);
-        cursor: pointer;
-        text-align: left;
-    }
-
-    .fav-item:last-child {
-        border-bottom: none;
-    }
-
-    @media (hover: hover) {
-        .fav-item:hover {
-            background: var(--paper-4);
-        }
-    }
-
-    .fav-desc {
-        font-weight: 500;
-    }
-
-    .fav-cal {
-        color: var(--mute-2);
-        font-size: 0.72rem;
-        flex-shrink: 0;
-        margin-left: 0.5rem;
-    }
-
-    .fav-empty {
-        display: block;
-        padding: 0.6rem;
-        font-size: var(--t-meta);
-        color: var(--mute-2);
-        text-align: center;
-    }
-
 </style>

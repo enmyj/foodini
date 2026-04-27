@@ -102,7 +102,7 @@ func TestWriteAPIErrInsufficientScopesFromDetails(t *testing.T) {
 	h.writeAPIErr(c, &googleapi.Error{
 		Code:    http.StatusForbidden,
 		Message: "Permission denied",
-		Details: []interface{}{
+		Details: []any{
 			map[string]any{
 				"@type":  "type.googleapis.com/google.rpc.ErrorInfo",
 				"reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT",

@@ -31,7 +31,8 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	blCfg := middleware.BodyLimitConfig{
 		LimitBytes: defaultBodyLimit,
 		Skipper: func(c *echo.Context) bool {
-			return c.Request().URL.Path == "/api/chat"
+			p := c.Request().URL.Path
+			return p == "/api/chat" || p == "/api/agent"
 		},
 	}
 	blMw, _ := blCfg.ToMiddleware()
@@ -99,16 +100,21 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
 
 	apiGroup.GET("/log", apiHandler.GetLog)
-	apiGroup.GET("/activity", apiHandler.GetActivity)
-	apiGroup.PUT("/activity", apiHandler.PutActivity)
+	apiGroup.GET("/events", apiHandler.GetEvents)
+	apiGroup.POST("/events", apiHandler.PostEvent)
+	apiGroup.PATCH("/events/:id", apiHandler.PatchEvent)
+	apiGroup.DELETE("/events/:id", apiHandler.DeleteEvent)
 	apiGroup.POST("/chat", apiHandler.Chat, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
 	apiGroup.POST("/chat/edit", apiHandler.EditChat)
+	apiGroup.POST("/agent", apiHandler.Agent, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/coach/chat", apiHandler.CoachChat)
 	apiGroup.GET("/insights", apiHandler.GetStoredInsights)
 	apiGroup.POST("/insights", apiHandler.Insights)
 	apiGroup.GET("/insights/day", apiHandler.GetStoredDayInsights)
 	apiGroup.POST("/insights/day", apiHandler.DayInsights)
+	apiGroup.GET("/insights/snapshots", apiHandler.GetInsightSnapshots)
+	apiGroup.GET("/insights/by-trigger", apiHandler.GetInsightByTrigger)
 	apiGroup.GET("/suggestions/day", apiHandler.GetStoredDaySuggestions)
 	apiGroup.POST("/suggestions/day", apiHandler.DaySuggestions)
 	apiGroup.GET("/suggestions/meal", apiHandler.GetStoredMealSuggestion)

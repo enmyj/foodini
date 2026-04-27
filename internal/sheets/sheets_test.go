@@ -34,7 +34,7 @@ func TestFoodEntryToRow(t *testing.T) {
 }
 
 func TestFoodEntryFromRow(t *testing.T) {
-	row := []interface{}{"abc-123", "2026-03-05", "08:30", "breakfast", "oatmeal", "300", "8", "54", "9"}
+	row := []any{"abc-123", "2026-03-05", "08:30", "breakfast", "oatmeal", "300", "8", "54", "9"}
 	e, err := sheets.FoodEntryFromRow(row)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestFoodEntryFromRow(t *testing.T) {
 }
 
 func TestFoodEntryFromRow_TooShort(t *testing.T) {
-	_, err := sheets.FoodEntryFromRow([]interface{}{"only", "three", "cols"})
+	_, err := sheets.FoodEntryFromRow([]any{"only", "three", "cols"})
 	if err == nil {
 		t.Error("expected error for short row")
 	}
@@ -72,7 +72,7 @@ func TestTimeString(t *testing.T) {
 }
 
 func TestDayLogFromRow_Full(t *testing.T) {
-	row := []interface{}{"2026-03-06", "ran 5k", "7", "felt good"}
+	row := []any{"2026-03-06", "ran 5k", "7", "felt good"}
 	d := sheets.DayLogFromRow(row)
 	if d.Date != "2026-03-06" {
 		t.Errorf("Date: got %q", d.Date)
@@ -89,7 +89,7 @@ func TestDayLogFromRow_Full(t *testing.T) {
 }
 
 func TestDayLogFromRow_LegacyTwoColumn(t *testing.T) {
-	row := []interface{}{"2026-03-06", "old activity notes"}
+	row := []any{"2026-03-06", "old activity notes"}
 	d := sheets.DayLogFromRow(row)
 	if d.Activity != "old activity notes" {
 		t.Errorf("Activity: got %q", d.Activity)
@@ -141,7 +141,7 @@ func TestFoodEntryFiber_ToRow(t *testing.T) {
 
 func TestFoodEntryFromRow_FiberBackwardCompat(t *testing.T) {
 	// 9-col row (no fiber column) → Fiber defaults to 0
-	row := []interface{}{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8"}
+	row := []any{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8"}
 	e, err := sheets.FoodEntryFromRow(row)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestFoodEntryFromRow_FiberBackwardCompat(t *testing.T) {
 }
 
 func TestFoodEntryFromRow_WithFiber(t *testing.T) {
-	row := []interface{}{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8", "4"}
+	row := []any{"id", "2026-03-07", "12:00", "lunch", "salad", "200", "5", "20", "8", "4"}
 	e, err := sheets.FoodEntryFromRow(row)
 	if err != nil {
 		t.Fatal(err)
@@ -170,8 +170,63 @@ func TestDeleteFood_NotFound(t *testing.T) {
 
 func TestGetSchemaVersion_ReturnsValue(t *testing.T) {
 	_ = sheets.CurrentSchemaVersion
-	if sheets.CurrentSchemaVersion != 9 {
-		t.Errorf("CurrentSchemaVersion: got %d, want 9", sheets.CurrentSchemaVersion)
+	if sheets.CurrentSchemaVersion != 12 {
+		t.Errorf("CurrentSchemaVersion: got %d, want 12", sheets.CurrentSchemaVersion)
+	}
+}
+
+func TestEventToRow_Workout(t *testing.T) {
+	e := sheets.Event{
+		ID: "evt-1", Date: "2026-04-25", Time: "07:30",
+		Kind: sheets.EventKindWorkout, Text: "ran 5k", Num: 30,
+	}
+	row := e.ToRow()
+	if len(row) != 7 {
+		t.Fatalf("want 7 cols, got %d", len(row))
+	}
+	if row[3] != sheets.EventKindWorkout {
+		t.Errorf("kind: got %v", row[3])
+	}
+	if row[4] != "ran 5k" {
+		t.Errorf("text: got %v", row[4])
+	}
+	if row[5] != "30" {
+		t.Errorf("num: got %v, want 30", row[5])
+	}
+}
+
+func TestEventFromRow_Water(t *testing.T) {
+	row := []any{"evt-2", "2026-04-25", "10:15", "water", "", "500", ""}
+	e, err := sheets.EventFromRow(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Kind != sheets.EventKindWater {
+		t.Errorf("kind: got %q", e.Kind)
+	}
+	if e.Num != 500 {
+		t.Errorf("num: got %v, want 500", e.Num)
+	}
+}
+
+func TestEventRoundTrip(t *testing.T) {
+	in := sheets.Event{
+		ID: "x", Date: "2026-04-25", Time: "12:00",
+		Kind: sheets.EventKindFeeling, Text: "tired", Num: 4, Notes: "post-lunch",
+	}
+	out, err := sheets.EventFromRow(in.ToRow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *out != in {
+		t.Errorf("round-trip mismatch: got %+v want %+v", *out, in)
+	}
+}
+
+func TestEventFromRow_TooShort(t *testing.T) {
+	_, err := sheets.EventFromRow([]any{"a", "b"})
+	if err == nil {
+		t.Error("expected error for short row")
 	}
 }
 
@@ -218,7 +273,7 @@ func TestUserProfileRoundTrip(t *testing.T) {
 }
 
 func TestUserProfileFromRow_BackwardCompatNoBirthYear(t *testing.T) {
-	row := []interface{}{"female", "165cm", "60kg", "notes", "maintain", "vegetarian"}
+	row := []any{"female", "165cm", "60kg", "notes", "maintain", "vegetarian"}
 	got := sheets.UserProfileFromRow(row)
 	if got.BirthYear != "" {
 		t.Errorf("birth_year: got %q, want empty", got.BirthYear)
@@ -229,7 +284,7 @@ func TestUserProfileFromRow_BackwardCompatNoBirthYear(t *testing.T) {
 }
 
 func TestDayLogFromRow_WithPoop(t *testing.T) {
-	row := []interface{}{"2026-03-07", "ran 5k", "8", "felt good", "true", "solid, once"}
+	row := []any{"2026-03-07", "ran 5k", "8", "felt good", "true", "solid, once"}
 	d := sheets.DayLogFromRow(row)
 	if !d.Poop {
 		t.Error("Poop: want true")
@@ -241,7 +296,7 @@ func TestDayLogFromRow_WithPoop(t *testing.T) {
 
 func TestDayLogFromRow_BackwardCompatNoPoop(t *testing.T) {
 	// 4-col row (old schema) — Poop defaults to false, PoopNotes to ""
-	row := []interface{}{"2026-03-07", "yoga", "7", "good"}
+	row := []any{"2026-03-07", "yoga", "7", "good"}
 	d := sheets.DayLogFromRow(row)
 	if d.Poop {
 		t.Error("Poop: want false for old-schema row")

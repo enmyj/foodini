@@ -1,12 +1,13 @@
 import type {
-    ActivityPayload,
-    ActivityResponse,
+    AgentResponse,
     ChatParseResponse,
     CoachChatResponse,
     CoachMessage,
     EntriesResponse,
     Entry,
     EntryInput,
+    LogEvent,
+    LogEventInput,
     Favorite,
     FavoritesResponse,
     InsightResponse,
@@ -128,6 +129,49 @@ export async function chat(
     if (date) body.date = date;
     if (meal) body.meal = meal;
     return apiFetchJson<ChatParseResponse>("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+}
+
+export async function agent(
+    message: string | null,
+    options: {
+        date?: string | null;
+        meal?: MealType | null;
+        time?: string | null;
+        currentEntries?: Entry[] | null;
+        images?: File[] | null;
+        reset?: boolean;
+    } = {},
+): Promise<AgentResponse> {
+    const { date = null, meal = null, time = null, currentEntries = null, images = null, reset = false } = options;
+    if (images?.length) {
+        const body = new FormData();
+        body.append("message", message ?? "");
+        if (date) body.append("date", date);
+        if (meal) body.append("meal", meal);
+        if (time) body.append("time", time);
+        if (reset) body.append("reset", "true");
+        if (currentEntries) body.append("current_entries", JSON.stringify(currentEntries));
+        for (const image of images) body.append("images", image);
+        return apiFetchJson<AgentResponse>("/api/agent", { method: "POST", body });
+    }
+    const body: {
+        message: string | null;
+        date?: string;
+        meal?: MealType;
+        time?: string;
+        current_entries?: Entry[];
+        reset?: boolean;
+    } = { message };
+    if (date) body.date = date;
+    if (meal) body.meal = meal;
+    if (time) body.time = time;
+    if (currentEntries) body.current_entries = currentEntries;
+    if (reset) body.reset = true;
+    return apiFetchJson<AgentResponse>("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -268,19 +312,31 @@ export async function deleteEntry(id: string): Promise<void> {
     await apiFetch(`/api/entries/${id}`, { method: "DELETE" });
 }
 
-export async function getActivity(date: string): Promise<ActivityResponse> {
-    return apiFetchJson<ActivityResponse>(`/api/activity?date=${date}`);
+export async function getEvents(date: string): Promise<LogEvent[]> {
+    return apiFetchJson<LogEvent[]>(`/api/events?date=${date}`);
 }
 
-export async function putActivity(
-    date: string,
-    payload: ActivityPayload,
-): Promise<ActivityResponse> {
-    return apiFetchJson<ActivityResponse>("/api/activity", {
-        method: "PUT",
+export async function addEvent(event: LogEventInput): Promise<LogEvent> {
+    return apiFetchJson<LogEvent>("/api/events", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, ...payload }),
+        body: JSON.stringify(event),
     });
+}
+
+export async function patchEvent(
+    id: string,
+    event: Partial<LogEvent>,
+): Promise<LogEvent> {
+    return apiFetchJson<LogEvent>(`/api/events/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+    });
+}
+
+export async function deleteEvent(id: string): Promise<void> {
+    await apiFetch(`/api/events/${id}`, { method: "DELETE" });
 }
 
 export async function fetchStoredDayInsight(
@@ -297,6 +353,27 @@ export async function generateDayInsights(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date }),
     });
+}
+
+export interface InsightSnapshot {
+    triggered_by: string;
+    generated_at: string;
+}
+
+export async function fetchInsightSnapshots(
+    date: string,
+): Promise<{ snapshots: InsightSnapshot[] }> {
+    return apiFetchJson<{ snapshots: InsightSnapshot[] }>(
+        `/api/insights/snapshots?date=${date}`,
+    );
+}
+
+export async function fetchInsightByTrigger(
+    id: string,
+): Promise<InsightResponse> {
+    return apiFetchJson<InsightResponse>(
+        `/api/insights/by-trigger?id=${encodeURIComponent(id)}`,
+    );
 }
 
 export async function fetchStoredInsight(

@@ -38,13 +38,13 @@ func (h *Handler) GetLog(c *echo.Context) error {
 		if err != nil {
 			return h.writeAPIErr(c, err)
 		}
-		dailyLogs, err := svc.GetActivityByDateRange(ctx, start, today)
+		events, err := svc.GetEventsByDateRange(ctx, start, today)
 		if err != nil {
 			return h.writeAPIErr(c, err)
 		}
 		data, _ := json.Marshal(map[string]any{
 			"entries":         entries,
-			"daily_logs":      dailyLogs,
+			"events":          events,
 			"start":           start,
 			"end":             today,
 			"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
@@ -68,13 +68,13 @@ func (h *Handler) GetLog(c *echo.Context) error {
 	if entries == nil {
 		entries = []sheets.FoodEntry{}
 	}
-	dayLog, err := svc.GetActivity(ctx, date)
+	events, err := svc.GetEventsByDate(ctx, date)
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
 	data, _ := json.Marshal(map[string]any{
 		"entries":         entries,
-		"day_log":         dayLog,
+		"events":          events,
 		"date":            date,
 		"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 	})

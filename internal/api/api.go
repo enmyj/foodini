@@ -121,7 +121,7 @@ func hasInsufficientScopesText(msg string) bool {
 	return strings.Contains(msg, "insufficient authentication scopes")
 }
 
-func hasInsufficientScopesDetails(details []interface{}) bool {
+func hasInsufficientScopesDetails(details []any) bool {
 	for _, detail := range details {
 		if detailHasInsufficientScopes(detail) {
 			return true
@@ -317,6 +317,9 @@ func (h *Handler) runMigrations(c *echo.Context, ts oauth2.TokenSource, spreadsh
 		{6, sheets.MigrateV6toV7},
 		{7, sheets.MigrateV7toV8},
 		{8, sheets.MigrateV8toV9},
+		{9, sheets.MigrateV9toV10},
+		{10, sheets.MigrateV10toV11},
+		{11, sheets.MigrateV11toV12},
 	}
 	for _, s := range steps {
 		if version == s.from {

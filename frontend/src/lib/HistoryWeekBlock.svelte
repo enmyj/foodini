@@ -38,7 +38,7 @@
                 >
             {/if}
         </div>
-        {#if week.weekTotal > 0 || week.days.some((day) => day.dayLog)}
+        {#if week.weekTotal > 0 || week.days.some((day) => day.events.length > 0)}
             <div class="week-btns">
                 <button
                     class="insights-btn"
@@ -85,7 +85,7 @@
                     {:else}
                         <span class="dc-empty">○</span>
                     {/if}
-                    {#if day.dayLog?.poop}
+                    {#if day.events.some((e) => e.kind === 'stool')}
                         <span class="dc-poop">💩</span>
                     {/if}
                 </span>

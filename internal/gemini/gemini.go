@@ -141,6 +141,9 @@ type Service struct {
 	clientOnce sync.Once
 	client     *genai.Client
 	clientErr  error
+
+	agentInit  sync.Once
+	agentStore *agentSessionStore
 }
 
 type cacheRecord struct {
