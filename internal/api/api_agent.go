@@ -145,6 +145,7 @@ func (h *Handler) Agent(c *echo.Context) error {
 
 	turn, err := h.gemini.AgentStart(ctx, agentSess, ac, req.Message, req.Images)
 	if err != nil {
+		h.gemini.ResetAgentSession(sessionKey)
 		return writeErr(c, http.StatusInternalServerError, "agent error: "+err.Error())
 	}
 
@@ -175,6 +176,7 @@ func (h *Handler) Agent(c *echo.Context) error {
 		}
 		next, err := h.gemini.AgentContinue(ctx, agentSess, results, turn.ToolCalls)
 		if err != nil {
+			h.gemini.ResetAgentSession(sessionKey)
 			return writeErr(c, http.StatusInternalServerError, "agent error: "+err.Error())
 		}
 		turn = next
