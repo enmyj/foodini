@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { addEvent, agent, deleteEntry, patchEntry } from "./api.ts";
+    import { addEvent, agent, deleteEntry, deleteEvent, patchEntry, patchEvent } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
@@ -41,6 +41,7 @@
         meal = null,
         editEntries = null,
         editMealType = null,
+        editEvent = null,
         initialMode = null,
     }: {
         open: boolean;
@@ -54,6 +55,7 @@
         meal?: MealType | null;
         editEntries?: Entry[] | null;
         editMealType?: MealType | null;
+        editEvent?: LogEvent | null;
         initialMode?: DrawerMode | null;
     } = $props();
 
@@ -64,6 +66,7 @@
     let eventWaterMl = $state(250);
     let eventFeelingScore = $state(7);
     let eventSaving = $state(false);
+    let eventDeleting = $state(false);
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
         workout: "Activity",
@@ -83,6 +86,44 @@
         eventWaterMl = 250;
         eventFeelingScore = 7;
         eventSaving = false;
+        eventDeleting = false;
+    }
+
+    async function onEntryTimeBlur() {
+        const newTime = entryTime;
+        if (!newTime || !entries.length || mode !== "meal") return;
+        const needsUpdate = entries.some((e) => (e.time ?? "") !== newTime);
+        if (!needsUpdate) return;
+        try {
+            const updated = await Promise.all(
+                entries.map((e) =>
+                    (e.time ?? "") === newTime
+                        ? Promise.resolve(e)
+                        : patchEntryMutation.mutateAsync({
+                              id: e.id,
+                              entry: { ...e, time: newTime },
+                          }),
+                ),
+            );
+            entries = updated;
+            if (onEntriesEdited) onEntriesEdited(updated, mealType);
+        } catch (err) {
+            showError(err, "Failed to update time.");
+        }
+    }
+
+    async function deleteEditingEvent() {
+        if (!editEvent || eventDeleting || eventSaving) return;
+        eventDeleting = true;
+        try {
+            await deleteEvent(editEvent.id);
+            if (onEventChanged) onEventChanged({ deletedId: editEvent.id });
+            onClose();
+        } catch (err) {
+            showError(err, "Failed to delete event.");
+        } finally {
+            eventDeleting = false;
+        }
     }
 
     function selectEventKind(kind: EventKind) {
@@ -112,8 +153,20 @@
         }
         eventSaving = true;
         try {
-            const saved = await addEvent(payload);
-            if (onEventChanged) onEventChanged({ added: saved });
+            if (editEvent) {
+                const patch: Partial<LogEvent> = {
+                    date: payload.date,
+                    time: payload.time,
+                    kind: payload.kind,
+                    text: payload.text ?? "",
+                };
+                if (payload.num !== undefined) patch.num = payload.num;
+                const updated = await patchEvent(editEvent.id, patch);
+                if (onEventChanged) onEventChanged({ updated });
+            } else {
+                const saved = await addEvent(payload);
+                if (onEventChanged) onEventChanged({ added: saved });
+            }
             onClose();
         } catch (err) {
             showError(err, "Failed to save event.");
@@ -193,11 +246,21 @@
                 clearPendingImages();
                 firstSend = true;
                 deletingEntryIds = new Set();
-                if (editEntries || meal) mode = "meal";
+                if (editEvent) mode = "event";
+                else if (editEntries || meal) mode = "meal";
                 else if (initialMode) mode = initialMode;
                 else mode = null;
                 resetEventForm();
-                entryTime = editEntries?.[0]?.time || nowHHMM();
+                if (editEvent) {
+                    eventKind = editEvent.kind;
+                    eventText = editEvent.text ?? "";
+                    if (editEvent.kind === "water") {
+                        eventWaterMl = Math.max(0, Math.round(editEvent.num ?? 250));
+                    } else if (editEvent.kind === "feeling") {
+                        eventFeelingScore = Math.max(1, Math.min(10, Math.round(editEvent.num ?? 7)));
+                    }
+                }
+                entryTime = editEvent?.time || editEntries?.[0]?.time || nowHHMM();
                 if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
             } else {
                 selectedDate = "";
@@ -526,7 +589,9 @@
                 <input
                     class="date-input time-input"
                     type="time"
+                    lang="en-GB"
                     bind:value={entryTime}
+                    onblur={onEntryTimeBlur}
                     title="Time"
                 />
                 {#if mealType}
@@ -601,7 +666,12 @@
                             </label>
                         {/if}
                         <div class="event-actions">
-                            <button class="event-save" onclick={saveEvent} disabled={eventSaving}>
+                            {#if editEvent}
+                                <button class="event-delete" onclick={deleteEditingEvent} disabled={eventSaving || eventDeleting}>
+                                    {eventDeleting ? "Deleting…" : "Delete"}
+                                </button>
+                            {/if}
+                            <button class="event-save" onclick={saveEvent} disabled={eventSaving || eventDeleting}>
                                 {eventSaving ? "Saving…" : "Save"}
                             </button>
                         </div>
@@ -1184,7 +1254,6 @@
         display: flex;
         gap: 0.35rem;
         flex-wrap: wrap;
-        margin-left: 5.5rem;
     }
 
     .quick-pill {
@@ -1227,8 +1296,38 @@
 
     .event-actions {
         display: flex;
-        justify-content: flex-end;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
         margin-top: 0.5rem;
+    }
+
+    .event-actions :only-child {
+        margin-left: auto;
+    }
+
+    .event-delete {
+        background: none;
+        color: var(--danger, #c00);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.55rem 1rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.5rem;
+    }
+
+    .event-delete:disabled {
+        opacity: 0.45;
+        cursor: default;
+    }
+
+    @media (hover: hover) {
+        .event-delete:not(:disabled):hover {
+            border-color: var(--danger, #c00);
+        }
     }
 
     .event-save {
@@ -1259,9 +1358,6 @@
         .field-label {
             min-width: 4.5rem;
             font-size: 0.65rem;
-        }
-        .quick-pills {
-            margin-left: 4.5rem;
         }
     }
 

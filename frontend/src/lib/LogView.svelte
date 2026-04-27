@@ -58,6 +58,7 @@
     let drawerMeal = $state<MealType | null>(null);
     let drawerEditEntries = $state<Entry[] | null>(null);
     let drawerEditMealType = $state<MealType | null>(null);
+    let drawerEditEvent = $state<LogEvent | null>(null);
     let drawerInitialMode = $state<"meal" | "event" | null>(null);
     let dateInputEl = $state<HTMLInputElement | null>(null);
     let coachPrefill = $state("");
@@ -492,6 +493,16 @@
         drawerOpen = true;
     }
 
+    function openEditEventDrawer(ev: LogEvent) {
+        drawerEditEvent = ev;
+        drawerDate = ev.date || currentDate;
+        drawerMeal = null;
+        drawerEditEntries = null;
+        drawerEditMealType = null;
+        drawerInitialMode = "event";
+        drawerOpen = true;
+    }
+
     function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | null = null) {
         const mealType =
             editedMealType ??
@@ -544,6 +555,7 @@
         drawerMeal = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
+        drawerEditEvent = null;
         drawerInitialMode = null;
         if (dayInsightStale && view === "day") {
             dayInsightStale = false;
@@ -1025,6 +1037,7 @@
                         <input
                             type="time"
                             class="meal-time-input"
+                            lang="en-GB"
                             title="Tap to retime this meal"
                             value={item.time !== "99:99" ? item.time : ""}
                             onblur={(e) => {
@@ -1112,6 +1125,7 @@
                                     drawerDate = currentDate;
                                     drawerEditEntries = null;
                                     drawerEditMealType = null;
+                                    drawerEditEvent = null;
                                     drawerInitialMode = "meal";
                                     drawerOpen = true;
                                 }}>+ add item</button
@@ -1127,6 +1141,7 @@
                         <input
                             type="time"
                             class="meal-time-input tl-event-time"
+                            lang="en-GB"
                             title="Tap to retime"
                             value={ev.time ?? ""}
                             onblur={(e) => {
@@ -1137,10 +1152,9 @@
                         <span class="event-name">{EVENT_KIND_LABELS[ev.kind]}</span>
                         <span class="tl-event-text">{describeEvent(ev)}</span>
                         <button
-                            class="tl-event-del"
-                            onclick={() => handleDeleteEvent(ev)}
-                            aria-label="Delete event"
-                            title="Delete">×</button
+                            class="meal-action-btn"
+                            onclick={() => openEditEventDrawer(ev)}
+                            >Edit</button
                         >
                     </div>
                 </section>
@@ -1200,6 +1214,7 @@
         drawerMeal = null;
         drawerEditEntries = null;
         drawerEditMealType = null;
+        drawerEditEvent = null;
         drawerInitialMode = null;
         drawerOpen = true;
     }}
@@ -1232,6 +1247,7 @@
     meal={drawerMeal}
     editEntries={drawerEditEntries}
     editMealType={drawerEditMealType}
+    editEvent={drawerEditEvent}
     initialMode={drawerInitialMode}
 />
 
@@ -1572,23 +1588,6 @@ section {
         color: var(--ink);
         flex: 1;
         min-width: 0;
-    }
-
-    .tl-event-del {
-        background: none;
-        border: none;
-        color: var(--mute-4);
-        font-size: 1.1rem;
-        cursor: pointer;
-        padding: 0 0.4rem;
-        line-height: 1;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .tl-event-del:hover {
-            color: var(--mute);
-        }
     }
 
     .tl-row {
