@@ -1630,8 +1630,9 @@ section {
         padding: 0.15rem 0.5rem;
         cursor: pointer;
         touch-action: manipulation;
-        width: auto;
-        min-width: 0;
+        width: 3.2rem;
+        min-width: 3.2rem;
+        box-sizing: content-box;
         appearance: none;
         -webkit-appearance: none;
     }
