@@ -45,8 +45,8 @@ type AgentAction struct {
 
 // agentResponse is the output of /api/agent for one user message.
 type agentResponse struct {
-	Message string         `json:"message"`
-	Actions []AgentAction  `json:"actions"`
+	Message string        `json:"message"`
+	Actions []AgentAction `json:"actions"`
 }
 
 // POST /api/agent
@@ -161,7 +161,9 @@ func (h *Handler) Agent(c *echo.Context) error {
 		now:             LocalNow(r),
 	}
 
-	// Tool-call loop.
+	// Tool-call loop. If we exit with pending tool calls, the model wanted to
+	// keep going but we capped it — surface that rather than silently dropping
+	// the unfinished work and returning a stale Message.
 	for range maxAgentIterations {
 		if len(turn.ToolCalls) == 0 {
 			break
@@ -176,6 +178,13 @@ func (h *Handler) Agent(c *echo.Context) error {
 			return writeErr(c, http.StatusInternalServerError, "agent error: "+err.Error())
 		}
 		turn = next
+	}
+	if len(turn.ToolCalls) > 0 {
+		// Reset the session — its history now ends on a model turn with unsent
+		// tool results, which would confuse the next request.
+		h.gemini.ResetAgentSession(sessionKey)
+		return writeErr(c, http.StatusInternalServerError,
+			fmt.Sprintf("agent exceeded %d tool-call iterations", maxAgentIterations))
 	}
 
 	// If any side-effects occurred, invalidate caches and clear convo on terminal action.
@@ -237,20 +246,7 @@ func (ex *agentExecutor) logMeal(args map[string]any) map[string]any {
 	if len(p.Items) == 0 {
 		return map[string]any{"error": "items required"}
 	}
-	timeStr := sheets.TimeString(ex.now)
-	if ex.date != sheets.DateString(ex.now) {
-		timeStr = defaultMealTime(p.MealType)
-	}
-	if ex.userMealTime != "" {
-		if parsed, err := time.Parse("15:04", ex.userMealTime); err == nil {
-			timeStr = parsed.Format("15:04")
-		}
-	}
-	if t := strings.TrimSpace(p.Time); t != "" {
-		if parsed, err := time.Parse("15:04", t); err == nil {
-			timeStr = parsed.Format("15:04")
-		}
-	}
+	timeStr := resolveLogMealTime(ex.now, ex.date, p.MealType, ex.userMealTime, p.Time)
 	saved := make([]sheets.FoodEntry, 0, len(p.Items))
 	for _, it := range p.Items {
 		fe := sheets.FoodEntry{
@@ -267,10 +263,10 @@ func (ex *agentExecutor) logMeal(args map[string]any) map[string]any {
 		if err := ge.Validate(); err != nil {
 			return map[string]any{"error": "invalid entry: " + err.Error()}
 		}
-		if err := ex.svc.AppendFood(ex.ctx, fe); err != nil {
-			return map[string]any{"error": "sheet write: " + err.Error()}
-		}
 		saved = append(saved, fe)
+	}
+	if err := ex.svc.AppendFoods(ex.ctx, saved); err != nil {
+		return map[string]any{"error": "sheet write: " + err.Error()}
 	}
 	ex.actions = append(ex.actions, AgentAction{
 		Type: "meal_added", Entries: saved, Date: ex.date,
@@ -293,13 +289,23 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 		mealType = ex.currentEntries[0].MealType
 	}
 
-	oldByDesc := map[string]sheets.FoodEntry{}
-	for _, e := range ex.currentEntries {
-		oldByDesc[e.Description] = e
-	}
+	// Pair new items to existing entries by description, but allow each old
+	// entry to be claimed at most once so that two identical descriptions in
+	// the new list don't both update (or both skip) the same row.
 	usedIDs := map[string]bool{}
+	claimByDesc := func(desc string) (sheets.FoodEntry, bool) {
+		for _, e := range ex.currentEntries {
+			if e.Description == desc && !usedIDs[e.ID] {
+				usedIDs[e.ID] = true
+				return e, true
+			}
+		}
+		return sheets.FoodEntry{}, false
+	}
+
 	timeStr := sheets.TimeString(ex.now)
 	saved := []sheets.FoodEntry{}
+	toAppend := []sheets.FoodEntry{}
 
 	for _, it := range p.Items {
 		ge := gemini.Entry{
@@ -310,7 +316,7 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 		if err := ge.Validate(); err != nil {
 			return map[string]any{"error": "invalid entry: " + err.Error()}
 		}
-		if old, ok := oldByDesc[it.Description]; ok && !usedIDs[old.ID] {
+		if old, ok := claimByDesc(it.Description); ok {
 			fe := old
 			fe.MealType = mealType
 			fe.Calories = it.Calories
@@ -321,7 +327,6 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 			if err := ex.svc.UpdateFood(ex.ctx, fe.ID, fe); err != nil {
 				return map[string]any{"error": "sheet update: " + err.Error()}
 			}
-			usedIDs[fe.ID] = true
 			saved = append(saved, fe)
 		} else {
 			fe := sheets.FoodEntry{
@@ -330,11 +335,12 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 				Calories: it.Calories, Protein: it.Protein,
 				Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
 			}
-			if err := ex.svc.AppendFood(ex.ctx, fe); err != nil {
-				return map[string]any{"error": "sheet write: " + err.Error()}
-			}
+			toAppend = append(toAppend, fe)
 			saved = append(saved, fe)
 		}
+	}
+	if err := ex.svc.AppendFoods(ex.ctx, toAppend); err != nil {
+		return map[string]any{"error": "sheet write: " + err.Error()}
 	}
 
 	var removed []string
@@ -351,6 +357,28 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 		Type: "meal_edited", Entries: saved, Removed: removed, Date: ex.date,
 	})
 	return map[string]any{"status": "edited", "kept": len(saved), "removed": len(removed)}
+}
+
+// resolveLogMealTime returns the HH:MM string to stamp a logged meal with,
+// applying this precedence (highest wins): tool-supplied time → user-supplied
+// time → defaultMealTime when retroactive → current clock time. Invalid
+// HH:MM inputs at any layer are ignored (fall through to the next source).
+func resolveLogMealTime(now time.Time, date, mealType, userMealTime, toolTime string) string {
+	timeStr := sheets.TimeString(now)
+	if date != sheets.DateString(now) {
+		timeStr = defaultMealTime(mealType)
+	}
+	if userMealTime != "" {
+		if parsed, err := time.Parse("15:04", userMealTime); err == nil {
+			timeStr = parsed.Format("15:04")
+		}
+	}
+	if t := strings.TrimSpace(toolTime); t != "" {
+		if parsed, err := time.Parse("15:04", t); err == nil {
+			timeStr = parsed.Format("15:04")
+		}
+	}
+	return timeStr
 }
 
 // defaultMealTime returns a conventional clock time for a meal type, used when

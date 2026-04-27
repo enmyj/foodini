@@ -121,7 +121,7 @@ func hasInsufficientScopesText(msg string) bool {
 	return strings.Contains(msg, "insufficient authentication scopes")
 }
 
-func hasInsufficientScopesDetails(details []interface{}) bool {
+func hasInsufficientScopesDetails(details []any) bool {
 	for _, detail := range details {
 		if detailHasInsufficientScopes(detail) {
 			return true

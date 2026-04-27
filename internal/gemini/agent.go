@@ -4,11 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 )
+
+// agentSessionTTL bounds how long an idle agent session stays in memory.
+// Drawer interactions are short; anything beyond this is stale state we'd
+// rather drop than carry into a new conversation.
+const agentSessionTTL = 30 * time.Minute
 
 const agentSystemPrompt = `You are the user's food + daily log assistant. They're in a single chat drawer and might want to: add/edit/scale/repeat meals, log activity, stool, hydration, or feelings, save a favorite, or just ask questions about their log.
 
@@ -202,6 +209,7 @@ type AgentSession struct {
 	mu       sync.Mutex
 	history  []*genai.Content
 	systemIn string
+	lastUsed time.Time
 }
 
 // AgentEvent is a minimal event shape for agent context.
@@ -237,6 +245,38 @@ type FavoriteRef struct {
 	Fiber       int
 }
 
+// mealOrder is the canonical ordering for meal sections in agent context.
+// Map iteration would otherwise vary the prompt across calls for identical state.
+var mealOrder = []string{"breakfast", "snack", "lunch", "dinner", "supplements"}
+
+func writeMealMap(b *strings.Builder, m map[string][]Entry) {
+	seen := make(map[string]bool, len(m))
+	write := func(meal string, entries []Entry) {
+		if len(entries) == 0 {
+			return
+		}
+		fmt.Fprintf(b, "  %s:\n", meal)
+		for _, e := range entries {
+			fmt.Fprintf(b, "    - %s (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
+				e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber)
+		}
+	}
+	for _, meal := range mealOrder {
+		write(meal, m[meal])
+		seen[meal] = true
+	}
+	extras := make([]string, 0)
+	for k := range m {
+		if !seen[k] {
+			extras = append(extras, k)
+		}
+	}
+	sort.Strings(extras)
+	for _, k := range extras {
+		write(k, m[k])
+	}
+}
+
 func formatAgentContext(ac AgentContext) string {
 	var b strings.Builder
 	if ac.Profile != "" {
@@ -258,29 +298,11 @@ func formatAgentContext(ac AgentContext) string {
 	}
 	if len(ac.TodayByMeal) > 0 {
 		b.WriteString("Today's meals so far:\n")
-		for meal, entries := range ac.TodayByMeal {
-			if len(entries) == 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "  %s:\n", meal)
-			for _, e := range entries {
-				fmt.Fprintf(&b, "    - %s (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
-					e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber)
-			}
-		}
+		writeMealMap(&b, ac.TodayByMeal)
 	}
 	if len(ac.YesterdayByMeal) > 0 {
 		b.WriteString("Yesterday's meals:\n")
-		for meal, entries := range ac.YesterdayByMeal {
-			if len(entries) == 0 {
-				continue
-			}
-			fmt.Fprintf(&b, "  %s:\n", meal)
-			for _, e := range entries {
-				fmt.Fprintf(&b, "    - %s (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
-					e.Description, e.Calories, e.Protein, e.Carbs, e.Fat, e.Fiber)
-			}
-		}
+		writeMealMap(&b, ac.YesterdayByMeal)
 	}
 	if len(ac.Favorites) > 0 {
 		b.WriteString("Available favorites:\n")
@@ -418,42 +440,52 @@ func (s *Service) agentGenerate(ctx context.Context, client *genai.Client, sess 
 	return turn, nil
 }
 
-// agentSessions holds per-user agent sessions keyed by userEmail|date.
-// They live for the duration of a drawer interaction. The handler calls
-// ResetAgent when the conversation is complete (e.g. after a successful
-// log_meal that the user confirms by closing the drawer).
+// agentSessionStore holds per-user agent sessions keyed by userEmail|date.
+// Idle sessions older than agentSessionTTL are evicted on every access so the
+// map can't grow without bound as users navigate dates.
 type agentSessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*AgentSession
 }
 
-var sessionStores sync.Map // *Service -> *agentSessionStore
-
-func (s *Service) sessionStore() *agentSessionStore {
-	if v, ok := sessionStores.Load(s); ok {
-		return v.(*agentSessionStore)
-	}
-	st := &agentSessionStore{sessions: make(map[string]*AgentSession)}
-	actual, _ := sessionStores.LoadOrStore(s, st)
-	return actual.(*agentSessionStore)
+func (s *Service) sessionStoreOnce() *agentSessionStore {
+	s.agentInit.Do(func() {
+		s.agentStore = &agentSessionStore{sessions: make(map[string]*AgentSession)}
+	})
+	return s.agentStore
 }
 
-// GetOrCreateAgentSession returns the agent session for the given key.
+// evictExpiredLocked removes sessions whose lastUsed is older than agentSessionTTL.
+// Caller must hold st.mu.
+func (st *agentSessionStore) evictExpiredLocked(now time.Time) {
+	for k, sess := range st.sessions {
+		if now.Sub(sess.lastUsed) > agentSessionTTL {
+			delete(st.sessions, k)
+		}
+	}
+}
+
+// GetOrCreateAgentSession returns the agent session for the given key, evicting
+// any other sessions that have gone idle past agentSessionTTL.
 func (s *Service) GetOrCreateAgentSession(key string) *AgentSession {
-	st := s.sessionStore()
+	st := s.sessionStoreOnce()
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	now := time.Now()
+	st.evictExpiredLocked(now)
 	sess, ok := st.sessions[key]
 	if !ok {
-		sess = &AgentSession{}
+		sess = &AgentSession{lastUsed: now}
 		st.sessions[key] = sess
+	} else {
+		sess.lastUsed = now
 	}
 	return sess
 }
 
 // ResetAgentSession discards conversation state for the given key.
 func (s *Service) ResetAgentSession(key string) {
-	st := s.sessionStore()
+	st := s.sessionStoreOnce()
 	st.mu.Lock()
 	delete(st.sessions, key)
 	st.mu.Unlock()

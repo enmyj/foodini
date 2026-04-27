@@ -1020,8 +1020,8 @@
                 {@const triggerId = insightOpen ? latestTriggerForMeal(group) : null}
                 {@const mealInsight = triggerId ? mealInsightCache[triggerId] : null}
                 <section class="tl-row event-row" class:expanded={!collapsed}>
-                    <span class="tl-dot" style="background:{MEAL_DOT_COLORS[meal]}" aria-hidden="true"></span>
                     <div class="event-head">
+                        <span class="tl-dot" style="background:{MEAL_DOT_COLORS[meal]}" aria-hidden="true"></span>
                         <input
                             type="time"
                             class="meal-time-input"
@@ -1122,8 +1122,8 @@
             {:else}
                 {@const ev = item.event}
                 <section class="tl-row tl-event">
-                    <span class="tl-dot" style="background:{EVENT_DOT_COLORS[ev.kind]}" aria-hidden="true"></span>
                     <div class="event-head">
+                        <span class="tl-dot" style="background:{EVENT_DOT_COLORS[ev.kind]}" aria-hidden="true"></span>
                         <input
                             type="time"
                             class="meal-time-input tl-event-time"
@@ -1532,7 +1532,9 @@ section {
     .day-timeline::before {
         content: "";
         position: absolute;
-        left: 0.35rem;
+        /* Center on the dots: row left = padding 1.25rem; dot offset -1.05rem,
+           width 0.65rem → dot center at 0.525rem from container left. */
+        left: calc(0.525rem - 0.5px);
         top: 0.6rem;
         bottom: 0.6rem;
         width: 1px;
@@ -1547,7 +1549,8 @@ section {
     .tl-dot {
         position: absolute;
         left: -1.05rem;
-        top: 0.95rem;
+        top: 50%;
+        transform: translateY(-50%);
         width: 0.65rem;
         height: 0.65rem;
         border-radius: 50%;
@@ -1593,6 +1596,7 @@ section {
     }
 
     .event-head {
+        position: relative;
         display: flex;
         align-items: center;
         gap: 0.4rem;
