@@ -58,9 +58,8 @@
     } = $props();
 
     let mode = $state<DrawerMode | null>(null);
-    let mealTime = $state("");
+    let entryTime = $state("");
     let eventKind = $state<EventKind | null>(null);
-    let eventTime = $state("");
     let eventText = $state("");
     let eventWaterMl = $state(250);
     let eventFeelingScore = $state(7);
@@ -80,7 +79,6 @@
 
     function resetEventForm() {
         eventKind = null;
-        eventTime = "";
         eventText = "";
         eventWaterMl = 250;
         eventFeelingScore = 7;
@@ -89,7 +87,6 @@
 
     function selectEventKind(kind: EventKind) {
         eventKind = kind;
-        eventTime = nowHHMM();
         eventText = "";
         eventWaterMl = 250;
         eventFeelingScore = 7;
@@ -97,7 +94,7 @@
 
     async function saveEvent() {
         if (!eventKind || eventSaving) return;
-        const time = eventTime || nowHHMM();
+        const time = entryTime || nowHHMM();
         const text = eventText.trim();
         const payload: {
             date: string;
@@ -200,7 +197,7 @@
                 else if (initialMode) mode = initialMode;
                 else mode = null;
                 resetEventForm();
-                mealTime = editEntries?.[0]?.time || nowHHMM();
+                entryTime = editEntries?.[0]?.time || nowHHMM();
                 if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
             } else {
                 selectedDate = "";
@@ -358,7 +355,7 @@
                 date: selectedDate,
                 images: imgs,
                 meal: mealType,
-                time: mealTime || null,
+                time: entryTime || null,
                 currentEntries: entries.length ? [...entries] : null,
                 reset: firstSend,
             });
@@ -520,25 +517,23 @@
 
         <div class="drawer-top">
             <div class="top-left">
-                {#if mealType}
-                    <span class="meal-tag">{mealType}</span>
-                {/if}
-            </div>
-            <div class="top-right">
-                {#if mode === "meal"}
-                    <input
-                        class="date-input time-input"
-                        type="time"
-                        bind:value={mealTime}
-                        title="Time for this meal"
-                    />
-                {/if}
                 <input
                     class="date-input"
                     type="date"
                     bind:value={selectedDate}
                     max={todayStr()}
                 />
+                <input
+                    class="date-input time-input"
+                    type="time"
+                    bind:value={entryTime}
+                    title="Time"
+                />
+                {#if mealType}
+                    <span class="meal-tag">{mealType}</span>
+                {/if}
+            </div>
+            <div class="top-right">
                 <button class="done-btn" onclick={onClose}>Done</button>
             </div>
         </div>
@@ -572,10 +567,6 @@
                 </div>
                 {#if eventKind}
                     <div class="event-fields">
-                        <label class="field-row">
-                            <span class="field-label">Time</span>
-                            <input type="time" bind:value={eventTime} />
-                        </label>
                         {#if eventKind === "water"}
                             <label class="field-row">
                                 <span class="field-label">Amount (ml)</span>
@@ -1163,7 +1154,6 @@
         min-width: 5.5rem;
     }
 
-    .field-row input[type="time"],
     .field-row input[type="number"] {
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
