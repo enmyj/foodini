@@ -299,7 +299,7 @@
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
         workout: "Workout",
-        stool: "BM",
+        stool: "💩",
         water: "Water",
         feeling: "Feeling",
     };
@@ -325,7 +325,7 @@
             case "workout":
                 return ev.text || "Workout";
             case "stool":
-                return ev.text || "BM";
+                return ev.text || "💩";
             case "water":
                 return `${Math.round(ev.num ?? 0)} ml`;
             case "feeling":

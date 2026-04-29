@@ -72,7 +72,7 @@
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
         workout: "Activity",
-        stool: "BM",
+        stool: "Bowel",
         water: "Water",
         feeling: "Feeling",
     };
