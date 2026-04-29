@@ -68,10 +68,13 @@
     let totalsOpen = $state(false);
     let insightsByWeek = $state<Record<string, WeekInsightPanelState>>({});
     let suggestionsByWeek = $state<Record<string, WeekInsightPanelState>>({});
-    let collapsedMeals = $state<Set<MealType>>(new Set(MEAL_ORDER));
-    let expandedMealMacros = $state<Set<MealType>>(new Set());
+    // Both keyed by timeline rowKey (for non-snack meals: the meal name; for
+    // snacks: a per-cluster id like "snack:0", since snacks split into multiple
+    // rows by time-of-day clustering).
+    let expandedRows = $state<Set<string>>(new Set());
+    let expandedMealMacros = $state<Set<string>>(new Set());
     let insightSnapshots = $state<InsightSnapshot[]>([]);
-    let openMealInsightFor = $state<MealType | null>(null);
+    let openMealInsightFor = $state<string | null>(null);
     let mealInsightCache = $state<Record<string, InsightPanelState>>({});
     let historyWeeks = $state(4);
     let favoritedDescs = $state<Set<string>>(new Set());
@@ -183,23 +186,94 @@
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
 
     type TimelineItem =
-        | { kind: "meal"; meal: MealType; entries: Entry[]; time: string }
+        | {
+              kind: "meal";
+              meal: MealType;
+              rowKey: string;
+              label: string;
+              entries: Entry[];
+              time: string;
+          }
         | { kind: "event"; event: LogEvent; time: string };
 
+    // Snacks split into clusters: any gap >60min between entry times starts a
+    // new cluster. Each cluster gets a time-of-day label. Untimed snacks land
+    // in a trailing cluster labeled plainly "snack".
+    function snackClusters(
+        entries: Entry[],
+    ): { rowKey: string; label: string; entries: Entry[]; time: string }[] {
+        const timed = entries
+            .filter((e) => !!e.time)
+            .slice()
+            .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+        const untimed = entries.filter((e) => !e.time);
+        const clusters: Entry[][] = [];
+        let cur: Entry[] = [];
+        let prevMin = -Infinity;
+        for (const e of timed) {
+            const [h, m] = (e.time as string).split(":");
+            const min = Number(h) * 60 + Number(m);
+            if (cur.length === 0 || min - prevMin <= 60) cur.push(e);
+            else {
+                clusters.push(cur);
+                cur = [e];
+            }
+            prevMin = min;
+        }
+        if (cur.length) clusters.push(cur);
+        if (untimed.length) clusters.push(untimed);
+        return clusters.map((es, i) => {
+            const t = es[0]?.time;
+            let label = "snack";
+            if (t) {
+                if (t < "12:00") label = "morning snack";
+                else if (t < "17:00") label = "afternoon snack";
+                else label = "evening snack";
+            }
+            return {
+                rowKey: `snack:${i}`,
+                label,
+                entries: es,
+                time: t ?? "99:99",
+            };
+        });
+    }
+
     // Unified time-sorted timeline interleaving meals (each meal type as one row,
-    // anchored to its earliest entry time) and events. Untimed entries sort last.
+    // anchored to its earliest entry time) and events. Snacks split by time-of-day
+    // clustering. Untimed entries sort last.
     let timelineItems = $derived.by<TimelineItem[]>(() => {
         const grouped = groupedByMeal(dayData?.entries);
         const items: TimelineItem[] = [];
         for (const meal of MEAL_ORDER) {
             const entries = grouped[meal] ?? [];
             if (entries.length === 0) continue;
+            if (meal === "snack") {
+                for (const c of snackClusters(entries)) {
+                    items.push({
+                        kind: "meal",
+                        meal,
+                        rowKey: c.rowKey,
+                        label: c.label,
+                        entries: c.entries,
+                        time: c.time,
+                    });
+                }
+                continue;
+            }
             let firstTime = "99:99";
             for (const e of entries) {
                 const t = e.time ?? "";
                 if (t && t < firstTime) firstTime = t;
             }
-            items.push({ kind: "meal", meal, entries, time: firstTime });
+            items.push({
+                kind: "meal",
+                meal,
+                rowKey: meal,
+                label: meal,
+                entries,
+                time: firstTime,
+            });
         }
         for (const ev of dayData?.events ?? []) {
             items.push({ kind: "event", event: ev, time: ev.time || "99:99" });
@@ -225,17 +299,33 @@
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
         workout: "Workout",
-        stool: "Bowel",
+        stool: "BM",
         water: "Water",
         feeling: "Feeling",
     };
+
+    // The expanded body's primary detail line. Returns "" when the event has no
+    // info beyond its kind (e.g. a logged BM with no text), so the row can show
+    // a "no details" placeholder instead of repeating the label.
+    function eventDetail(ev: LogEvent): string {
+        switch (ev.kind) {
+            case "workout":
+                return ev.text || "";
+            case "stool":
+                return ev.text || "";
+            case "water":
+                return `${Math.round(ev.num ?? 0)} ml`;
+            case "feeling":
+                return `${ev.num ?? 0}/10${ev.text ? ` — ${ev.text}` : ""}`;
+        }
+    }
 
     function describeEvent(ev: LogEvent): string {
         switch (ev.kind) {
             case "workout":
                 return ev.text || "Workout";
             case "stool":
-                return ev.text || "Bowel movement";
+                return ev.text || "BM";
             case "water":
                 return `${Math.round(ev.num ?? 0)} ml`;
             case "feeling":
@@ -323,12 +413,12 @@
         return pickId;
     }
 
-    async function toggleMealInsight(meal: MealType, entries: Entry[]) {
-        if (openMealInsightFor === meal) {
+    async function toggleMealInsight(rowKey: string, entries: Entry[]) {
+        if (openMealInsightFor === rowKey) {
             openMealInsightFor = null;
             return;
         }
-        openMealInsightFor = meal;
+        openMealInsightFor = rowKey;
         const triggerId = latestTriggerForMeal(entries);
         if (!triggerId) return;
         if (mealInsightCache[triggerId]?.text != null) return;
@@ -384,7 +474,8 @@
             void currentDate;
             dayInsightRequestId++;
             dayInsightStale = false;
-            collapsedMeals = new Set(MEAL_ORDER);
+            expandedRows = new Set();
+            expandedMealMacros = new Set();
             dayInsight = null;
             dayInsightExpanded = false;
             dayInsightFresh = readFresh(currentDate);
@@ -514,7 +605,13 @@
             replaceMealEntriesInLogCache(old, mealType, updatedEntries),
         );
         if (mealType && (updatedEntries[0]?.date ?? currentDate) === currentDate) {
-            collapsedMeals = new Set([...collapsedMeals, mealType]);
+            // Re-collapse rows for the edited meal type. Snack cluster ids may
+            // have changed if entries were retimed, so drop all "snack:*" too.
+            expandedRows = new Set(
+                [...expandedRows].filter(
+                    (k) => k !== mealType && !k.startsWith(`${mealType}:`),
+                ),
+            );
         }
     }
 
@@ -595,7 +692,13 @@
         );
         if (addedDate === currentDate) {
             const mealsAdded = new Set(newEntries.map((e) => e.meal_type));
-            collapsedMeals = new Set([...collapsedMeals, ...mealsAdded]);
+            expandedRows = new Set(
+                [...expandedRows].filter(
+                    (k) =>
+                        !mealsAdded.has(k as MealType) &&
+                        ![...mealsAdded].some((m) => k.startsWith(`${m}:`)),
+                ),
+            );
         }
     }
 
@@ -1029,15 +1132,17 @@
             </div>
         {/if}
         <div class="day-timeline">
-        {#each timelineItems as item (item.kind === "meal" ? `m-${item.meal}` : `e-${item.event.id}`)}
+        {#each timelineItems as item (item.kind === "meal" ? `m-${item.rowKey}` : `e-${item.event.id}`)}
             {#if item.kind === "meal"}
                 {@const meal = item.meal}
+                {@const rowKey = item.rowKey}
+                {@const label = item.label}
                 {@const group = item.entries}
-                {@const collapsed = collapsedMeals.has(meal)}
+                {@const collapsed = !expandedRows.has(rowKey)}
                 {@const mt = totals(group)}
-                {@const macrosOpen = expandedMealMacros.has(meal)}
+                {@const macrosOpen = expandedMealMacros.has(rowKey)}
                 {@const hasAnchor = group.some((e) => triggerEntryIds.has(e.id))}
-                {@const insightOpen = openMealInsightFor === meal}
+                {@const insightOpen = openMealInsightFor === rowKey}
                 {@const triggerId = insightOpen ? latestTriggerForMeal(group) : null}
                 {@const mealInsight = triggerId ? mealInsightCache[triggerId] : null}
                 <section class="tl-row event-row" class:expanded={!collapsed}>
@@ -1058,13 +1163,13 @@
                         <button
                             class="event-toggle"
                             onclick={() => {
-                                collapsedMeals = collapsed
-                                    ? new Set([...collapsedMeals].filter((m) => m !== meal))
-                                    : new Set([...collapsedMeals, meal]);
+                                expandedRows = collapsed
+                                    ? new Set([...expandedRows, rowKey])
+                                    : new Set([...expandedRows].filter((k) => k !== rowKey));
                             }}
                             aria-expanded={!collapsed}
                         >
-                            <span class="event-name">{meal}</span>
+                            <span class="event-name">{label}</span>
                             <span class="event-caret" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
                         </button>
                         {#if hasAnchor}
@@ -1073,7 +1178,7 @@
                                 class:active={insightOpen}
                                 aria-label="Insight at this point"
                                 title="Insight at this point in the day"
-                                onclick={() => toggleMealInsight(meal, group)}
+                                onclick={() => toggleMealInsight(rowKey, group)}
                                 >💡</button
                             >
                         {/if}
@@ -1083,8 +1188,8 @@
                             aria-expanded={macrosOpen}
                             onclick={() => {
                                 const next = new Set(expandedMealMacros);
-                                if (macrosOpen) next.delete(meal);
-                                else next.add(meal);
+                                if (macrosOpen) next.delete(rowKey);
+                                else next.add(rowKey);
                                 expandedMealMacros = next;
                             }}
                         >
@@ -1144,7 +1249,9 @@
                 </section>
             {:else}
                 {@const ev = item.event}
-                <section class="tl-row tl-event">
+                {@const evRowKey = `event:${ev.id}`}
+                {@const evCollapsed = !expandedRows.has(evRowKey)}
+                <section class="tl-row tl-event" class:expanded={!evCollapsed}>
                     <div class="event-head">
                         <span class="tl-dot" style="background:{EVENT_DOT_COLORS[ev.kind]}" aria-hidden="true"></span>
                         <input
@@ -1158,14 +1265,39 @@
                                 if (v && v !== (ev.time ?? "")) retimeEvent(ev, v);
                             }}
                         />
-                        <span class="event-name">{EVENT_KIND_LABELS[ev.kind]}</span>
-                        <span class="tl-event-text">{describeEvent(ev)}</span>
+                        <button
+                            class="event-toggle"
+                            onclick={() => {
+                                expandedRows = evCollapsed
+                                    ? new Set([...expandedRows, evRowKey])
+                                    : new Set([...expandedRows].filter((k) => k !== evRowKey));
+                            }}
+                            aria-expanded={!evCollapsed}
+                        >
+                            <span class="event-name">{EVENT_KIND_LABELS[ev.kind]}</span>
+                            <span class="event-caret" aria-hidden="true">{evCollapsed ? "▸" : "▾"}</span>
+                        </button>
                         <button
                             class="meal-action-btn"
                             onclick={() => openEditEventDrawer(ev)}
                             >Edit</button
                         >
                     </div>
+                    {#if !evCollapsed}
+                        {@const detail = eventDetail(ev)}
+                        <div class="event-body">
+                            {#if detail || ev.notes}
+                                {#if detail}
+                                    <div class="tl-event-detail">{detail}</div>
+                                {/if}
+                                {#if ev.notes}
+                                    <div class="tl-event-detail tl-event-notes">{ev.notes}</div>
+                                {/if}
+                            {:else}
+                                <div class="tl-event-detail tl-event-notes">no details</div>
+                            {/if}
+                        </div>
+                    {/if}
                 </section>
             {/if}
         {/each}
@@ -1593,11 +1725,15 @@ section {
         min-width: 3.2rem;
     }
 
-    .tl-event-text {
+    .tl-event-detail {
         font-size: var(--t-body-sm);
         color: var(--ink);
-        flex: 1;
-        min-width: 0;
+        padding: 0.2rem 0;
+    }
+
+    .tl-event-notes {
+        color: var(--ink-soft, var(--ink));
+        opacity: 0.8;
     }
 
     .tl-row {
