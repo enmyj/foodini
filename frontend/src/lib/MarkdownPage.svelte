@@ -4,7 +4,6 @@
     import type { RoutePath } from './types.ts';
 
     let { html }: { html: string } = $props();
-    let moreOpen = $state(false);
 
     function go(e: MouseEvent, href: RoutePath) {
         e.preventDefault();
@@ -17,22 +16,6 @@
         <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
         <nav class="nav-links">
             <ThemeToggle />
-            <div class="more-wrap">
-                <button
-                    class="more-btn"
-                    onclick={() => (moreOpen = !moreOpen)}
-                    aria-expanded={moreOpen}
-                    aria-label="More"
-                >More <span class="caret" aria-hidden="true">▾</span></button>
-                {#if moreOpen}
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <div class="menu-backdrop" aria-hidden="true" onclick={() => (moreOpen = false)}></div>
-                    <div class="more-menu">
-                        <a href="/about" onclick={(e) => { moreOpen = false; go(e, '/about'); }}>About</a>
-                        <a href="/legal" onclick={(e) => { moreOpen = false; go(e, '/legal'); }}>Privacy Policy</a>
-                    </div>
-                {/if}
-            </div>
             <a href="/app" class="btn" onclick={(e) => go(e, '/app')}>Open app</a>
         </nav>
     </header>
@@ -41,6 +24,13 @@
             {@html html}
         </article>
     </main>
+    <footer class="site-foot">
+        <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
+        <span aria-hidden="true">·</span>
+        <a href="/legal" onclick={(e) => go(e, '/legal')}>Privacy</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/enmyj/foodini" target="_blank" rel="noopener">GitHub</a>
+    </footer>
 </div>
 
 <style>
@@ -85,63 +75,29 @@
         color: var(--ink);
     }
 
-    .more-wrap {
-        position: relative;
+    .site-foot {
         display: flex;
+        justify-content: center;
         align-items: center;
-    }
-
-    .more-btn {
-        background: none;
-        border: none;
-        font-family: inherit;
+        gap: 0.6rem;
+        padding: 1.5rem 1rem 2rem;
         font-size: var(--t-meta);
         color: var(--mute);
-        cursor: pointer;
-        padding: 0.25rem 0;
+        border-top: 1px solid var(--rule);
+        margin-top: 2rem;
     }
 
-    .more-btn:hover {
-        color: var(--ink);
-    }
-
-    .caret {
-        font-size: 0.75em;
-        margin-left: 0.15em;
-    }
-
-    .menu-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 9;
-    }
-
-    .more-menu {
-        position: absolute;
-        top: 100%;
-        right: 0;
-        margin-top: 0.4rem;
-        background: var(--paper);
-        border: 1px solid var(--rule);
-        border-radius: var(--r-md);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-        z-index: 10;
-        min-width: 160px;
-        padding: 0.35rem 0;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .more-menu a {
-        padding: 0.55rem 1rem;
-        font-size: var(--t-body-sm);
+    .site-foot a {
         color: var(--mute);
         text-decoration: none;
     }
 
-    .more-menu a:hover {
-        background: var(--paper-4);
+    .site-foot a:hover {
         color: var(--ink);
+    }
+
+    .site-foot span {
+        opacity: 0.5;
     }
 
     .nav-links :global(.theme-toggle) {
