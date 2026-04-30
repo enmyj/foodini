@@ -115,15 +115,7 @@ func (h *Handler) Agent(c *echo.Context) error {
 
 	current := make([]gemini.Entry, 0, len(req.CurrentEntries))
 	for _, e := range req.CurrentEntries {
-		current = append(current, gemini.Entry{
-			MealType:    e.MealType,
-			Description: e.Description,
-			Calories:    e.Calories,
-			Protein:     e.Protein,
-			Carbs:       e.Carbs,
-			Fat:         e.Fat,
-			Fiber:       e.Fiber,
-		})
+		current = append(current, foodEntryToGemini(e))
 	}
 
 	ac := gemini.AgentContext{
@@ -257,12 +249,7 @@ func (ex *agentExecutor) logMeal(args map[string]any) map[string]any {
 			Calories: it.Calories, Protein: it.Protein,
 			Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
 		}
-		ge := gemini.Entry{
-			MealType: fe.MealType, Description: fe.Description,
-			Calories: fe.Calories, Protein: fe.Protein,
-			Carbs: fe.Carbs, Fat: fe.Fat, Fiber: fe.Fiber,
-		}
-		if err := ge.Validate(); err != nil {
+		if err := foodEntryToGemini(fe).Validate(); err != nil {
 			return map[string]any{"error": "invalid entry: " + err.Error()}
 		}
 		saved = append(saved, fe)
@@ -291,70 +278,27 @@ func (ex *agentExecutor) editMeal(args map[string]any) map[string]any {
 		mealType = ex.currentEntries[0].MealType
 	}
 
-	// Pair new items to existing entries by description, but allow each old
-	// entry to be claimed at most once so that two identical descriptions in
-	// the new list don't both update (or both skip) the same row.
-	usedIDs := map[string]bool{}
-	claimByDesc := func(desc string) (sheets.FoodEntry, bool) {
-		for _, e := range ex.currentEntries {
-			if e.Description == desc && !usedIDs[e.ID] {
-				usedIDs[e.ID] = true
-				return e, true
-			}
-		}
-		return sheets.FoodEntry{}, false
-	}
-
-	timeStr := sheets.TimeString(ex.now)
-	saved := []sheets.FoodEntry{}
-	toAppend := []sheets.FoodEntry{}
-
-	for _, it := range p.Items {
-		ge := gemini.Entry{
-			MealType: mealType, Description: it.Description,
-			Calories: it.Calories, Protein: it.Protein,
-			Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
-		}
+	plan := planEditMeal(ex.currentEntries, p.Items, mealType, ex.date, sheets.TimeString(ex.now), uuid.NewString)
+	for _, ge := range plan.toValidate {
 		if err := ge.Validate(); err != nil {
 			return map[string]any{"error": "invalid entry: " + err.Error()}
 		}
-		if old, ok := claimByDesc(it.Description); ok {
-			fe := old
-			fe.MealType = mealType
-			fe.Calories = it.Calories
-			fe.Protein = it.Protein
-			fe.Carbs = it.Carbs
-			fe.Fat = it.Fat
-			fe.Fiber = it.Fiber
-			if err := ex.svc.UpdateFood(ex.ctx, fe.ID, fe); err != nil {
-				return map[string]any{"error": "sheet update: " + err.Error()}
-			}
-			saved = append(saved, fe)
-		} else {
-			fe := sheets.FoodEntry{
-				ID: uuid.NewString(), Date: ex.date, Time: timeStr,
-				MealType: mealType, Description: it.Description,
-				Calories: it.Calories, Protein: it.Protein,
-				Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
-			}
-			toAppend = append(toAppend, fe)
-			saved = append(saved, fe)
+	}
+	for _, fe := range plan.toUpdate {
+		if err := ex.svc.UpdateFood(ex.ctx, fe.ID, fe); err != nil {
+			return map[string]any{"error": "sheet update: " + err.Error()}
 		}
 	}
-	if err := ex.svc.AppendFoods(ex.ctx, toAppend); err != nil {
+	if err := ex.svc.AppendFoods(ex.ctx, plan.toAppend); err != nil {
 		return map[string]any{"error": "sheet write: " + err.Error()}
 	}
-
-	var removed []string
-	for _, e := range ex.currentEntries {
-		if usedIDs[e.ID] {
-			continue
-		}
-		if err := ex.svc.DeleteFood(ex.ctx, e.ID); err != nil {
+	for _, id := range plan.toDelete {
+		if err := ex.svc.DeleteFood(ex.ctx, id); err != nil {
 			return map[string]any{"error": "sheet delete: " + err.Error()}
 		}
-		removed = append(removed, e.ID)
 	}
+	saved := plan.saved
+	removed := plan.toDelete
 
 	// Update local state so subsequent tool calls see the new entries.
 	ex.currentEntries = saved
@@ -575,6 +519,72 @@ func (ex *agentExecutor) readLog(args map[string]any) map[string]any {
 	}
 }
 
+// editMealPlan describes the side-effects an edit_meal call should have.
+// All slices are in iteration-stable order so the result is deterministic.
+type editMealPlan struct {
+	toValidate []gemini.Entry     // validate before any sheet write
+	toUpdate   []sheets.FoodEntry // pass to UpdateFood (paired with existing rows)
+	toAppend   []sheets.FoodEntry // pass to AppendFoods (new rows)
+	toDelete   []string           // existing IDs no longer present
+	saved      []sheets.FoodEntry // final ordered list (updates + appends in p.Items order)
+}
+
+// planEditMeal pairs incoming items to existing entries by description, allowing
+// each existing entry to be claimed at most once so duplicate descriptions in
+// the new list don't both claim (or both skip) the same row.
+func planEditMeal(
+	current []sheets.FoodEntry,
+	items []gemini.AgentEntry,
+	mealType, date, newTime string,
+	newID func() string,
+) editMealPlan {
+	used := map[string]bool{}
+	claim := func(desc string) (sheets.FoodEntry, bool) {
+		for _, e := range current {
+			if e.Description == desc && !used[e.ID] {
+				used[e.ID] = true
+				return e, true
+			}
+		}
+		return sheets.FoodEntry{}, false
+	}
+
+	plan := editMealPlan{}
+	for _, it := range items {
+		plan.toValidate = append(plan.toValidate, gemini.Entry{
+			MealType: mealType, Description: it.Description,
+			Calories: it.Calories, Protein: it.Protein,
+			Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
+		})
+		if old, ok := claim(it.Description); ok {
+			fe := old
+			fe.MealType = mealType
+			fe.Calories = it.Calories
+			fe.Protein = it.Protein
+			fe.Carbs = it.Carbs
+			fe.Fat = it.Fat
+			fe.Fiber = it.Fiber
+			plan.toUpdate = append(plan.toUpdate, fe)
+			plan.saved = append(plan.saved, fe)
+		} else {
+			fe := sheets.FoodEntry{
+				ID: newID(), Date: date, Time: newTime,
+				MealType: mealType, Description: it.Description,
+				Calories: it.Calories, Protein: it.Protein,
+				Carbs: it.Carbs, Fat: it.Fat, Fiber: it.Fiber,
+			}
+			plan.toAppend = append(plan.toAppend, fe)
+			plan.saved = append(plan.saved, fe)
+		}
+	}
+	for _, e := range current {
+		if !used[e.ID] {
+			plan.toDelete = append(plan.toDelete, e.ID)
+		}
+	}
+	return plan
+}
+
 func groupByMeal(entries []sheets.FoodEntry) map[string][]sheets.FoodEntry {
 	out := map[string][]sheets.FoodEntry{}
 	for _, e := range entries {
@@ -587,14 +597,22 @@ func convertMealMap(m map[string][]sheets.FoodEntry) map[string][]gemini.Entry {
 	out := map[string][]gemini.Entry{}
 	for k, v := range m {
 		for _, e := range v {
-			out[k] = append(out[k], gemini.Entry{
-				MealType: e.MealType, Description: e.Description,
-				Calories: e.Calories, Protein: e.Protein,
-				Carbs: e.Carbs, Fat: e.Fat, Fiber: e.Fiber,
-			})
+			out[k] = append(out[k], foodEntryToGemini(e))
 		}
 	}
 	return out
+}
+
+func foodEntryToGemini(e sheets.FoodEntry) gemini.Entry {
+	return gemini.Entry{
+		MealType:    e.MealType,
+		Description: e.Description,
+		Calories:    e.Calories,
+		Protein:     e.Protein,
+		Carbs:       e.Carbs,
+		Fat:         e.Fat,
+		Fiber:       e.Fiber,
+	}
 }
 
 func parseAgentRequest(r *http.Request) (agentRequest, error) {

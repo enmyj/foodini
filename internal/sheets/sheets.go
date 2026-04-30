@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/googleapi"
@@ -18,13 +17,16 @@ import (
 
 const (
 	foodSheet      = "Food"
-	activitySheet  = "Activity"
 	eventsSheet    = "Events"
 	metaSheet      = "Meta"
 	profileSheet   = "Profile"
 	insightsSheet  = "Insights"
 	favoritesSheet = "Favorites"
 
+	// CurrentSchemaVersion is the schema the running code expects. Bump this
+	// and register a step in runMigrations whenever the sheet layout changes.
+	// Historical V1→V12 migration bodies were dropped — a sheet older than
+	// v12 has no migration path and is rejected as unsupported.
 	CurrentSchemaVersion = 12
 )
 
@@ -124,61 +126,6 @@ func FoodEntryFromRow(row []any) (*FoodEntry, error) {
 
 func DateString(t time.Time) string { return t.Format("2006-01-02") }
 func TimeString(t time.Time) string { return t.Format("15:04") }
-
-// DayLog is one row in the Activity sheet.
-// Schema: date | activity | feeling_score | feeling_notes | poop | poop_notes | hydration
-// Backward compat: old 2-column rows (date | notes) map notes → activity.
-type DayLog struct {
-	Date         string  `json:"date"`
-	Activity     string  `json:"activity"`
-	FeelingScore int     `json:"feeling_score"` // 0 = not set, 1–10
-	FeelingNotes string  `json:"feeling_notes"`
-	Poop         bool    `json:"poop"`
-	PoopNotes    string  `json:"poop_notes"`
-	Hydration    float64 `json:"hydration"` // litres, 0 = not set
-}
-
-func (d DayLog) ToRow() []any {
-	return []any{
-		d.Date, d.Activity, strconv.Itoa(d.FeelingScore), d.FeelingNotes,
-		strconv.FormatBool(d.Poop), d.PoopNotes, strconv.FormatFloat(d.Hydration, 'f', -1, 64),
-	}
-}
-
-func DayLogFromRow(row []any) DayLog {
-	str := func(v any) string { return fmt.Sprintf("%v", v) }
-	num := func(v any) int {
-		n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
-		return n
-	}
-	fnum := func(v any) float64 {
-		f, _ := strconv.ParseFloat(fmt.Sprintf("%v", v), 64)
-		return f
-	}
-	d := DayLog{}
-	if len(row) >= 1 {
-		d.Date = str(row[0])
-	}
-	if len(row) >= 2 {
-		d.Activity = str(row[1])
-	}
-	if len(row) >= 3 {
-		d.FeelingScore = num(row[2])
-	}
-	if len(row) >= 4 {
-		d.FeelingNotes = str(row[3])
-	}
-	if len(row) >= 5 {
-		d.Poop = str(row[4]) == "true"
-	}
-	if len(row) >= 6 {
-		d.PoopNotes = str(row[5])
-	}
-	if len(row) >= 7 {
-		d.Hydration = fnum(row[6])
-	}
-	return d
-}
 
 // UserProfile stores user context for improving Gemini macro estimates.
 // Stored in the Profile sheet as a single data row: gender | height | weight | notes | goals | dietary_restrictions | birth_year | nutrition_expertise
@@ -537,7 +484,6 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 		},
 		Sheets: []*googlesheets.Sheet{
 			{Properties: &googlesheets.SheetProperties{Title: foodSheet}},
-			{Properties: &googlesheets.SheetProperties{Title: activitySheet}},
 			{Properties: &googlesheets.SheetProperties{Title: eventsSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: metaSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
@@ -559,16 +505,6 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("food headers: %w", err)
-	}
-
-	actHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes", "hydration"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		created.SpreadsheetId, activitySheet+"!A1:G1", actHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return "", fmt.Errorf("activity headers: %w", err)
 	}
 
 	eventHeaders := &googlesheets.ValueRange{
@@ -626,448 +562,6 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	}
 
 	return created.SpreadsheetId, nil
-}
-
-// MigrateV1toV2 upgrades an existing spreadsheet from schema v1 to v2.
-// It extends the Activity sheet header to include poop and poop_notes columns.
-func MigrateV1toV2(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	actHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, activitySheet+"!A1:F1", actHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v1→v2 activity header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"2"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV2toV3 upgrades an existing spreadsheet from schema v2 to v3.
-// It adds the hydration column to the Activity sheet header.
-func MigrateV2toV3(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	actHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"date", "activity", "feeling_score", "feeling_notes", "poop", "poop_notes", "hydration"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, activitySheet+"!A1:G1", actHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v2→v3 activity header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"3"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV3toV4 upgrades an existing spreadsheet from schema v3 to v4.
-// It adds the goals column to the Profile sheet header.
-func MigrateV3toV4(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	profHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"gender", "height", "weight", "notes", "goals"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, profileSheet+"!A1:E1", profHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v3→v4 profile header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"4"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV4toV5 upgrades an existing spreadsheet from schema v4 to v5.
-// It adds the dietary_restrictions column to the Profile sheet header.
-func MigrateV4toV5(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	profHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, profileSheet+"!A1:F1", profHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v4→v5 profile header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"5"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV5toV6 upgrades an existing spreadsheet from schema v5 to v6.
-// It adds the Insights sheet for persisting generated AI insights.
-func MigrateV5toV6(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	// Add Insights sheet; ignore error if it already exists.
-	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*googlesheets.Request{{
-			AddSheet: &googlesheets.AddSheetRequest{
-				Properties: &googlesheets.SheetProperties{Title: insightsSheet},
-			},
-		}},
-	}).Context(ctx).Do()
-
-	insightHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"type", "start_date", "end_date", "generated_at", "insight"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, insightsSheet+"!A1:E1", insightHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v5→v6 insights header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"6"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV6toV7 upgrades an existing spreadsheet from schema v6 to v7.
-// It adds the age column to the Profile sheet header.
-func MigrateV6toV7(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	profHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "age"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, profileSheet+"!A1:G1", profHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v6→v7 profile header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"7"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV7toV8 upgrades an existing spreadsheet from schema v7 to v8.
-// It adds the Favorites sheet for storing saved food entries.
-func MigrateV7toV8(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	// Add Favorites sheet; ignore error if it already exists.
-	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*googlesheets.Request{{
-			AddSheet: &googlesheets.AddSheetRequest{
-				Properties: &googlesheets.SheetProperties{Title: favoritesSheet},
-			},
-		}},
-	}).Context(ctx).Do()
-
-	favHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"id", "description", "meal_type", "calories", "protein", "carbs", "fat", "fiber", "created_at"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, favoritesSheet+"!A1:I1", favHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v7→v8 favorites header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"8"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV8toV9 upgrades an existing spreadsheet from schema v8 to v9.
-// Renames the Profile column "age" to "birth_year" and converts any existing
-// integer age value into a birth year using the server's current year.
-// Non-numeric or out-of-range values are cleared.
-func MigrateV8toV9(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	// Read existing age cell (G2) before rewriting the header.
-	existing, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, profileSheet+"!G2").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v8→v9 read age: %w", err)
-	}
-	converted := ""
-	if len(existing.Values) > 0 && len(existing.Values[0]) > 0 {
-		raw := strings.TrimSpace(fmt.Sprintf("%v", existing.Values[0][0]))
-		if n, convErr := strconv.Atoi(raw); convErr == nil && n > 0 && n < 130 {
-			converted = strconv.Itoa(time.Now().Year() - n)
-		}
-	}
-
-	profHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"gender", "height", "weight", "notes", "goals", "dietary_restrictions", "birth_year"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, profileSheet+"!A1:G1", profHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v8→v9 profile header: %w", err)
-	}
-
-	// Overwrite G2 with the converted birth year (or clear it).
-	ageCell := &googlesheets.ValueRange{Values: [][]any{{converted}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, profileSheet+"!G2", ageCell,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v8→v9 profile value: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"9"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV9toV10 upgrades an existing spreadsheet from schema v9 to v10.
-// Adds a "triggered_by" column to the Insights sheet so day-level insights
-// can be anchored to the entry that triggered their generation.
-func MigrateV9toV10(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	insightHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"type", "start_date", "end_date", "generated_at", "insight", "triggered_by"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, insightsSheet+"!A1:F1", insightHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v9→v10 insights header: %w", err)
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"10"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV10toV11 adds the Events sheet and fans the per-day Activity rows
-// out into individual events at 12:00. The Activity sheet is left in place so
-// the migration is reversible if needed; nothing reads from it after v11.
-func MigrateV10toV11(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	_, _ = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{
-		Requests: []*googlesheets.Request{{
-			AddSheet: &googlesheets.AddSheetRequest{
-				Properties: &googlesheets.SheetProperties{Title: eventsSheet},
-			},
-		}},
-	}).Context(ctx).Do()
-
-	eventHeaders := &googlesheets.ValueRange{
-		Values: [][]any{{"id", "date", "time", "kind", "text", "num", "notes"}},
-	}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, eventsSheet+"!A1:G1", eventHeaders,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v10→v11 events header: %w", err)
-	}
-
-	// Skip the activity-fanout if events already exist — this migration is
-	// being re-run after the schema bump. Idempotency guard added after a
-	// crash-mid-migration produced doubled events for some users.
-	existing, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, eventsSheet+"!A:G").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v10→v11 read events: %w", err)
-	}
-	if len(existing.Values) > 1 {
-		metaData := &googlesheets.ValueRange{Values: [][]any{{"11"}}}
-		_, err = sheetsSvc.Spreadsheets.Values.Update(
-			spreadsheetID, metaSheet+"!A2", metaData,
-		).ValueInputOption("RAW").Context(ctx).Do()
-		return err
-	}
-
-	resp, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v10→v11 read activity: %w", err)
-	}
-
-	const noon = "12:00"
-	var rows [][]any
-	for i, row := range resp.Values {
-		if i == 0 || len(row) < 1 {
-			continue
-		}
-		dl := DayLogFromRow(row)
-		if dl.Date == "" {
-			continue
-		}
-		mk := func(kind, text string, num float64) []any {
-			return Event{
-				ID: uuid.NewString(), Date: dl.Date, Time: noon,
-				Kind: kind, Text: text, Num: num,
-			}.ToRow()
-		}
-		if strings.TrimSpace(dl.Activity) != "" {
-			rows = append(rows, mk(EventKindWorkout, dl.Activity, 0))
-		}
-		if dl.Poop {
-			rows = append(rows, mk(EventKindStool, dl.PoopNotes, 0))
-		}
-		if dl.Hydration > 0 {
-			rows = append(rows, mk(EventKindWater, "", dl.Hydration*1000))
-		}
-		if dl.FeelingScore > 0 || strings.TrimSpace(dl.FeelingNotes) != "" {
-			rows = append(rows, mk(EventKindFeeling, dl.FeelingNotes, float64(dl.FeelingScore)))
-		}
-	}
-	if len(rows) > 0 {
-		_, err = sheetsSvc.Spreadsheets.Values.Append(
-			spreadsheetID, eventsSheet+"!A:G",
-			&googlesheets.ValueRange{Values: rows},
-		).ValueInputOption("RAW").Context(ctx).Do()
-		if err != nil {
-			return fmt.Errorf("migrate v10→v11 append events: %w", err)
-		}
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"11"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateV11toV12 deduplicates the Events sheet. A bug in earlier MigrateV10toV11
-// runs (no idempotency guard) caused some users to have every fanned-out activity
-// event appended twice. This pass deletes any event rows whose
-// date+time+kind+text+num signature matches a row above them, keeping the first.
-func MigrateV11toV12(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	sheetsSvc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
-	if err != nil {
-		return fmt.Errorf("sheets client: %w", err)
-	}
-
-	ss, err := sheetsSvc.Spreadsheets.Get(spreadsheetID).Context(ctx).Do()
-	if err != nil {
-		return fmt.Errorf("migrate v11→v12 get spreadsheet: %w", err)
-	}
-	var sheetID int64 = -1
-	for _, sh := range ss.Sheets {
-		if sh.Properties.Title == eventsSheet {
-			sheetID = sh.Properties.SheetId
-			break
-		}
-	}
-
-	if sheetID >= 0 {
-		resp, err := sheetsSvc.Spreadsheets.Values.Get(spreadsheetID, eventsSheet+"!A:G").Context(ctx).Do()
-		if err != nil {
-			return fmt.Errorf("migrate v11→v12 read events: %w", err)
-		}
-		seen := map[string]bool{}
-		var dupRows []int // 0-based row indices to delete
-		str := func(row []any, i int) string {
-			if i >= len(row) {
-				return ""
-			}
-			return fmt.Sprintf("%v", row[i])
-		}
-		for i, row := range resp.Values {
-			if i == 0 || len(row) < 4 {
-				continue
-			}
-			sig := str(row, 1) + "|" + str(row, 2) + "|" + str(row, 3) + "|" + str(row, 4) + "|" + str(row, 5)
-			if seen[sig] {
-				dupRows = append(dupRows, i)
-				continue
-			}
-			seen[sig] = true
-		}
-		// Delete bottom-up so earlier indices stay valid.
-		if len(dupRows) > 0 {
-			reqs := make([]*googlesheets.Request, 0, len(dupRows))
-			for j := len(dupRows) - 1; j >= 0; j-- {
-				idx := dupRows[j]
-				reqs = append(reqs, &googlesheets.Request{
-					DeleteDimension: &googlesheets.DeleteDimensionRequest{
-						Range: &googlesheets.DimensionRange{
-							SheetId:    sheetID,
-							Dimension:  "ROWS",
-							StartIndex: int64(idx),
-							EndIndex:   int64(idx + 1),
-						},
-					},
-				})
-			}
-			_, err := sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &googlesheets.BatchUpdateSpreadsheetRequest{Requests: reqs}).Context(ctx).Do()
-			if err != nil {
-				return fmt.Errorf("migrate v11→v12 dedupe: %w", err)
-			}
-		}
-	}
-
-	metaData := &googlesheets.ValueRange{Values: [][]any{{"12"}}}
-	_, err = sheetsSvc.Spreadsheets.Values.Update(
-		spreadsheetID, metaSheet+"!A2", metaData,
-	).ValueInputOption("RAW").Context(ctx).Do()
-	return err
-}
-
-// MigrateSpreadsheet is an alias kept for backwards compatibility; calls MigrateV1toV2.
-func MigrateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
-	return MigrateV1toV2(ctx, ts, spreadsheetID)
 }
 
 // AppendEvent appends an event row.
@@ -1351,53 +845,6 @@ func (s *Service) DeleteFood(ctx context.Context, id string) error {
 	return err
 }
 
-// GetActivity returns the DayLog for the given date, or an empty DayLog if none.
-func (s *Service) GetActivity(ctx context.Context, date string) (DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
-	if err != nil {
-		return DayLog{}, err
-	}
-	for i, row := range resp.Values {
-		if i == 0 || len(row) < 1 {
-			continue
-		}
-		if fmt.Sprintf("%v", row[0]) == date {
-			return DayLogFromRow(row), nil
-		}
-	}
-	return DayLog{Date: date}, nil
-}
-
-// SetActivity upserts the DayLog for its date.
-func (s *Service) SetActivity(ctx context.Context, log DayLog) error {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:A").Context(ctx).Do()
-	if err != nil {
-		return err
-	}
-	vr := &googlesheets.ValueRange{Values: [][]any{log.ToRow()}}
-	rowNum := -1
-	for i, row := range resp.Values {
-		if i == 0 {
-			continue
-		}
-		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == log.Date {
-			rowNum = i + 1
-			break
-		}
-	}
-	if rowNum < 0 {
-		_, err = s.svc.Spreadsheets.Values.Append(
-			s.spreadsheetID, activitySheet+"!A:G", vr,
-		).ValueInputOption("RAW").Context(ctx).Do()
-	} else {
-		_, err = s.svc.Spreadsheets.Values.Update(
-			s.spreadsheetID,
-			fmt.Sprintf("%s!A%d:G%d", activitySheet, rowNum, rowNum),
-			vr,
-		).ValueInputOption("RAW").Context(ctx).Do()
-	}
-	return err
-}
 
 // GetSchemaVersion reads the schema_version value from the Meta sheet.
 // Returns 0 if the Meta sheet doesn't exist or has no value.
@@ -1412,23 +859,4 @@ func (s *Service) GetSchemaVersion(ctx context.Context) (int, error) {
 	}
 	n, _ := strconv.Atoi(fmt.Sprintf("%v", resp.Values[0][0]))
 	return n, nil
-}
-
-// GetActivityByDateRange returns DayLogs where start <= date <= end.
-func (s *Service) GetActivityByDateRange(ctx context.Context, start, end string) ([]DayLog, error) {
-	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, activitySheet+"!A:G").Context(ctx).Do()
-	if err != nil {
-		return nil, err
-	}
-	var out []DayLog
-	for i, row := range resp.Values {
-		if i == 0 || len(row) < 1 {
-			continue
-		}
-		d := fmt.Sprintf("%v", row[0])
-		if d >= start && d <= end {
-			out = append(out, DayLogFromRow(row))
-		}
-	}
-	return out, nil
 }

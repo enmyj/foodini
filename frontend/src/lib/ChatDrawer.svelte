@@ -1,19 +1,19 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { addEvent, agent, deleteEntry, deleteEvent, patchEntry, patchEvent } from "./api.ts";
+    import { agent, deleteEntry, patchEntry } from "./api.ts";
     import { autosize } from "./autosize.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
-    import { EVENT_KINDS, MEAL_ORDER } from "./types.ts";
+    import { MEAL_ORDER } from "./types.ts";
     import type {
         AgentAction,
         Entry,
-        EventKind,
         LogEvent,
         MealType,
         PendingImage,
     } from "./types.ts";
+    import EventForm from "./EventForm.svelte";
 
     type DrawerMode = "meal" | "event";
 
@@ -24,12 +24,10 @@
         | "fat"
         | "fiber";
 
-    interface ChatMsg {
-        role: "user" | "agent" | "action";
-        text?: string;
-        previewUrls?: string[];
-        action?: AgentAction;
-    }
+    type ChatMsg =
+        | { role: "user"; text?: string; previewUrls: string[] }
+        | { role: "agent"; text: string }
+        | { role: "action"; action: AgentAction };
 
     let {
         open,
@@ -63,32 +61,10 @@
 
     let mode = $state<DrawerMode | null>(null);
     let entryTime = $state("");
-    let eventKind = $state<EventKind | null>(null);
-    let eventText = $state("");
-    let eventWaterMl = $state(250);
-    let eventFeelingScore = $state(7);
-    let eventSaving = $state(false);
-    let eventDeleting = $state(false);
-
-    const EVENT_KIND_LABELS: Record<EventKind, string> = {
-        workout: "Activity",
-        stool: "Bowel",
-        water: "Water",
-        feeling: "Feeling",
-    };
 
     function nowHHMM(): string {
         const d = new Date();
         return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    }
-
-    function resetEventForm() {
-        eventKind = null;
-        eventText = "";
-        eventWaterMl = 250;
-        eventFeelingScore = 7;
-        eventSaving = false;
-        eventDeleting = false;
     }
 
     async function onEntryTimeBlur() {
@@ -111,69 +87,6 @@
             if (onEntriesEdited) onEntriesEdited(updated, mealType);
         } catch (err) {
             showError(err, "Failed to update time.");
-        }
-    }
-
-    async function deleteEditingEvent() {
-        if (!editEvent || eventDeleting || eventSaving) return;
-        eventDeleting = true;
-        try {
-            await deleteEvent(editEvent.id);
-            if (onEventChanged) onEventChanged({ deletedId: editEvent.id });
-            onClose();
-        } catch (err) {
-            showError(err, "Failed to delete event.");
-        } finally {
-            eventDeleting = false;
-        }
-    }
-
-    function selectEventKind(kind: EventKind) {
-        eventKind = kind;
-        eventText = "";
-        eventWaterMl = 250;
-        eventFeelingScore = 7;
-    }
-
-    async function saveEvent() {
-        if (!eventKind || eventSaving) return;
-        const time = entryTime || nowHHMM();
-        const text = eventText.trim();
-        const payload: {
-            date: string;
-            time: string;
-            kind: EventKind;
-            text?: string;
-            num?: number;
-        } = { date: selectedDate, time, kind: eventKind };
-        if (eventKind === "water") payload.num = Math.max(0, Math.round(eventWaterMl));
-        else if (eventKind === "feeling") {
-            payload.num = Math.max(1, Math.min(10, Math.round(eventFeelingScore)));
-            if (text) payload.text = text;
-        } else {
-            if (text) payload.text = text;
-        }
-        eventSaving = true;
-        try {
-            if (editEvent) {
-                const patch: Partial<LogEvent> = {
-                    date: payload.date,
-                    time: payload.time,
-                    kind: payload.kind,
-                    text: payload.text ?? "",
-                };
-                if (payload.num !== undefined) patch.num = payload.num;
-                const updated = await patchEvent(editEvent.id, patch);
-                if (onEventChanged) onEventChanged({ updated });
-            } else {
-                const saved = await addEvent(payload);
-                if (onEventChanged) onEventChanged({ added: saved });
-            }
-            onClose();
-        } catch (err) {
-            showError(err, "Failed to save event.");
-        } finally {
-            eventSaving = false;
         }
     }
 
@@ -254,16 +167,6 @@
                 else if (editEntries || meal) mode = "meal";
                 else if (initialMode) mode = initialMode;
                 else mode = null;
-                resetEventForm();
-                if (editEvent) {
-                    eventKind = editEvent.kind;
-                    eventText = editEvent.text ?? "";
-                    if (editEvent.kind === "water") {
-                        eventWaterMl = Math.max(0, Math.round(editEvent.num ?? 250));
-                    } else if (editEvent.kind === "feeling") {
-                        eventFeelingScore = Math.max(1, Math.min(10, Math.round(editEvent.num ?? 7)));
-                    }
-                }
                 entryTime = editEvent?.time || editEntries?.[0]?.time || nowHHMM();
                 if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
             } else {
@@ -275,7 +178,6 @@
                 clearPendingImages();
                 deletingEntryIds = new Set();
                 mode = null;
-                resetEventForm();
             }
         });
     });
@@ -673,64 +575,14 @@
                 </div>
             </div>
         {:else if mode === "event"}
-            <div class="event-form">
-                <div class="kind-bubbles">
-                    {#each EVENT_KINDS as k}
-                        <button
-                            class="kind-bubble"
-                            class:active={eventKind === k}
-                            onclick={() => selectEventKind(k)}
-                        >{EVENT_KIND_LABELS[k]}</button>
-                    {/each}
-                </div>
-                {#if eventKind}
-                    <div class="event-fields">
-                        {#if eventKind === "water"}
-                            <label class="field-row">
-                                <span class="field-label">Amount (ml)</span>
-                                <input type="number" min="0" max="5000" step="50" bind:value={eventWaterMl} />
-                            </label>
-                            <div class="quick-pills">
-                                {#each [125, 250, 500, 750, 1000] as ml}
-                                    <button class="quick-pill" onclick={() => (eventWaterMl = ml)}>{ml}ml</button>
-                                {/each}
-                            </div>
-                        {:else if eventKind === "feeling"}
-                            <label class="field-row">
-                                <span class="field-label">Score (1-10)</span>
-                                <div class="slider-wrap">
-                                    <input type="range" min="1" max="10" step="1" bind:value={eventFeelingScore} />
-                                    <span class="slider-val">{eventFeelingScore}</span>
-                                </div>
-                            </label>
-                            <label class="field-row stacked">
-                                <span class="field-label">Note (optional)</span>
-                                <textarea rows="2" bind:value={eventText} placeholder="energy, mood, anything notable"></textarea>
-                            </label>
-                        {:else if eventKind === "stool"}
-                            <label class="field-row stacked">
-                                <span class="field-label">Note (optional)</span>
-                                <textarea rows="2" bind:value={eventText} placeholder="consistency, urgency, etc."></textarea>
-                            </label>
-                        {:else if eventKind === "workout"}
-                            <label class="field-row stacked">
-                                <span class="field-label">What did you do?</span>
-                                <textarea rows="3" bind:value={eventText} placeholder="e.g. 30min run, bench 3×8 @135"></textarea>
-                            </label>
-                        {/if}
-                        <div class="event-actions">
-                            {#if editEvent}
-                                <button class="event-delete" onclick={deleteEditingEvent} disabled={eventSaving || eventDeleting}>
-                                    {eventDeleting ? "Deleting…" : "Delete"}
-                                </button>
-                            {/if}
-                            <button class="event-save" onclick={saveEvent} disabled={eventSaving || eventDeleting}>
-                                {eventSaving ? "Saving…" : "Save"}
-                            </button>
-                        </div>
-                    </div>
-                {/if}
-            </div>
+            <EventForm
+                date={selectedDate}
+                time={entryTime}
+                {editEvent}
+                onSaved={(change) => onEventChanged?.(change)}
+                onDeleted={(id) => onEventChanged?.({ deletedId: id })}
+                onDone={onClose}
+            />
         {/if}
 
         {#snippet entriesCard()}
@@ -1273,214 +1125,6 @@
     .mode-bubble-hint {
         font-size: var(--t-meta);
         color: var(--mute-2);
-    }
-
-    /* --- Event form --- */
-    .event-form {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-        padding: 0.5rem 0 0.25rem;
-        flex: 1;
-        overflow-y: auto;
-        min-height: 0;
-    }
-
-    .kind-bubbles {
-        display: flex;
-        gap: 0.4rem;
-        flex-wrap: wrap;
-    }
-
-    .kind-bubble {
-        background: none;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        color: var(--mute);
-        font-size: var(--t-body-sm);
-        padding: 0.4rem 0.85rem;
-        cursor: pointer;
-        font-family: inherit;
-        font-weight: 500;
-        touch-action: manipulation;
-        transition: border-color 0.12s, color 0.12s, background 0.12s;
-    }
-
-    .kind-bubble.active {
-        border-color: var(--ink-2);
-        color: var(--ink-2);
-        background: var(--paper-2);
-    }
-
-    @media (hover: hover) {
-        .kind-bubble:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .event-fields {
-        display: flex;
-        flex-direction: column;
-        gap: 0.85rem;
-    }
-
-    .field-row {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-
-    .field-row.stacked {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.35rem;
-    }
-
-    .field-label {
-        font-size: var(--t-meta);
-        color: var(--mute);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-        min-width: 5.5rem;
-    }
-
-    .field-row input[type="number"] {
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        padding: 0.45rem 0.65rem;
-        font-family: inherit;
-        font-size: var(--t-body-sm);
-        color: var(--ink);
-        background: var(--paper);
-        font-variant-numeric: tabular-nums;
-    }
-
-    .field-row input[type="number"] {
-        width: 6rem;
-    }
-
-    .field-row textarea {
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        padding: 0.5rem 0.65rem;
-        font-family: inherit;
-        font-size: var(--t-body-sm);
-        background: var(--paper);
-        color: var(--ink);
-        resize: vertical;
-    }
-
-    .quick-pills {
-        display: flex;
-        gap: 0.35rem;
-        flex-wrap: wrap;
-    }
-
-    .quick-pill {
-        background: none;
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        color: var(--mute);
-        font-size: var(--t-meta);
-        padding: 0.2rem 0.6rem;
-        cursor: pointer;
-        font-family: inherit;
-        touch-action: manipulation;
-    }
-
-    @media (hover: hover) {
-        .quick-pill:hover {
-            border-color: var(--ink-2);
-            color: var(--ink-2);
-        }
-    }
-
-    .slider-wrap {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        flex: 1;
-    }
-
-    .slider-wrap input[type="range"] {
-        flex: 1;
-    }
-
-    .slider-val {
-        font-variant-numeric: tabular-nums;
-        font-weight: 600;
-        color: var(--ink);
-        min-width: 1.5rem;
-        text-align: right;
-    }
-
-    .event-actions {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 0.5rem;
-        margin-top: 0.5rem;
-    }
-
-    .event-actions :only-child {
-        margin-left: auto;
-    }
-
-    .event-delete {
-        background: none;
-        color: var(--danger, #c00);
-        border: 1px solid var(--rule);
-        border-radius: var(--r-sm);
-        padding: 0.55rem 1rem;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-        cursor: pointer;
-        min-height: 2.5rem;
-    }
-
-    .event-delete:disabled {
-        opacity: 0.45;
-        cursor: default;
-    }
-
-    @media (hover: hover) {
-        .event-delete:not(:disabled):hover {
-            border-color: var(--danger, #c00);
-        }
-    }
-
-    .event-save {
-        background: var(--ink-2);
-        color: var(--paper);
-        border: none;
-        border-radius: var(--r-sm);
-        padding: 0.55rem 1.4rem;
-        font-size: var(--t-body-sm);
-        font-family: inherit;
-        font-weight: 500;
-        cursor: pointer;
-        min-height: 2.5rem;
-    }
-
-    .event-save:disabled {
-        opacity: 0.45;
-        cursor: default;
-    }
-
-    @media (hover: hover) {
-        .event-save:not(:disabled):hover {
-            background: var(--ink);
-        }
-    }
-
-    @media (max-width: 480px) {
-        .field-label {
-            min-width: 4.5rem;
-            font-size: 0.65rem;
-        }
     }
 
     /* --- Result ledger --- */

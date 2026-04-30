@@ -25,7 +25,8 @@ type Handler struct {
 	gemini  *gemini.Service
 	cacheMu sync.RWMutex
 	cache   map[string]cacheItem
-	// migratedIDs tracks spreadsheet IDs confirmed at CurrentSchemaVersion.
+	// migratedIDs tracks spreadsheet IDs confirmed at CurrentSchemaVersion
+	// so we don't re-check the Meta sheet on every request.
 	migratedMu  sync.RWMutex
 	migratedIDs map[string]bool
 }
@@ -219,8 +220,7 @@ func (h *Handler) sheetsSvc(c *echo.Context, session *auth.Session) (*sheets.Ser
 }
 
 // EnsureSpreadsheetMiddleware returns middleware that finds or creates the
-// user's spreadsheet before any handler runs. The result is memoized via
-// migratedIDs so subsequent requests skip the Sheets API calls.
+// user's spreadsheet before any handler runs.
 func (h *Handler) EnsureSpreadsheetMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -236,7 +236,9 @@ func (h *Handler) EnsureSpreadsheetMiddleware() echo.MiddlewareFunc {
 	}
 }
 
-// ensureSpreadsheet finds or creates the user's spreadsheet.
+// ensureSpreadsheet finds or creates the user's spreadsheet, then runs any
+// pending schema migrations. Migration completion is memoized via migratedIDs
+// so we only hit the Meta sheet once per process per spreadsheet.
 func (h *Handler) ensureSpreadsheet(c *echo.Context, session *auth.Session) error {
 	r := c.Request()
 	if session.SpreadsheetID != "" {
@@ -247,87 +249,88 @@ func (h *Handler) ensureSpreadsheet(c *echo.Context, session *auth.Session) erro
 			return nil
 		}
 		ts := h.auth.TokenSource(r.Context(), session)
-		svc, err := sheets.NewService(r.Context(), ts, session.SpreadsheetID)
-		if err != nil {
-			return h.writeAPIErr(c, err)
-		}
-		version, err := svc.GetSchemaVersion(r.Context())
-		if err != nil {
-			return h.writeAPIErr(c, err)
-		}
-		if version < sheets.CurrentSchemaVersion {
-			if err := h.runMigrations(c, ts, session.SpreadsheetID, version); err != nil {
-				return err
-			}
+		if err := h.checkAndMigrate(c, ts, session.SpreadsheetID); err != nil {
+			return err
 		}
 		h.migratedMu.Lock()
 		h.migratedIDs[session.SpreadsheetID] = true
 		h.migratedMu.Unlock()
 		return nil
 	}
-	ts := h.auth.TokenSource(r.Context(), session)
 
+	ts := h.auth.TokenSource(r.Context(), session)
 	id, err := sheets.FindExistingSpreadsheet(r.Context(), ts, session.UserEmail)
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
-
-	if id != "" {
-		svc, err := sheets.NewService(r.Context(), ts, id)
-		if err != nil {
-			return h.writeAPIErr(c, err)
-		}
-		version, err := svc.GetSchemaVersion(r.Context())
-		if err != nil {
-			return h.writeAPIErr(c, err)
-		}
-		if version < 1 {
-			return writeErr(c, http.StatusConflict, "incompatible_spreadsheet")
-		}
-		if err := h.runMigrations(c, ts, id, version); err != nil {
-			return err
-		}
-		session.SpreadsheetID = id
-	} else {
+	if id == "" {
 		id, err = sheets.CreateSpreadsheet(r.Context(), ts, session.UserEmail)
 		if err != nil {
 			return h.writeAPIErr(c, err)
 		}
-		session.SpreadsheetID = id
+	} else {
+		if err := h.checkAndMigrate(c, ts, id); err != nil {
+			return err
+		}
 	}
-
+	session.SpreadsheetID = id
+	h.migratedMu.Lock()
+	h.migratedIDs[id] = true
+	h.migratedMu.Unlock()
 	if err := h.auth.SetSession(c, session); err != nil {
 		return writeErr(c, http.StatusInternalServerError, "session save failed")
 	}
 	return nil
 }
 
-func (h *Handler) runMigrations(c *echo.Context, ts oauth2.TokenSource, spreadsheetID string, version int) error {
+// checkAndMigrate reads the spreadsheet's schema version and runs any pending
+// migrations. If the sheet is older than CurrentSchemaVersion and no migration
+// path is registered to advance it, returns 409 unsupported_legacy_sheet so
+// the frontend can prompt the user to start over with a fresh spreadsheet.
+func (h *Handler) checkAndMigrate(c *echo.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	ctx := c.Request().Context()
+	svc, err := sheets.NewService(ctx, ts, spreadsheetID)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	version, err := svc.GetSchemaVersion(ctx)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if version == sheets.CurrentSchemaVersion {
+		return nil
+	}
+	final, err := h.runMigrations(c, ts, spreadsheetID, version)
+	if err != nil {
+		return err
+	}
+	if final != sheets.CurrentSchemaVersion {
+		return writeErr(c, http.StatusConflict, "unsupported_legacy_sheet")
+	}
+	return nil
+}
+
+// runMigrations advances spreadsheetID from `version` toward CurrentSchemaVersion,
+// running each registered step in order. Returns the version reached (which may
+// be < CurrentSchemaVersion if no step is registered for `version`). Append a
+// new entry to `steps` and bump CurrentSchemaVersion to introduce a schema change.
+func (h *Handler) runMigrations(c *echo.Context, ts oauth2.TokenSource, spreadsheetID string, version int) (int, error) {
 	ctx := c.Request().Context()
 	type step struct {
 		from    int
 		migrate func(context.Context, oauth2.TokenSource, string) error
 	}
 	steps := []step{
-		{1, sheets.MigrateV1toV2},
-		{2, sheets.MigrateV2toV3},
-		{3, sheets.MigrateV3toV4},
-		{4, sheets.MigrateV4toV5},
-		{5, sheets.MigrateV5toV6},
-		{6, sheets.MigrateV6toV7},
-		{7, sheets.MigrateV7toV8},
-		{8, sheets.MigrateV8toV9},
-		{9, sheets.MigrateV9toV10},
-		{10, sheets.MigrateV10toV11},
-		{11, sheets.MigrateV11toV12},
+		// Register future migrations here, e.g.:
+		// {12, sheets.MigrateV12toV13},
 	}
 	for _, s := range steps {
 		if version == s.from {
 			if err := s.migrate(ctx, ts, spreadsheetID); err != nil {
-				return writeErr(c, http.StatusInternalServerError, "migration failed: "+err.Error())
+				return version, writeErr(c, http.StatusInternalServerError, "migration failed: "+err.Error())
 			}
 			version++
 		}
 	}
-	return nil
+	return version, nil
 }

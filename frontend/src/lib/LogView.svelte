@@ -782,63 +782,6 @@
 
     // --- Weekly insights & suggestions ---
 
-    async function fetchInsights(weekStart: string, weekEnd: string, regenerate = false) {
-        insightsByWeek = {
-            ...insightsByWeek,
-            [weekStart]: {
-                open: true,
-                loading: true,
-                text: null,
-                error: null,
-                generatedAt: null,
-                loaded: false,
-            },
-        };
-        try {
-            if (!regenerate) {
-                const stored = await fetchStoredInsight(weekStart, weekEnd);
-                if (stored.insight) {
-                    insightsByWeek = {
-                        ...insightsByWeek,
-                        [weekStart]: {
-                            open: true,
-                            loading: false,
-                            text: stored.insight,
-                            error: null,
-                            generatedAt: stored.generated_at ?? null,
-                            loaded: true,
-                        },
-                    };
-                    return;
-                }
-            }
-            const res = await generateInsights(weekStart, weekEnd);
-            insightsByWeek = {
-                ...insightsByWeek,
-                [weekStart]: {
-                    open: true,
-                    loading: false,
-                    text: res.insight ?? null,
-                    error: null,
-                    generatedAt: res.generated_at ?? null,
-                    loaded: true,
-                },
-            };
-        } catch {
-            insightsByWeek = {
-                ...insightsByWeek,
-                [weekStart]: {
-                    open: true,
-                    loading: false,
-                    text: null,
-                    error: "Could not load insights",
-                    generatedAt: null,
-                    loaded: true,
-                },
-            };
-        }
-    }
-
     function canCloseDayInsight(insight: InsightPanelState | null): boolean {
         return Boolean(insight && !insight.loading && (insight.error || insight.text != null));
     }
@@ -848,92 +791,90 @@
         dayInsight = { ...dayInsight, open: false };
     }
 
-    function toggleInsights(weekStart: string, weekEnd: string) {
-        const cur = insightsByWeek[weekStart];
-        if (!cur || !cur.loaded) {
-            fetchInsights(weekStart, weekEnd, false);
-        } else {
-            insightsByWeek = {
-                ...insightsByWeek,
-                [weekStart]: { ...cur, open: !cur.open },
-            };
-        }
-    }
-
-    async function fetchWeekSuggestions(
+    // Loads/regenerates a per-week panel (insights or suggestions). Each panel
+    // state lives in its own map keyed by weekStart; behavior is identical
+    // beyond the API endpoints and error string.
+    async function fetchWeekPanel(
+        map: Record<string, WeekInsightPanelState>,
+        setMap: (next: Record<string, WeekInsightPanelState>) => void,
         weekStart: string,
         weekEnd: string,
-        regenerate = false,
+        regenerate: boolean,
+        fetchStored: (s: string, e: string) => Promise<{ text: string | null; generatedAt: string | null }>,
+        generate: (s: string, e: string) => Promise<{ text: string | null; generatedAt: string | null }>,
+        errorText: string,
     ): Promise<void> {
-        suggestionsByWeek = {
-            ...suggestionsByWeek,
-            [weekStart]: {
-                open: true,
-                loading: true,
-                text: null,
-                error: null,
-                generatedAt: null,
-                loaded: false,
-            },
-        };
+        const set = (state: WeekInsightPanelState) =>
+            setMap({ ...map, [weekStart]: state });
+        set({ open: true, loading: true, text: null, error: null, generatedAt: null, loaded: false });
         try {
             if (!regenerate) {
-                const stored = await fetchStoredWeekSuggestions(
-                    weekStart,
-                    weekEnd,
-                );
-                if (stored.suggestions) {
-                    suggestionsByWeek = {
-                        ...suggestionsByWeek,
-                        [weekStart]: {
-                            open: true,
-                            loading: false,
-                            text: stored.suggestions,
-                            error: null,
-                            generatedAt: stored.generated_at ?? null,
-                            loaded: true,
-                        },
-                    };
+                const stored = await fetchStored(weekStart, weekEnd);
+                if (stored.text) {
+                    set({ open: true, loading: false, text: stored.text, error: null, generatedAt: stored.generatedAt, loaded: true });
                     return;
                 }
             }
-            const res = await generateWeekSuggestions(weekStart, weekEnd);
-            suggestionsByWeek = {
-                ...suggestionsByWeek,
-                [weekStart]: {
-                    open: true,
-                    loading: false,
-                    text: res.suggestions ?? null,
-                    error: null,
-                    generatedAt: res.generated_at ?? null,
-                    loaded: true,
-                },
-            };
+            const res = await generate(weekStart, weekEnd);
+            set({ open: true, loading: false, text: res.text, error: null, generatedAt: res.generatedAt, loaded: true });
         } catch {
-            suggestionsByWeek = {
-                ...suggestionsByWeek,
-                [weekStart]: {
-                    open: true,
-                    loading: false,
-                    text: null,
-                    error: "Could not load suggestions",
-                    generatedAt: null,
-                    loaded: true,
-                },
-            };
+            set({ open: true, loading: false, text: null, error: errorText, generatedAt: null, loaded: true });
         }
     }
 
+    function togglePanel(
+        map: Record<string, WeekInsightPanelState>,
+        setMap: (next: Record<string, WeekInsightPanelState>) => void,
+        weekStart: string,
+        load: () => void,
+    ): void {
+        const cur = map[weekStart];
+        if (!cur || !cur.loaded) load();
+        else setMap({ ...map, [weekStart]: { ...cur, open: !cur.open } });
+    }
+
+    function fetchInsights(weekStart: string, weekEnd: string, regenerate = false): Promise<void> {
+        return fetchWeekPanel(
+            insightsByWeek,
+            (next) => (insightsByWeek = next),
+            weekStart, weekEnd, regenerate,
+            async (s, e) => {
+                const r = await fetchStoredInsight(s, e);
+                return { text: r.insight ?? null, generatedAt: r.generated_at ?? null };
+            },
+            async (s, e) => {
+                const r = await generateInsights(s, e);
+                return { text: r.insight ?? null, generatedAt: r.generated_at ?? null };
+            },
+            "Could not load insights",
+        );
+    }
+
+    function toggleInsights(weekStart: string, weekEnd: string) {
+        togglePanel(insightsByWeek, (next) => (insightsByWeek = next), weekStart,
+            () => fetchInsights(weekStart, weekEnd, false));
+    }
+
+    function fetchWeekSuggestions(weekStart: string, weekEnd: string, regenerate = false): Promise<void> {
+        return fetchWeekPanel(
+            suggestionsByWeek,
+            (next) => (suggestionsByWeek = next),
+            weekStart, weekEnd, regenerate,
+            async (s, e) => {
+                const r = await fetchStoredWeekSuggestions(s, e);
+                return { text: r.suggestions ?? null, generatedAt: r.generated_at ?? null };
+            },
+            async (s, e) => {
+                const r = await generateWeekSuggestions(s, e);
+                return { text: r.suggestions ?? null, generatedAt: r.generated_at ?? null };
+            },
+            "Could not load suggestions",
+        );
+    }
+
     function toggleWeekSuggestions(weekStart: string, weekEnd: string) {
-        const cur = suggestionsByWeek[weekStart];
-        if (!cur || !cur.loaded) {
-            fetchWeekSuggestions(weekStart, weekEnd, false);
-        } else {
-            suggestionsByWeek = {
-                ...suggestionsByWeek,
-                [weekStart]: { ...cur, open: !cur.open },
-            };
-        }
+        togglePanel(suggestionsByWeek, (next) => (suggestionsByWeek = next), weekStart,
+            () => fetchWeekSuggestions(weekStart, weekEnd, false));
     }
 </script>
 

@@ -18,8 +18,8 @@
     const legalHtml = marked.parse(legalMd) as string;
 
     let authed = $state<boolean | null>(null); // null=loading, false=logged out, true=logged in
-    let schemaError = $state(false);
     let scopeError = $state(false);
+    let legacySheetError = $state(false);
     let sessionExpired = $state(false);
     let loadError = $state("");
 
@@ -37,7 +37,7 @@
 
     async function checkAuth() {
         scopeError = false;
-        schemaError = false;
+        legacySheetError = false;
         sessionExpired = false;
         loadError = "";
         try {
@@ -56,8 +56,8 @@
                     authed = false;
                 }
             } else if (res.status === 409) {
-                if ((await readError(res)) === "incompatible_spreadsheet") {
-                    schemaError = true;
+                if ((await readError(res)) === "unsupported_legacy_sheet") {
+                    legacySheetError = true;
                     authed = false;
                 } else {
                     loadError = "Could not load the app. Try reloading, or sign out and back in.";
@@ -141,7 +141,7 @@
                 </p>
             </main>
         </div>
-    {:else if schemaError}
+    {:else if legacySheetError}
         <div class="landing">
             <header class="top-nav">
                 <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
@@ -149,8 +149,10 @@
             </header>
             <main class="content">
                 <p class="error-msg">
-                    Your existing Food Tracker spreadsheet is from an older version.<br />
-                    Please rename it in Google Drive, then reload the page to create a fresh one.
+                    Your existing Food Tracker spreadsheet is from an older,
+                    no-longer-supported schema.<br />
+                    Rename it (or move it out of the way) in Google Drive, then
+                    reload — a fresh spreadsheet will be created automatically.
                 </p>
             </main>
         </div>
