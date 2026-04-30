@@ -34,6 +34,7 @@
     import { showError } from "./toast.ts";
     import { navigate } from "./router.svelte.ts";
     import ThemeToggle from "./ThemeToggle.svelte";
+    import SystemPromptModal from "./SystemPromptModal.svelte";
     import { MEAL_ORDER } from "./types.ts";
     import type {
         Entry,
@@ -54,6 +55,8 @@
     let view = $state<ViewMode>("day");
     let currentDate = $state(todayStr());
     let menuOpen = $state(false);
+    let gearOpen = $state(false);
+    let promptOpen = $state(false);
     let drawerOpen = $state(false);
     let drawerDate = $state<string | null>(null);
     let drawerMeal = $state<MealType | null>(null);
@@ -967,78 +970,36 @@
                         <button class:active={view === "history"} onclick={() => { view = "history"; menuOpen = false; }}>History</button>
                         <button class:active={view === "favorites"} onclick={() => { view = "favorites"; menuOpen = false; }}>Favorites</button>
                         <button class:active={view === "coach"} onclick={() => { view = "coach"; menuOpen = false; }}>Coach</button>
-                        <hr />
-                        <button class:active={view === "profile"} onclick={() => { view = "profile"; menuOpen = false; }}>Profile</button>
                     </nav>
                 {/if}
             </div>
             <div class="header-actions">
                 <ThemeToggle />
-                {#if spreadsheetUrl}
-                    <a
-                        class="sheet-link"
-                        href={spreadsheetUrl}
-                        target="_blank"
-                        rel="noopener"
-                        aria-label="Open Google Sheet"
-                        title="Open Google Sheet"
+                <div class="gear-wrap">
+                    <button
+                        class="gear-btn"
+                        onclick={() => (gearOpen = !gearOpen)}
+                        aria-label="Settings"
+                        aria-expanded={gearOpen}
+                        title="Settings"
                     >
-                        <svg
-                            width="15"
-                            height="15"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            ><path
-                                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                            /><polyline points="14 2 14 8 20 8" /><line
-                                x1="8"
-                                y1="13"
-                                x2="16"
-                                y2="13"
-                            /><line x1="8" y1="17" x2="16" y2="17" /><polyline
-                                points="10 9 9 9 8 9"
-                            /></svg
-                        >
-                    </a>
-                {/if}
-                <a
-                    class="home-btn"
-                    href="/"
-                    onclick={(e: MouseEvent) => { e.preventDefault(); navigate("/"); }}
-                    aria-label="Home"
-                    title="Home"
-                >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
-                </a>
-                <a
-                    class="signout-btn"
-                    href="/auth/logout"
-                    aria-label="Sign out"
-                    title="Sign out"
-                >
-                    <svg
-                        width="15"
-                        height="15"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        ><path
-                            d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
-                        /><polyline points="16 17 21 12 16 7" /><line
-                            x1="21"
-                            y1="12"
-                            x2="9"
-                            y2="12"
-                        /></svg
-                    >
-                </a>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+                    </button>
+                    {#if gearOpen}
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <div class="menu-backdrop" aria-hidden="true" onclick={() => (gearOpen = false)}></div>
+                        <nav class="gear-menu">
+                            <button class:active={view === "profile"} onclick={() => { view = "profile"; gearOpen = false; }}>Profile</button>
+                            <button onclick={() => { promptOpen = true; gearOpen = false; }}>System prompt</button>
+                            {#if spreadsheetUrl}
+                                <a href={spreadsheetUrl} target="_blank" rel="noopener" onclick={() => (gearOpen = false)}>Open Google Sheet</a>
+                            {/if}
+                            <hr />
+                            <a href="/" onclick={(e: MouseEvent) => { e.preventDefault(); gearOpen = false; navigate("/"); }}>Home</a>
+                            <a href="/auth/logout">Sign out</a>
+                        </nav>
+                    {/if}
+                </div>
             </div>
         </div>
         {#if view === "history"}
@@ -1384,6 +1345,10 @@
     {/if}
 </div>
 
+{#if promptOpen}
+    <SystemPromptModal onClose={() => (promptOpen = false)} />
+{/if}
+
 {#if view === "day"}
 <button
     class="fab"
@@ -1532,12 +1497,6 @@
     .nav-menu button:hover {
         background: var(--paper-4);
         color: var(--ink);
-    }
-
-    .nav-menu hr {
-        border: none;
-        border-top: 1px solid var(--rule);
-        margin: 0.25rem 0;
     }
 
     /* Week picker */
@@ -2166,58 +2125,82 @@ section {
         gap: 0.25rem;
     }
 
-    .home-btn {
-        display: flex;
-        align-items: center;
-        color: var(--mute);
-        padding: 0.5rem 0.4rem;
-        text-decoration: none;
-        touch-action: manipulation;
-        min-height: 2.75rem;
-    }
-
-    @media (hover: hover) {
-        .home-btn:hover {
-            color: var(--ink-2);
-        }
-    }
-
-    .sheet-link {
-        display: flex;
-        align-items: center;
-        color: var(--mute);
-        padding: 0.5rem 0.4rem;
-        text-decoration: none;
-        touch-action: manipulation;
-        min-height: 2.75rem;
-    }
-
-    @media (hover: hover) {
-        .sheet-link:hover {
-            color: var(--ink-2);
-        }
-    }
-
-.header-actions :global(.theme-toggle) {
+    .header-actions :global(.theme-toggle) {
         font-size: 1rem;
         color: var(--mute);
         padding: 0.5rem 0.4rem;
         min-height: 2.75rem;
     }
 
-    .signout-btn {
+    .gear-wrap {
+        position: relative;
         display: flex;
         align-items: center;
+    }
+
+    .gear-btn {
+        display: flex;
+        align-items: center;
+        background: none;
+        border: none;
         color: var(--mute);
         padding: 0.5rem 0.4rem;
-        text-decoration: none;
+        cursor: pointer;
         touch-action: manipulation;
         min-height: 2.75rem;
+        font-family: inherit;
     }
 
     @media (hover: hover) {
-        .signout-btn:hover {
+        .gear-btn:hover {
             color: var(--ink-2);
         }
+    }
+
+    .gear-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.35rem;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-md);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+        min-width: 180px;
+        padding: 0.35rem 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .gear-menu button,
+    .gear-menu a {
+        background: none;
+        border: none;
+        text-align: left;
+        padding: 0.55rem 1rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        color: var(--mute);
+        cursor: pointer;
+        font-weight: 500;
+        text-decoration: none;
+        display: block;
+    }
+
+    .gear-menu button.active {
+        color: var(--ink);
+    }
+
+    .gear-menu button:hover,
+    .gear-menu a:hover {
+        background: var(--paper-4);
+        color: var(--ink);
+    }
+
+    .gear-menu hr {
+        border: none;
+        border-top: 1px solid var(--rule);
+        margin: 0.25rem 0;
     }
 </style>

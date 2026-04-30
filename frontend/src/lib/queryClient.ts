@@ -4,7 +4,11 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60_000,
-      refetchOnWindowFocus: true,
+      // 'always' (vs true) refetches on focus regardless of staleTime — needed
+      // so a mobile pocket trip under staleTime still pulls fresh state when
+      // the tab resumes. Fires on visibilitychange, which iOS Safari emits
+      // reliably on resume.
+      refetchOnWindowFocus: "always",
       refetchOnReconnect: true,
       // Retry network/5xx errors twice — covers the iOS-Safari case where a tab
       // resumed from background fires a fetch before the network is ready. Skip

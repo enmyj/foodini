@@ -17,6 +17,10 @@ import (
 // rather drop than carry into a new conversation.
 const agentSessionTTL = 30 * time.Minute
 
+// AgentSystemPrompt is the system instruction used for the chat-drawer agent.
+// Exported so the frontend can render it for users curious about the prompt.
+const AgentSystemPrompt = agentSystemPrompt
+
 const agentSystemPrompt = `You are the user's food + daily log assistant. They're in a single chat drawer and might want to: add/edit/scale/repeat meals, log activity, stool, hydration, or feelings, save a favorite, or just ask questions about their log.
 
 Pick the right tool based on intent. If no tool fits, reply in plain text.

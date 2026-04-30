@@ -24,6 +24,7 @@
     let loadError = $state("");
 
     let path = $derived<RoutePath>(getCurrent());
+    let moreOpen = $state(false);
 
     async function readError(res: Response): Promise<string> {
         const contentType = res.headers.get("content-type") || "";
@@ -131,7 +132,7 @@
     {:else if scopeError}
         <div class="landing">
             <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
                 <a href="/auth/logout" class="btn">Sign out</a>
             </header>
             <main class="content">
@@ -144,7 +145,7 @@
     {:else if legacySheetError}
         <div class="landing">
             <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
                 <a href="/auth/logout" class="btn">Sign out</a>
             </header>
             <main class="content">
@@ -159,7 +160,7 @@
     {:else if sessionExpired}
         <div class="landing">
             <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
                 <a href="/auth/login" class="btn">Sign in with Google</a>
             </header>
             <main class="content">
@@ -172,7 +173,7 @@
     {:else if loadError}
         <div class="landing">
             <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
                 <a href="/auth/logout" class="btn">Sign out</a>
             </header>
             <main class="content">
@@ -182,7 +183,7 @@
     {:else if authed === false}
         <div class="landing">
             <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
+                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
                 <a href="/auth/login" class="btn">Sign in with Google</a>
             </header>
             <main class="content">
@@ -201,8 +202,22 @@
             <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>Food Tracker</a>
             <nav class="nav-links">
                 <ThemeToggle />
-                <a href="/about" onclick={(e) => go(e, '/about')}>About</a>
-                <a href="/legal" onclick={(e) => go(e, '/legal')}>Privacy Policy</a>
+                <div class="more-wrap">
+                    <button
+                        class="more-btn"
+                        onclick={() => (moreOpen = !moreOpen)}
+                        aria-expanded={moreOpen}
+                        aria-label="More"
+                    >More <span class="caret" aria-hidden="true">▾</span></button>
+                    {#if moreOpen}
+                        <!-- svelte-ignore a11y_click_events_have_key_events -->
+                        <div class="menu-backdrop" aria-hidden="true" onclick={() => (moreOpen = false)}></div>
+                        <div class="more-menu">
+                            <a href="/about" onclick={(e) => { moreOpen = false; go(e, '/about'); }}>About</a>
+                            <a href="/legal" onclick={(e) => { moreOpen = false; go(e, '/legal'); }}>Privacy Policy</a>
+                        </div>
+                    {/if}
+                </div>
                 <a href="/auth/login" class="btn" onclick={startApp}>Open app</a>
             </nav>
         </header>
@@ -283,6 +298,65 @@
     }
 
     .nav-links a:not(.btn):hover {
+        color: var(--ink);
+    }
+
+    .more-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .more-btn {
+        background: none;
+        border: none;
+        font-family: inherit;
+        font-size: var(--t-meta);
+        color: var(--mute);
+        cursor: pointer;
+        padding: 0.25rem 0;
+    }
+
+    .more-btn:hover {
+        color: var(--ink);
+    }
+
+    .caret {
+        font-size: 0.75em;
+        margin-left: 0.15em;
+    }
+
+    .menu-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+    }
+
+    .more-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.4rem;
+        background: var(--paper);
+        border: 1px solid var(--rule);
+        border-radius: var(--r-md);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+        min-width: 160px;
+        padding: 0.35rem 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .more-menu a {
+        padding: 0.55rem 1rem;
+        font-size: var(--t-body-sm);
+        color: var(--mute);
+        text-decoration: none;
+    }
+
+    .more-menu a:hover {
+        background: var(--paper-4);
         color: var(--ink);
     }
 

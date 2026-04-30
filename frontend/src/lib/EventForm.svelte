@@ -256,12 +256,13 @@
         min-width: 5.5rem;
     }
 
+    /* font-size: 16px on focusable inputs prevents iOS Safari auto-zoom-and-stuck */
     .field-row input[type="number"] {
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
         padding: 0.45rem 0.65rem;
         font-family: inherit;
-        font-size: var(--t-body-sm);
+        font-size: 16px;
         color: var(--ink);
         background: var(--paper);
         font-variant-numeric: tabular-nums;
@@ -273,7 +274,7 @@
         border-radius: var(--r-sm);
         padding: 0.5rem 0.65rem;
         font-family: inherit;
-        font-size: var(--t-body-sm);
+        font-size: 16px;
         background: var(--paper);
         color: var(--ink);
         resize: vertical;

@@ -122,6 +122,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.DELETE("/entries/:id", apiHandler.DeleteEntry)
 	apiGroup.GET("/profile", apiHandler.GetProfile)
 	apiGroup.PUT("/profile", apiHandler.PutProfile)
+	apiGroup.GET("/system-prompt", apiHandler.GetSystemPrompt)
 	apiGroup.GET("/favorites", apiHandler.GetFavorites)
 	apiGroup.POST("/favorites", apiHandler.AddFavorite)
 	apiGroup.DELETE("/favorites/:id", apiHandler.DeleteFavorite)

@@ -411,3 +411,8 @@ export async function putProfile(profile: Profile): Promise<Profile> {
         body: JSON.stringify(profile),
     });
 }
+
+export async function getSystemPrompt(): Promise<string> {
+    const data = await apiFetchJson<{ prompt: string }>("/api/system-prompt");
+    return data.prompt;
+}
