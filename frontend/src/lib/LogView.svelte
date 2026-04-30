@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
@@ -164,6 +165,16 @@
     // Derive load error from active query
     let loadError = $derived.by(() => {
         const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
+        const hasData =
+            view === "day"
+                ? Boolean(dayQuery.data)
+                : view === "history"
+                  ? Boolean(historyQuery.data)
+                  : false;
+        // Keep showing the last good snapshot if a background refetch fails.
+        // This is common on iOS when Safari resumes before the network is
+        // fully ready; the query will usually recover on its own.
+        if (hasData) return "";
         if (!err) return "";
         if (err?.status === 401 || err?.code === "session_expired")
             return "Your session expired. Sign in again.";
@@ -175,7 +186,46 @@
     });
     let loadErrorAction = $derived.by<{ href: string; label: string } | null>(() => {
         const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
+        const hasData =
+            view === "day"
+                ? Boolean(dayQuery.data)
+                : view === "history"
+                  ? Boolean(historyQuery.data)
+                  : false;
+        if (hasData) return null;
         if (!err) return null;
+        if (err?.status === 401 || err?.code === "session_expired")
+            return { href: "/auth/login", label: "Sign in" };
+        if (err?.code === "insufficient_scopes")
+            return { href: "/auth/login?consent=1", label: "Re-authorize" };
+        return null;
+    });
+    let refreshNotice = $derived.by(() => {
+        const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
+        const hasData =
+            view === "day"
+                ? Boolean(dayQuery.data)
+                : view === "history"
+                  ? Boolean(historyQuery.data)
+                  : false;
+        if (!err || !hasData) return "";
+        if (err?.status === 401 || err?.code === "session_expired")
+            return "Session expired. Sign in again to refresh.";
+        if (err?.code === "insufficient_scopes")
+            return "Google permissions are missing. Re-authorize to refresh.";
+        return view === "day"
+            ? "Could not refresh. Showing the last loaded day."
+            : "Could not refresh. Showing the last loaded history.";
+    });
+    let refreshNoticeAction = $derived.by<{ href: string; label: string } | null>(() => {
+        const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
+        const hasData =
+            view === "day"
+                ? Boolean(dayQuery.data)
+                : view === "history"
+                  ? Boolean(historyQuery.data)
+                  : false;
+        if (!err || !hasData) return null;
         if (err?.status === 401 || err?.code === "session_expired")
             return { href: "/auth/login", label: "Sign in" };
         if (err?.code === "insufficient_scopes")
@@ -184,6 +234,24 @@
     });
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
+
+    onMount(() => {
+        function refreshActiveView() {
+            if (document.visibilityState === "hidden") return;
+            if (view === "day") {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.logDay(currentDate) });
+            } else if (view === "history") {
+                void queryClient.invalidateQueries({ queryKey: queryKeys.logHistory(historyWeeks) });
+            }
+        }
+
+        window.addEventListener("pageshow", refreshActiveView);
+        document.addEventListener("visibilitychange", refreshActiveView);
+        return () => {
+            window.removeEventListener("pageshow", refreshActiveView);
+            document.removeEventListener("visibilitychange", refreshActiveView);
+        };
+    });
 
     type TimelineItem =
         | {
@@ -1062,6 +1130,16 @@
             {/if}
         </div>
     {:else if view === "day"}
+        {#if refreshNotice}
+            <div class="refresh-notice">
+                <span>{refreshNotice}</span>
+                {#if refreshNoticeAction}
+                    <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
+                {:else}
+                    <button type="button" onclick={() => dayQuery.refetch()}>Retry</button>
+                {/if}
+            </div>
+        {/if}
         {#if dayInsight?.open}
             <div class="day-insights-panel">
                 <InsightPanel
@@ -1273,6 +1351,16 @@
     {:else if view === "profile"}
         <ProfilePanel onClose={closeProfile} />
     {:else}
+        {#if refreshNotice}
+            <div class="refresh-notice">
+                <span>{refreshNotice}</span>
+                {#if refreshNoticeAction}
+                    <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
+                {:else}
+                    <button type="button" onclick={() => historyQuery.refetch()}>Retry</button>
+                {/if}
+            </div>
+        {/if}
         {#each weekGroupsData as week}
             <HistoryWeekBlock
                 {week}
@@ -1909,6 +1997,30 @@ section {
         padding: 0;
         font-family: inherit;
         cursor: pointer;
+    }
+
+    .refresh-notice {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.65rem;
+        color: var(--mute);
+        font-size: var(--t-meta);
+        margin: -0.15rem 0 1rem;
+        text-align: center;
+    }
+
+    .refresh-notice a,
+    .refresh-notice button {
+        color: var(--ink-2);
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+        white-space: nowrap;
     }
 
     .insights-btn {
