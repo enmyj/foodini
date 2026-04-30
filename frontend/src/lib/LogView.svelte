@@ -1051,6 +1051,14 @@
                 <a class="state-link" href={loadErrorAction.href}
                     >{loadErrorAction.label}</a
                 >
+            {:else}
+                <button
+                    class="state-link"
+                    type="button"
+                    onclick={() => {
+                        if (view === "day") dayQuery.refetch();
+                        else if (view === "history") historyQuery.refetch();
+                    }}>Retry</button>
             {/if}
         </div>
     {:else if view === "day"}
@@ -1896,6 +1904,11 @@ section {
         text-decoration: underline;
         text-underline-offset: 2px;
         font-size: var(--t-body-sm);
+        background: none;
+        border: none;
+        padding: 0;
+        font-family: inherit;
+        cursor: pointer;
     }
 
     .insights-btn {

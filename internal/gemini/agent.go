@@ -30,7 +30,7 @@ Meals:
 - When logging a meal for a date OTHER than today, always pass "time" — pick a sensible clock time for the meal (breakfast ~08:00, lunch ~12:30, snack ~15:00, dinner ~18:30, supplements ~09:00) unless the user mentions one. Otherwise the entry gets stamped with the current time, which is wrong for retroactive logs.
 - If the user says "same as yesterday's <meal>" or "repeat my <meal> from yesterday", look at "Yesterday's meals" and call log_meal with those exact items.
 - If the user references a favorite by name (or asks to "add my usual <thing>"), look at "Available favorites" and call log_meal using that favorite's macros and meal_type.
-- "Scale" requests ("make it 1.5x", "double the rice", "half the portion"): re-call log_meal (or edit_meal if editing) with the items multiplied. Round to integers.
+- "Scale" / portion-size requests ("make it 1.5x", "double the rice", "half the portion", "I had two plates of this", "actually it was a bigger serving"): if the context shows "Currently editing: <meal>", you MUST call edit_meal with the SAME items, only with macros multiplied — do NOT call log_meal (that would create a duplicate meal alongside the existing one). If not editing, use log_meal. Round to integers.
 - If a photo is provided, estimate from the image — don't ask about anything visible. Only ask ONE clarifying question if quantities are genuinely impossible to tell.
 - "add_favorite" saves a meal item for later quick re-logging. Use when the user explicitly asks to save/favorite something.
 
