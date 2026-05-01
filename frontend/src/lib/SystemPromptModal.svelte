@@ -28,7 +28,7 @@
         <header>
             <div>
                 <h2>System prompt</h2>
-                <p class="sub">The instructions sent to the AI assistant in the chat drawer.</p>
+                <p class="sub">The coaching guidance the AI follows when generating your daily and weekly insights.</p>
             </div>
             <button class="close" onclick={onClose} aria-label="Close">×</button>
         </header>

@@ -10,6 +10,6 @@ import (
 
 func (h *Handler) GetSystemPrompt(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
-		"prompt": gemini.AgentSystemPrompt,
+		"prompt": gemini.InsightsSystemPrompt,
 	})
 }
