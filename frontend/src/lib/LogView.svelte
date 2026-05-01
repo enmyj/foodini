@@ -981,7 +981,7 @@ type TimelineItem =
     }
 </script>
 
-<div class="wrap">
+<div class="wrap" class:coach-view={view === "coach"}>
     <header>
         <div class="header-top">
             <div class="nav-left">
@@ -1437,10 +1437,19 @@ type TimelineItem =
         padding: 0 1.25rem 6rem;
     }
 
+    .wrap.coach-view {
+        padding-bottom: 0;
+        height: 100dvh;
+        display: flex;
+        flex-direction: column;
+    }
+
     .coach-pane {
         display: flex;
         flex-direction: column;
-        min-height: calc(100dvh - 8rem);
+        flex: 1;
+        min-height: 0;
+        padding-bottom: env(safe-area-inset-bottom, 0);
     }
 
     header {
