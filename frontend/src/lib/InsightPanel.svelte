@@ -18,6 +18,7 @@
         onClose = null,
         onToggleExpanded = null,
         onRegenerate = null,
+        onDiscuss = null,
     }: {
         loading: boolean;
         error?: string | null;
@@ -32,12 +33,16 @@
         onClose?: (() => void) | null;
         onToggleExpanded?: (() => void) | null;
         onRegenerate?: (() => void) | null;
+        onDiscuss?: (() => void) | null;
     } = $props();
 
     let showToggle = $derived(
         Boolean(showMoreToggle && generatedAt && onToggleExpanded),
     );
-    let footerVisible = $derived(Boolean(generatedAt) || showToggle);
+    let showDiscuss = $derived(Boolean(onDiscuss && text && generatedAt));
+    let footerVisible = $derived(
+        Boolean(generatedAt) || showToggle || showDiscuss,
+    );
 </script>
 
 <div class="insights-panel" class:suggestions-panel={variant === "suggestion"}>
@@ -71,6 +76,11 @@
             <div class="insight-footer">
                 {#if generatedAt}
                     <span class="insight-ts">{formatGeneratedAt(generatedAt)}</span>
+                {/if}
+                {#if showDiscuss && onDiscuss}
+                    <button class="insight-discuss" onclick={onDiscuss}>
+                        discuss with coach
+                    </button>
                 {/if}
                 {#if onRegenerate}
                     <button class="insight-regen" onclick={onRegenerate}>
@@ -189,7 +199,8 @@
         color: var(--mute-3);
     }
 
-    .insight-regen {
+    .insight-regen,
+    .insight-discuss {
         background: none;
         border: none;
         font-family: inherit;
@@ -198,11 +209,16 @@
         cursor: pointer;
         padding: 0;
         touch-action: manipulation;
+    }
+
+    .insight-discuss,
+    .insight-regen {
         margin-left: auto;
     }
 
     @media (hover: hover) {
-        .insight-regen:hover {
+        .insight-regen:hover,
+        .insight-discuss:hover {
             color: var(--ink-mute);
         }
     }

@@ -267,7 +267,7 @@
           }
         | { kind: "event"; event: LogEvent; time: string };
 
-    // Snacks split into clusters: any gap >60min between entry times starts a
+    // Snacks split into clusters: any gap >30min between entry times starts a
     // new cluster. Each cluster gets a time-of-day label. Untimed snacks land
     // in a trailing cluster labeled plainly "snack".
     function snackClusters(
@@ -284,7 +284,7 @@
         for (const e of timed) {
             const [h, m] = (e.time as string).split(":");
             const min = Number(h) * 60 + Number(m);
-            if (cur.length === 0 || min - prevMin <= 60) cur.push(e);
+            if (cur.length === 0 || min - prevMin <= 30) cur.push(e);
             else {
                 clusters.push(cur);
                 cur = [e];
@@ -460,6 +460,17 @@
     function suggestNextMeal() {
         if (!nextSuggestableMeal) return;
         coachPrefill = `Suggest a ${nextSuggestableMeal} for today.`;
+        view = "coach";
+    }
+
+    function discussInsight(text: string | null) {
+        if (!text) return;
+        const quoted = text
+            .trim()
+            .split("\n")
+            .map((line) => `> ${line}`)
+            .join("\n");
+        coachPrefill = `${quoted}\n\n`;
         view = "coach";
     }
 
@@ -1116,6 +1127,7 @@
                     onToggleExpanded={() =>
                         (dayInsightExpanded = !dayInsightExpanded)}
                     onRegenerate={() => fetchDayInsights(currentDate, true)}
+                    onDiscuss={() => discussInsight(dayInsight?.text ?? null)}
                 />
             </div>
         {/if}
@@ -1204,6 +1216,8 @@
                                 error={mealInsight.error}
                                 text={mealInsight.text}
                                 generatedAt={mealInsight.generatedAt}
+                                onDiscuss={() =>
+                                    discussInsight(mealInsight.text)}
                             />
                         </div>
                     {/if}
@@ -1340,6 +1354,14 @@
                     fetchInsights(week.weekStart, week.weekEnd, true)}
                 onRegenerateSuggestions={() =>
                     fetchWeekSuggestions(week.weekStart, week.weekEnd, true)}
+                onDiscussInsights={() =>
+                    discussInsight(
+                        insightsByWeek[week.weekStart]?.text ?? null,
+                    )}
+                onDiscussSuggestions={() =>
+                    discussInsight(
+                        suggestionsByWeek[week.weekStart]?.text ?? null,
+                    )}
             />
         {/each}
     {/if}

@@ -13,6 +13,8 @@
         onToggleSuggestions,
         onRegenerateInsights,
         onRegenerateSuggestions,
+        onDiscussInsights = null,
+        onDiscussSuggestions = null,
     }: {
         week: WeekGroup;
         dayAbbrev: string[];
@@ -23,6 +25,8 @@
         onToggleSuggestions: () => void;
         onRegenerateInsights: () => void;
         onRegenerateSuggestions: () => void;
+        onDiscussInsights?: (() => void) | null;
+        onDiscussSuggestions?: (() => void) | null;
     } = $props();
 </script>
 
@@ -99,6 +103,7 @@
             text={insightState.text}
             generatedAt={insightState.generatedAt}
             onRegenerate={onRegenerateInsights}
+            onDiscuss={onDiscussInsights}
         />
     {/if}
     {#if suggestionState?.open}
@@ -110,6 +115,7 @@
             label="Meal ideas for next week"
             variant="suggestion"
             onRegenerate={onRegenerateSuggestions}
+            onDiscuss={onDiscussSuggestions}
         />
     {/if}
 </div>
