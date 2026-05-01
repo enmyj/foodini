@@ -78,6 +78,13 @@ async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> 
         ...init,
         headers,
     });
+    if (res.status === 401) {
+        // Session expired while the page was idle. Reload so App.svelte's
+        // checkAuth re-runs and shows the sign-in screen, instead of leaving
+        // the user staring at a "failed to load" error.
+        window.location.reload();
+        throw new Error("session_expired");
+    }
     if (!res.ok) await throwResponseError(res);
     return res;
 }

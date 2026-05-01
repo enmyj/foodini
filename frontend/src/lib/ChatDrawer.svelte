@@ -823,7 +823,7 @@
                     bind:value={input}
                     onkeydown={onKeyDown}
                     placeholder={entries.length
-                        ? "Tweak this meal, or add more…"
+                        ? "Tweak or add more…"
                         : "What did you eat?"}
                     rows="1"
                     disabled={sending}
@@ -1078,10 +1078,11 @@
     }
 
     .mode-bubbles {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 1rem;
-        flex-wrap: wrap;
-        justify-content: center;
+        width: 100%;
+        max-width: 22rem;
     }
 
     .mode-bubble {
@@ -1092,11 +1093,12 @@
         background: var(--paper);
         border: 1px solid var(--rule);
         border-radius: var(--r-md);
-        padding: 1.1rem 1.4rem;
+        padding: 1.1rem 0.8rem;
         cursor: pointer;
         font-family: inherit;
         color: var(--ink);
-        min-width: 9rem;
+        min-width: 0;
+        width: 100%;
         transition: border-color 0.12s, background 0.12s, transform 0.08s;
         touch-action: manipulation;
     }
@@ -1125,6 +1127,8 @@
     .mode-bubble-hint {
         font-size: var(--t-meta);
         color: var(--mute-2);
+        text-align: center;
+        line-height: 1.3;
     }
 
     /* --- Result ledger --- */
