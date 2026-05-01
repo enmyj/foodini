@@ -524,6 +524,17 @@ type TimelineItem =
         return NON_DAY_VIEWS.includes(h) ? h : "day";
     }
 
+    function withViewTransition(fn: () => void) {
+        const doc = document as Document & {
+            startViewTransition?: (cb: () => void) => unknown;
+        };
+        if (typeof doc.startViewTransition === "function") {
+            doc.startViewTransition(fn);
+        } else {
+            fn();
+        }
+    }
+
     function setView(next: ViewMode) {
         if (next === view) return;
         if (next === "day") {
@@ -531,7 +542,7 @@ type TimelineItem =
                 history.back();
                 return;
             }
-            view = "day";
+            withViewTransition(() => { view = "day"; });
             return;
         }
         const url = `${location.pathname}${location.search}#${next}`;
@@ -540,7 +551,7 @@ type TimelineItem =
         } else {
             history.replaceState({ appView: next }, "", url);
         }
-        view = next;
+        withViewTransition(() => { view = next; });
     }
 
     // Restore view from hash on initial load (refresh / deep link).
@@ -1442,6 +1453,7 @@ type TimelineItem =
         height: 100dvh;
         display: flex;
         flex-direction: column;
+        overflow: hidden;
     }
 
     .coach-pane {

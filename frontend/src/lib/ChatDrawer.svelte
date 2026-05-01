@@ -2,7 +2,6 @@
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
     import { agent, deleteEntry, patchEntry } from "./api.ts";
-    import { autosize } from "./autosize.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
@@ -91,7 +90,7 @@
     }
 
     let selectedDate = $state("");
-    let drawerEl = $state<HTMLDivElement | null>(null);
+    let drawerEl = $state<HTMLDialogElement | null>(null);
     let scrollEl = $state<HTMLDivElement | null>(null);
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let fileInputEl = $state<HTMLInputElement | null>(null);
@@ -108,7 +107,7 @@
 
     let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
-    let mealPickerOpen = $state(false);
+    let mealMenuEl = $state<HTMLElement | null>(null);
 
     const agentMutation = createMutation(() => ({
         mutationFn: ({
@@ -151,6 +150,11 @@
 
     $effect(() => {
         const isOpen = open;
+        const el = drawerEl;
+        if (el) {
+            if (isOpen && !el.open) el.showModal();
+            else if (!isOpen && el.open) el.close();
+        }
         untrack(() => {
             if (isOpen) {
                 selectedDate = date || todayStr();
@@ -162,7 +166,7 @@
                 clearPendingImages();
                 firstSend = true;
                 deletingEntryIds = new Set();
-                mealPickerOpen = false;
+                closeMealMenu();
                 if (editEvent) mode = "event";
                 else if (editEntries || meal) mode = "meal";
                 else if (initialMode) mode = initialMode;
@@ -183,7 +187,7 @@
     });
 
     function selectMeal(m: MealType) {
-        mealPickerOpen = false;
+        closeMealMenu();
         if (m === mealType) return;
         if (onSwitchMeal) {
             const switched = onSwitchMeal(m);
@@ -198,7 +202,7 @@
     }
 
     function clearMeal() {
-        mealPickerOpen = false;
+        closeMealMenu();
         mealType = null;
         entries = [];
         messages = [];
@@ -482,6 +486,26 @@
         }
     }
 
+    function closeMealMenu() {
+        if (mealMenuEl?.matches(":popover-open")) mealMenuEl.hidePopover();
+    }
+
+    function onBackdropClick(e: MouseEvent) {
+        if (!drawerEl || e.target !== drawerEl) return;
+        const r = drawerEl.getBoundingClientRect();
+        const inside =
+            e.clientX >= r.left &&
+            e.clientX <= r.right &&
+            e.clientY >= r.top &&
+            e.clientY <= r.bottom;
+        if (!inside) onClose();
+    }
+
+    function onCancel(e: Event) {
+        e.preventDefault();
+        onClose();
+    }
+
     function onKeyDown(e: KeyboardEvent) {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -490,19 +514,17 @@
     }
 </script>
 
+<dialog
+    class="drawer"
+    aria-label="Log"
+    bind:this={drawerEl}
+    onclick={onBackdropClick}
+    oncancel={onCancel}
+    ontouchstart={onDragStart}
+    ontouchmove={onDragMove}
+    ontouchend={onDragEnd}
+>
 {#if open}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="overlay" aria-hidden="true" onclick={onClose}></div>
-    <div
-        class="drawer"
-        role="dialog"
-        aria-label="Log"
-        tabindex="-1"
-        bind:this={drawerEl}
-        ontouchstart={onDragStart}
-        ontouchmove={onDragMove}
-        ontouchend={onDragEnd}
-    >
         <button class="handle" onclick={onClose} aria-label="Close drawer">
             <span class="handle-bar"></span>
         </button>
@@ -524,31 +546,32 @@
                     title="Time"
                 />
                 {#if mode === "meal"}
-                    <div class="meal-picker">
-                        <button
-                            class="meal-pill"
-                            class:active={mealType !== null}
-                            onclick={() => (mealPickerOpen = !mealPickerOpen)}
-                            aria-expanded={mealPickerOpen}
-                        >{mealType ?? "Meal"}</button>
-                        {#if mealPickerOpen}
-                            <div class="meal-menu" role="menu">
-                                {#each MEAL_ORDER as m}
-                                    <button
-                                        class="meal-menu-item"
-                                        class:selected={mealType === m}
-                                        onclick={() => selectMeal(m)}
-                                        role="menuitem"
-                                    >{m}</button>
-                                {/each}
-                                {#if mealType !== null}
-                                    <button
-                                        class="meal-menu-item clear"
-                                        onclick={() => clearMeal()}
-                                        role="menuitem"
-                                    >Clear</button>
-                                {/if}
-                            </div>
+                    <button
+                        class="meal-pill"
+                        class:active={mealType !== null}
+                        popovertarget="meal-menu-popover"
+                    >{mealType ?? "Meal"}</button>
+                    <div
+                        class="meal-menu"
+                        role="menu"
+                        popover
+                        id="meal-menu-popover"
+                        bind:this={mealMenuEl}
+                    >
+                        {#each MEAL_ORDER as m}
+                            <button
+                                class="meal-menu-item"
+                                class:selected={mealType === m}
+                                onclick={() => selectMeal(m)}
+                                role="menuitem"
+                            >{m}</button>
+                        {/each}
+                        {#if mealType !== null}
+                            <button
+                                class="meal-menu-item clear"
+                                onclick={() => clearMeal()}
+                                role="menuitem"
+                            >Clear</button>
                         {/if}
                     </div>
                 {/if}
@@ -819,7 +842,6 @@
                 <textarea
                     class="text-entry composer-input"
                     bind:this={inputEl}
-                    use:autosize
                     bind:value={input}
                     onkeydown={onKeyDown}
                     placeholder={entries.length
@@ -838,37 +860,65 @@
             </div>
         </div>
         {/if}
-    </div>
 {/if}
+</dialog>
 
 <style>
-    .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.2);
-        z-index: 10;
-    }
-
     .drawer {
         position: fixed;
         bottom: 0;
         left: 0;
         right: 0;
+        top: auto;
         max-width: 640px;
         margin: 0 auto;
         background: var(--paper);
+        color: var(--ink);
+        border: none;
         border-radius: var(--r-lg) var(--r-lg) 0 0;
         box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.08);
-        z-index: 11;
-        display: flex;
-        flex-direction: column;
         width: min(100%, 640px);
         height: min(82vh, 720px);
         height: min(82dvh, 720px);
         max-height: calc(100dvh - 0.5rem);
         padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
-        transition: transform 0.2s ease;
+        transform: translateY(0);
+        opacity: 1;
+        transition:
+            transform 0.22s ease,
+            opacity 0.22s ease,
+            display 0.22s allow-discrete,
+            overlay 0.22s allow-discrete;
         will-change: transform;
+    }
+
+    .drawer:not([open]) {
+        display: none;
+        transform: translateY(100%);
+        opacity: 0;
+    }
+
+    .drawer[open] {
+        display: flex;
+        flex-direction: column;
+    }
+
+    @starting-style {
+        .drawer[open] {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        .drawer[open]::backdrop {
+            background: rgba(0, 0, 0, 0);
+        }
+    }
+
+    .drawer::backdrop {
+        background: rgba(0, 0, 0, 0.2);
+        transition:
+            background 0.22s ease,
+            display 0.22s allow-discrete,
+            overlay 0.22s allow-discrete;
     }
 
     .handle {
@@ -918,11 +968,6 @@
         min-width: 0;
     }
 
-    .meal-picker {
-        position: relative;
-        display: inline-block;
-    }
-
     .meal-pill {
         background: none;
         border: 1px solid var(--rule-3);
@@ -937,6 +982,7 @@
         touch-action: manipulation;
         white-space: nowrap;
         transition: border-color 0.12s, color 0.12s, background 0.12s;
+        anchor-name: --meal-pill;
     }
 
     .meal-pill.active {
@@ -952,19 +998,26 @@
         }
     }
 
-    .meal-menu {
-        position: absolute;
-        top: calc(100% + 0.25rem);
-        left: 0;
-        z-index: 5;
+    .meal-menu[popover] {
+        position: fixed;
+        position-anchor: --meal-pill;
+        top: calc(anchor(bottom) + 0.25rem);
+        left: anchor(left);
+        inset-block-end: auto;
+        inset-inline-end: auto;
+        margin: 0;
         background: var(--paper);
+        color: var(--ink);
         border: 1px solid var(--rule);
         border-radius: var(--r-sm);
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-        display: flex;
         flex-direction: column;
         min-width: 8rem;
         padding: 0.25rem;
+    }
+
+    .meal-menu[popover]:popover-open {
+        display: flex;
     }
 
     .meal-menu-item {
@@ -1278,6 +1331,7 @@
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;

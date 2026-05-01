@@ -124,6 +124,8 @@
     .week-block {
         border-top: 1px solid var(--rule);
         margin-bottom: 1.25rem;
+        content-visibility: auto;
+        contain-intrinsic-size: auto 14rem;
     }
 
     .week-block:last-of-type {

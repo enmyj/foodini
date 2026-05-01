@@ -1,6 +1,5 @@
 <script lang="ts">
     import { coachChatStream } from "./api.ts";
-    import { autosize } from "./autosize.ts";
     import { renderInsight } from "./insight.ts";
     import { showError } from "./toast.ts";
     import type { CoachMessage } from "./types.ts";
@@ -182,7 +181,6 @@
         <textarea
             class="text-entry composer-input"
             bind:this={inputEl}
-            use:autosize
             bind:value={input}
             onkeydown={onKeyDown}
             onfocus={scrollInputIntoView}
@@ -253,6 +251,7 @@
         flex: 1;
         min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;

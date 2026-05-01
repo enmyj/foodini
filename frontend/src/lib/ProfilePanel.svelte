@@ -1,7 +1,6 @@
 <script lang="ts">
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
     import { getProfile, putProfile } from "./api.ts";
-    import { autosize } from "./autosize.ts";
     import { queryKeys } from "./queryKeys.ts";
     import { showError } from "./toast.ts";
     import type { Profile } from "./types.ts";
@@ -133,7 +132,6 @@
                 <span>Notes</span>
                 <textarea
                     class="text-entry"
-                    use:autosize
                     bind:value={notes}
                     placeholder="Dietary restrictions, allergies…"
                     rows="2"
@@ -145,7 +143,6 @@
                 <span>Goals</span>
                 <textarea
                     class="text-entry"
-                    use:autosize
                     bind:value={goals}
                     placeholder="e.g. lose weight, build muscle, eat more protein…"
                     rows="2"
@@ -157,7 +154,6 @@
                 <span>Dietary Restrictions</span>
                 <textarea
                     class="text-entry"
-                    use:autosize
                     bind:value={dietaryRestrictions}
                     placeholder="e.g. vegetarian, no gluten, lactose intolerant…"
                     rows="2"

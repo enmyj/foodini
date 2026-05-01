@@ -1,7 +1,6 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { patchEntry, deleteEntry } from "./api.ts";
-    import { autosize } from "./autosize.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
     import type { Entry, Favorite, MealType } from "./types.ts";
@@ -165,7 +164,6 @@
             <span class="label">Description</span>
             <textarea
                 class="text-entry"
-                use:autosize
                 bind:value={editDesc}
                 rows="2"
                 disabled={saving}
