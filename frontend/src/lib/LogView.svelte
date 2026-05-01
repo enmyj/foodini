@@ -442,13 +442,13 @@ type TimelineItem =
     function suggestNextMeal() {
         if (!nextSuggestableMeal) return;
         coachPrefill = `Suggest a ${nextSuggestableMeal} for today.`;
-        view = "coach";
+        setView("coach");
     }
 
     function discussInsight(text: string | null) {
         if (!text) return;
         coachPrefill = text.trim();
-        view = "coach";
+        setView("coach");
     }
 
     let triggerEntryIds = $derived<Set<string>>(
@@ -516,6 +516,50 @@ type TimelineItem =
             };
         }
     }
+
+    const NON_DAY_VIEWS: ViewMode[] = ["favorites", "history", "coach", "profile"];
+
+    function viewFromHash(): ViewMode {
+        const h = location.hash.slice(1) as ViewMode;
+        return NON_DAY_VIEWS.includes(h) ? h : "day";
+    }
+
+    function setView(next: ViewMode) {
+        if (next === view) return;
+        if (next === "day") {
+            if (history.state?.appView) {
+                history.back();
+                return;
+            }
+            view = "day";
+            return;
+        }
+        const url = `${location.pathname}${location.search}#${next}`;
+        if (view === "day") {
+            history.pushState({ appView: next }, "", url);
+        } else {
+            history.replaceState({ appView: next }, "", url);
+        }
+        view = next;
+    }
+
+    // Restore view from hash on initial load (refresh / deep link).
+    {
+        const initial = viewFromHash();
+        if (initial !== "day") {
+            view = initial;
+            history.replaceState({ appView: initial }, "", location.href);
+        }
+    }
+
+    $effect(() => {
+        const onPop = () => {
+            const next = (history.state?.appView ?? viewFromHash()) as ViewMode;
+            view = NON_DAY_VIEWS.includes(next) ? next : "day";
+        };
+        window.addEventListener("popstate", onPop);
+        return () => window.removeEventListener("popstate", onPop);
+    });
 
     // Sync favorited descriptions from query
     $effect(() => {
@@ -741,7 +785,7 @@ type TimelineItem =
     }
 
     function closeProfile() {
-        view = "day";
+        setView("day");
     }
 
     function onEntriesAdded(newEntries: Entry[]) {
@@ -954,10 +998,10 @@ type TimelineItem =
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <div class="menu-backdrop" aria-hidden="true" onclick={() => (menuOpen = false)}></div>
                     <nav class="nav-menu">
-                        <button class:active={view === "day"} onclick={() => { view = "day"; menuOpen = false; }}>Day</button>
-                        <button class:active={view === "history"} onclick={() => { view = "history"; menuOpen = false; }}>History</button>
-                        <button class:active={view === "favorites"} onclick={() => { view = "favorites"; menuOpen = false; }}>Favorites</button>
-                        <button class:active={view === "coach"} onclick={() => { view = "coach"; menuOpen = false; }}>Coach</button>
+                        <button class:active={view === "day"} onclick={() => { setView("day"); menuOpen = false; }}>Day</button>
+                        <button class:active={view === "history"} onclick={() => { setView("history"); menuOpen = false; }}>History</button>
+                        <button class:active={view === "favorites"} onclick={() => { setView("favorites"); menuOpen = false; }}>Favorites</button>
+                        <button class:active={view === "coach"} onclick={() => { setView("coach"); menuOpen = false; }}>Coach</button>
                     </nav>
                 {/if}
             </div>
@@ -977,7 +1021,7 @@ type TimelineItem =
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <div class="menu-backdrop" aria-hidden="true" onclick={() => (gearOpen = false)}></div>
                         <nav class="gear-menu">
-                            <button class:active={view === "profile"} onclick={() => { view = "profile"; gearOpen = false; }}>Profile</button>
+                            <button class:active={view === "profile"} onclick={() => { setView("profile"); gearOpen = false; }}>Profile</button>
                             <button onclick={() => { promptOpen = true; gearOpen = false; }}>System prompt</button>
                             {#if spreadsheetUrl}
                                 <a href={spreadsheetUrl} target="_blank" rel="noopener" onclick={() => (gearOpen = false)}>Open Google Sheet</a>
@@ -1313,7 +1357,7 @@ type TimelineItem =
                 suggestionState={suggestionsByWeek[week.weekStart] ?? null}
                 onOpenDay={(date) => {
                     currentDate = date;
-                    view = "day";
+                    setView("day");
                 }}
                 onToggleInsights={() =>
                     toggleInsights(week.weekStart, week.weekEnd)}
