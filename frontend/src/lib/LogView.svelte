@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onMount } from "svelte";
     import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
@@ -239,27 +238,7 @@
 
     let weekGroupsData = $derived(weekGroups(historyData, historyWeeks));
 
-    onMount(() => {
-        function refreshActiveView() {
-            if (document.visibilityState === "hidden") return;
-            if (view === "day") {
-                void queryClient.invalidateQueries({ queryKey: queryKeys.logDay(currentDate) });
-            } else if (view === "history") {
-                void queryClient.invalidateQueries({ queryKey: queryKeys.logHistory(historyWeeks) });
-            }
-        }
-
-        window.addEventListener("pageshow", refreshActiveView);
-        document.addEventListener("visibilitychange", refreshActiveView);
-        window.addEventListener("online", refreshActiveView);
-        return () => {
-            window.removeEventListener("pageshow", refreshActiveView);
-            document.removeEventListener("visibilitychange", refreshActiveView);
-            window.removeEventListener("online", refreshActiveView);
-        };
-    });
-
-    type TimelineItem =
+type TimelineItem =
         | {
               kind: "meal";
               meal: MealType;
@@ -468,12 +447,7 @@
 
     function discussInsight(text: string | null) {
         if (!text) return;
-        const quoted = text
-            .trim()
-            .split("\n")
-            .map((line) => `> ${line}`)
-            .join("\n");
-        coachPrefill = `${quoted}\n\n`;
+        coachPrefill = text.trim();
         view = "coach";
     }
 
@@ -1318,8 +1292,8 @@
             <CoachChat
                 active={view === "coach"}
                 date={currentDate}
-                initialInput={coachPrefill}
-                onInputConsumed={() => (coachPrefill = "")}
+                pinnedContext={coachPrefill || null}
+                onContextConsumed={() => (coachPrefill = "")}
             />
         </div>
     {:else if view === "profile"}

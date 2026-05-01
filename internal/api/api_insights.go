@@ -114,8 +114,12 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 		return writeErr(c, http.StatusBadRequest, "no data for this day")
 	}
 
+	prevDate := addDaysStr(req.Date, -1)
+	prevEntries, _ := svc.GetFoodByDateRange(ctx, prevDate, prevDate)
+	prevEvents, _ := svc.GetEventsByDateRange(ctx, prevDate, prevDate)
+
 	today := sheets.DateString(LocalNow(r))
-	summary := buildDaySummary(req.Date, entries, dailyLogs, req.Date == today)
+	summary := buildDaySummary(req.Date, entries, dailyLogs, prevDate, prevEntries, prevEvents, req.Date == today)
 
 	profileCacheKey := session.SpreadsheetID + "|profile"
 	var profileCtx string
@@ -652,10 +656,37 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, events []sh
 	return b.String()
 }
 
-func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Event, inProgress bool) string {
+func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Event, prevDate string, prevEntries []sheets.FoodEntry, prevEvents []sheets.Event, inProgress bool) string {
 	t, _ := time.Parse("2006-01-02", date)
 
 	var b strings.Builder
+
+	if len(prevEntries) > 0 || len(prevEvents) > 0 {
+		pt, _ := time.Parse("2006-01-02", prevDate)
+		fmt.Fprintf(&b, "Yesterday (%s, %s) — for context only; GI/sleep/energy effects often lag 12–48h:\n", prevDate, pt.Weekday())
+		if len(prevEntries) > 0 {
+			pCal, pProt, pCarb, pFat, pFiber := 0, 0, 0, 0, 0
+			for _, e := range prevEntries {
+				pCal += e.Calories
+				pProt += e.Protein
+				pCarb += e.Carbs
+				pFat += e.Fat
+				pFiber += e.Fiber
+			}
+			fmt.Fprintf(&b, "  Totals: %d cal, %dg protein, %dg carbs, %dg fat, %dg fiber\n", pCal, pProt, pCarb, pFat, pFiber)
+			for _, e := range prevEntries {
+				fmt.Fprintf(&b, "  - [%s] %s: %d cal\n", e.MealType, e.Description, e.Calories)
+			}
+		}
+		for _, ev := range prevEvents {
+			if ev.Date != prevDate {
+				continue
+			}
+			formatEvent(&b, ev, "  ")
+		}
+		b.WriteString("\n")
+	}
+
 	fmt.Fprintf(&b, "Day: %s (%s)\n", date, t.Weekday())
 	if inProgress {
 		fmt.Fprintf(&b, "Status: TODAY — day is still in progress; more meals may be logged later.\n")

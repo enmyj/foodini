@@ -8,23 +8,26 @@
     let {
         active,
         date,
-        initialInput = "",
-        onInputConsumed = null,
+        pinnedContext = null,
+        onContextConsumed = null,
     }: {
         active: boolean;
         date: string;
-        initialInput?: string;
-        onInputConsumed?: (() => void) | null;
+        pinnedContext?: string | null;
+        onContextConsumed?: (() => void) | null;
     } = $props();
 
     let messages = $state<CoachMessage[]>([]);
     let input = $state("");
+    let pinned = $state<string | null>(null);
+    let pinnedExpanded = $state(false);
 
     $effect(() => {
-        if (initialInput) {
-            input = initialInput;
-            onInputConsumed?.();
-            setTimeout(() => inputEl?.focus(), 60);
+        if (pinnedContext) {
+            pinned = pinnedContext;
+            pinnedExpanded = false;
+            onContextConsumed?.();
+            focusInput();
         }
     });
     let sending = $state(false);
@@ -33,6 +36,19 @@
     let inputEl = $state<HTMLTextAreaElement | null>(null);
     let scrollEl = $state<HTMLDivElement | null>(null);
     let prevLen = 0;
+
+    function focusInput() {
+        setTimeout(() => {
+            inputEl?.focus();
+            scrollInputIntoView();
+        }, 60);
+    }
+
+    function scrollInputIntoView() {
+        setTimeout(() => {
+            inputEl?.scrollIntoView({ block: "end", behavior: "smooth" });
+        }, 280);
+    }
 
     $effect(() => {
         if (active) {
@@ -55,11 +71,15 @@
 
     async function send(): Promise<void> {
         if (sending) return;
-        const text = input.trim();
-        if (!text) return;
+        const typed = input.trim();
+        const ctx = pinned?.trim() ?? "";
+        if (!typed && !ctx) return;
+        const text = ctx && typed ? `${ctx}\n\n${typed}` : ctx || typed;
         const next: CoachMessage[] = [...messages, { role: "user", text }];
         messages = next;
         input = "";
+        pinned = null;
+        pinnedExpanded = false;
         sending = true;
         let started = false;
         try {
@@ -136,6 +156,28 @@
         {/if}
     </div>
 
+    {#if pinned}
+        <div class="pinned" class:expanded={pinnedExpanded}>
+            <button
+                class="pinned-remove"
+                onclick={() => (pinned = null)}
+                aria-label="Remove context"
+                type="button"
+            >✕</button>
+            <div class="pinned-body">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                <div class="pinned-text">{@html renderInsight(pinned)}</div>
+                {#if pinned.length > 140}
+                    <button
+                        class="pinned-toggle"
+                        onclick={() => (pinnedExpanded = !pinnedExpanded)}
+                        type="button"
+                    >{pinnedExpanded ? "Show less" : "Show more"}</button>
+                {/if}
+            </div>
+        </div>
+    {/if}
+
     <div class="input-row">
         <textarea
             class="text-entry composer-input"
@@ -143,11 +185,12 @@
             use:autosize
             bind:value={input}
             onkeydown={onKeyDown}
-            placeholder={`Ask about your last ${weeks * 7} days…`}
+            onfocus={scrollInputIntoView}
+            placeholder={pinned ? "Add details (optional)…" : `Ask about your last ${weeks * 7} days…`}
             rows="1"
             disabled={sending}
         ></textarea>
-        <button onclick={send} disabled={sending || !input.trim()}>Send</button>
+        <button onclick={send} disabled={sending || (!input.trim() && !pinned)}>Send</button>
     </div>
 </div>
 
@@ -288,6 +331,74 @@
     @keyframes bounce {
         0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
         40% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    .pinned {
+        position: relative;
+        padding: 0.5rem 2rem 0.5rem 0.7rem;
+        border-left: 3px solid var(--ink-2);
+        background: var(--paper-2);
+        border-radius: 0 var(--r-sm) var(--r-sm) 0;
+        font-size: var(--t-meta);
+        color: var(--mute);
+        line-height: 1.45;
+    }
+
+    .pinned-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .pinned-text {
+        white-space: pre-line;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .pinned.expanded .pinned-text {
+        -webkit-line-clamp: unset;
+        line-clamp: unset;
+        overflow: visible;
+        max-height: 40vh;
+        overflow-y: auto;
+    }
+
+    .pinned-toggle {
+        align-self: flex-start;
+        background: none;
+        border: none;
+        color: var(--ink-2);
+        font-family: inherit;
+        font-size: 0.7rem;
+        cursor: pointer;
+        padding: 0;
+        min-height: 0;
+    }
+
+    .pinned-remove {
+        position: absolute;
+        top: 0.25rem;
+        right: 0.35rem;
+        background: none;
+        border: none;
+        color: var(--mute-3);
+        font-size: 0.85rem;
+        cursor: pointer;
+        padding: 0.2rem 0.35rem;
+        line-height: 1;
+        min-height: 0;
+    }
+
+    @media (hover: hover) {
+        .pinned-remove:hover {
+            color: var(--ink-2);
+        }
     }
 
     .input-row {
