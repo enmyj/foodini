@@ -203,6 +203,9 @@
             return { href: "/auth/login?consent=1", label: "Re-authorize" };
         return null;
     });
+    // Only surface a banner for auth-related refresh failures — those need user
+    // action. Generic network/5xx failures stay quiet; the next focus or
+    // online event will retry automatically.
     let refreshNotice = $derived.by(() => {
         const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
         const hasData =
@@ -216,9 +219,7 @@
             return "Session expired. Sign in again to refresh.";
         if (err?.code === "insufficient_scopes")
             return "Google permissions are missing. Re-authorize to refresh.";
-        return view === "day"
-            ? "Could not refresh. Showing the last loaded day."
-            : "Could not refresh. Showing the last loaded history.";
+        return "";
     });
     let refreshNoticeAction = $derived.by<{ href: string; label: string } | null>(() => {
         const err = (view === "day" ? dayQuery.error : view === "history" ? historyQuery.error : null) as Partial<ApiError> | null;
@@ -250,9 +251,11 @@
 
         window.addEventListener("pageshow", refreshActiveView);
         document.addEventListener("visibilitychange", refreshActiveView);
+        window.addEventListener("online", refreshActiveView);
         return () => {
             window.removeEventListener("pageshow", refreshActiveView);
             document.removeEventListener("visibilitychange", refreshActiveView);
+            window.removeEventListener("online", refreshActiveView);
         };
     });
 
@@ -1102,14 +1105,10 @@
             {/if}
         </div>
     {:else if view === "day"}
-        {#if refreshNotice}
+        {#if refreshNotice && refreshNoticeAction}
             <div class="refresh-notice">
                 <span>{refreshNotice}</span>
-                {#if refreshNoticeAction}
-                    <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
-                {:else}
-                    <button type="button" onclick={() => dayQuery.refetch()}>Retry</button>
-                {/if}
+                <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
             </div>
         {/if}
         {#if dayInsight?.open}
@@ -1326,14 +1325,10 @@
     {:else if view === "profile"}
         <ProfilePanel onClose={closeProfile} />
     {:else}
-        {#if refreshNotice}
+        {#if refreshNotice && refreshNoticeAction}
             <div class="refresh-notice">
                 <span>{refreshNotice}</span>
-                {#if refreshNoticeAction}
-                    <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
-                {:else}
-                    <button type="button" onclick={() => historyQuery.refetch()}>Retry</button>
-                {/if}
+                <a href={refreshNoticeAction.href}>{refreshNoticeAction.label}</a>
             </div>
         {/if}
         {#each weekGroupsData as week}
@@ -1991,16 +1986,10 @@ section {
         text-align: center;
     }
 
-    .refresh-notice a,
-    .refresh-notice button {
+    .refresh-notice a {
         color: var(--ink-2);
-        background: none;
-        border: none;
-        padding: 0;
-        font: inherit;
         text-decoration: underline;
         text-underline-offset: 2px;
-        cursor: pointer;
         white-space: nowrap;
     }
 
