@@ -916,6 +916,8 @@
         transition:
             transform 0.22s ease,
             opacity 0.22s ease,
+            bottom 0.22s ease-out,
+            height 0.22s ease-out,
             display 0.22s allow-discrete,
             overlay 0.22s allow-discrete;
         will-change: transform;

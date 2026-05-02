@@ -1455,6 +1455,15 @@ type TimelineItem =
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        transition:
+            bottom 0.22s ease-out,
+            height 0.22s ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .wrap.coach-view {
+            transition: none;
+        }
     }
 
     .coach-pane {
