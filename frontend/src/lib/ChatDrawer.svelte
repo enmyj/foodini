@@ -172,7 +172,12 @@
                 else if (initialMode) mode = initialMode;
                 else mode = null;
                 entryTime = editEvent?.time || editEntries?.[0]?.time || nowHHMM();
-                if (mode === "meal") setTimeout(() => inputEl?.focus(), 60);
+                // Auto-focus only when composing a fresh meal. Skip when
+                // editing an existing meal so the keyboard doesn't pop up
+                // over the entries the user came to look at.
+                if (mode === "meal" && !editEntries) {
+                    setTimeout(() => inputEl?.focus(), 60);
+                }
             } else {
                 selectedDate = "";
                 mealType = null;
@@ -218,10 +223,7 @@
         const len = messages.length;
         if (!len || !scrollEl) return;
         queueMicrotask(() => {
-            scrollEl?.scrollTo({
-                top: scrollEl.scrollHeight,
-                behavior: "smooth",
-            });
+            scrollEl?.scrollTo({ top: scrollEl.scrollHeight });
         });
     });
 
@@ -635,6 +637,8 @@
                             <span class="macro-field">
                                 <input
                                     type="number"
+                                    inputmode="numeric"
+                                    step="1"
                                     value={entry.calories}
                                     onblur={(e: FocusEvent) =>
                                         editInlineEntry(
@@ -651,6 +655,8 @@
                             <span class="macro-field">
                                 <input
                                     type="number"
+                                    inputmode="numeric"
+                                    step="1"
                                     value={entry.protein}
                                     onblur={(e: FocusEvent) =>
                                         editInlineEntry(
@@ -667,6 +673,8 @@
                             <span class="macro-field">
                                 <input
                                     type="number"
+                                    inputmode="numeric"
+                                    step="1"
                                     value={entry.carbs}
                                     onblur={(e: FocusEvent) =>
                                         editInlineEntry(
@@ -683,6 +691,8 @@
                             <span class="macro-field">
                                 <input
                                     type="number"
+                                    inputmode="numeric"
+                                    step="1"
                                     value={entry.fat}
                                     onblur={(e: FocusEvent) =>
                                         editInlineEntry(
@@ -699,6 +709,8 @@
                             <span class="macro-field">
                                 <input
                                     type="number"
+                                    inputmode="numeric"
+                                    step="1"
                                     value={entry.fiber ?? 0}
                                     onblur={(e: FocusEvent) =>
                                         editInlineEntry(
@@ -718,7 +730,14 @@
         {/snippet}
 
         {#if mode === "meal"}
-        <div class="messages" bind:this={scrollEl}>
+        <div
+            class="messages"
+            bind:this={scrollEl}
+            role="log"
+            aria-live="polite"
+            aria-atomic="false"
+            aria-relevant="additions"
+        >
             {#if messages.length === 0}
                 <p class="empty">
                     {#if entries.length > 0}
@@ -818,8 +837,12 @@
                     </button>
                 </div>
             {/if}
-            <div class="input-row">
+            <form
+                class="input-row"
+                onsubmit={(e) => { e.preventDefault(); send(); }}
+            >
                 <button
+                    type="button"
                     class="attach-btn"
                     onclick={openFilePicker}
                     disabled={sending}
@@ -848,16 +871,20 @@
                         ? "Tweak or add more…"
                         : "What did you eat?"}
                     rows="1"
+                    enterkeyhint="send"
+                    autocapitalize="sentences"
+                    autocomplete="off"
+                    spellcheck="true"
                     disabled={sending}
                 ></textarea>
                 <button
+                    type="submit"
                     class="send-btn"
-                    onclick={send}
                     disabled={sending ||
                         (!input.trim() && !pendingImages.length)}
                     >Send</button
                 >
-            </div>
+            </form>
         </div>
         {/if}
 {/if}
@@ -879,8 +906,8 @@
         box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.08);
         width: min(100%, 640px);
         height: min(82vh, 720px);
-        height: min(82dvh, 720px);
-        max-height: calc(100dvh - 0.5rem);
+        height: min(calc(var(--vvh, 100dvh) * 0.82), 720px);
+        max-height: calc(var(--vvh, 100dvh) - 0.5rem);
         padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
         transform: translateY(0);
         opacity: 1;
@@ -1332,11 +1359,19 @@
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
         padding: 0.25rem 0;
         margin-bottom: 0.5rem;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .messages {
+            scroll-behavior: auto;
+        }
     }
 
     .empty {

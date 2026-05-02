@@ -37,22 +37,15 @@
     let prevLen = 0;
 
     function focusInput() {
-        setTimeout(() => {
-            inputEl?.focus();
-            scrollInputIntoView();
-        }, 60);
-    }
-
-    function scrollInputIntoView() {
-        setTimeout(() => {
-            inputEl?.scrollIntoView({ block: "end", behavior: "smooth" });
-        }, 280);
+        // Only auto-focus on devices with a fine pointer (desktop). On touch
+        // devices, auto-focus would force-open the soft keyboard before the
+        // user has read anything — antipattern on iOS/Android in 2026.
+        if (!window.matchMedia("(pointer: fine)").matches) return;
+        setTimeout(() => inputEl?.focus(), 60);
     }
 
     $effect(() => {
-        if (active) {
-            setTimeout(() => inputEl?.focus(), 120);
-        }
+        if (active) focusInput();
     });
 
     $effect(() => {
@@ -62,7 +55,7 @@
             queueMicrotask(() => {
                 const items = scrollEl?.querySelectorAll(".msg");
                 const el = items?.[items.length - 1] as HTMLElement | undefined;
-                el?.scrollIntoView({ block: "start", behavior: "smooth" });
+                el?.scrollIntoView({ block: "start" });
             });
         }
         prevLen = len;
@@ -134,7 +127,14 @@
             >
         {/each}
     </div>
-    <div class="messages" bind:this={scrollEl}>
+    <div
+        class="messages"
+        bind:this={scrollEl}
+        role="log"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-relevant="additions"
+    >
         {#if messages.length === 0}
             <p class="empty">
                 Ask your coach about the last {weeks * 7} days — patterns, gaps, swaps, ideas.
@@ -177,19 +177,25 @@
         </div>
     {/if}
 
-    <div class="input-row">
+    <form
+        class="input-row"
+        onsubmit={(e) => { e.preventDefault(); send(); }}
+    >
         <textarea
             class="text-entry composer-input"
             bind:this={inputEl}
             bind:value={input}
             onkeydown={onKeyDown}
-            onfocus={scrollInputIntoView}
             placeholder={pinned ? "Add details (optional)…" : `Ask about your last ${weeks * 7} days…`}
             rows="1"
+            enterkeyhint="send"
+            autocapitalize="sentences"
+            autocomplete="off"
+            spellcheck="true"
             disabled={sending}
         ></textarea>
-        <button onclick={send} disabled={sending || (!input.trim() && !pinned)}>Send</button>
-    </div>
+        <button type="submit" disabled={sending || (!input.trim() && !pinned)}>Send</button>
+    </form>
 </div>
 
 <style>
@@ -252,10 +258,18 @@
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
         padding: 0.25rem 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .messages {
+            scroll-behavior: auto;
+        }
     }
 
     .empty {

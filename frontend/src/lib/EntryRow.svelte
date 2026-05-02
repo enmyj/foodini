@@ -166,6 +166,9 @@
                 class="text-entry"
                 bind:value={editDesc}
                 rows="2"
+                autocapitalize="sentences"
+                autocomplete="off"
+                spellcheck="true"
                 disabled={saving}
             ></textarea>
         </label>
@@ -188,27 +191,27 @@
         <div class="num-grid">
             <label class="field">
                 <span class="label">Calories</span>
-                <input type="number" bind:value={editCal} disabled={saving} />
+                <input type="number" inputmode="numeric" step="1" bind:value={editCal} disabled={saving} />
             </label>
             <label class="field">
                 <span class="label">Protein (g)</span>
                 <input
-                    type="number"
+                    type="number" inputmode="numeric" step="1"
                     bind:value={editProtein}
                     disabled={saving}
                 />
             </label>
             <label class="field">
                 <span class="label">Carbs (g)</span>
-                <input type="number" bind:value={editCarbs} disabled={saving} />
+                <input type="number" inputmode="numeric" step="1" bind:value={editCarbs} disabled={saving} />
             </label>
             <label class="field">
                 <span class="label">Fat (g)</span>
-                <input type="number" bind:value={editFat} disabled={saving} />
+                <input type="number" inputmode="numeric" step="1" bind:value={editFat} disabled={saving} />
             </label>
             <label class="field">
                 <span class="label">Fiber (g)</span>
-                <input type="number" bind:value={editFiber} disabled={saving} />
+                <input type="number" inputmode="numeric" step="1" bind:value={editFiber} disabled={saving} />
             </label>
         </div>
 
