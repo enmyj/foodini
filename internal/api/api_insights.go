@@ -592,20 +592,24 @@ func addDaysStr(dateStr string, n int) string {
 	return t.AddDate(0, 0, n).Format("2006-01-02")
 }
 
+// formatEvent writes one event line stamped with the full ISO date+time so
+// every line is unambiguously dated, even when yesterday and today appear in
+// the same prompt.
 func formatEvent(b *strings.Builder, e sheets.Event, indent string) {
+	stamp := e.Date + " " + e.Time
 	switch e.Kind {
 	case sheets.EventKindWorkout:
-		fmt.Fprintf(b, "%s[%s] Workout: %s\n", indent, e.Time, e.Text)
+		fmt.Fprintf(b, "%s[%s] Workout: %s\n", indent, stamp, e.Text)
 	case sheets.EventKindStool:
 		if e.Text != "" {
-			fmt.Fprintf(b, "%s[%s] Bowel movement: %s\n", indent, e.Time, e.Text)
+			fmt.Fprintf(b, "%s[%s] Bowel movement — %s\n", indent, stamp, e.Text)
 		} else {
-			fmt.Fprintf(b, "%s[%s] Bowel movement\n", indent, e.Time)
+			fmt.Fprintf(b, "%s[%s] Bowel movement (no description)\n", indent, stamp)
 		}
 	case sheets.EventKindWater:
-		fmt.Fprintf(b, "%s[%s] Water: %dml\n", indent, e.Time, int(e.Num))
+		fmt.Fprintf(b, "%s[%s] Water: %dml\n", indent, stamp, int(e.Num))
 	case sheets.EventKindFeeling:
-		fmt.Fprintf(b, "%s[%s] Feeling: %d/10", indent, e.Time, int(e.Num))
+		fmt.Fprintf(b, "%s[%s] Feeling: %d/10", indent, stamp, int(e.Num))
 		if e.Text != "" {
 			fmt.Fprintf(b, " — %s", e.Text)
 		}

@@ -779,19 +779,13 @@ type TimelineItem =
         drawerInitialMode = null;
         if (dayInsightStale && view === "day") {
             dayInsightStale = false;
-            const currentLog = queryClient.getQueryData<LogResponse>(
-                queryKeys.logDay(currentDate),
-            );
-            const hasEntries = (currentLog?.entries?.length ?? 0) > 0;
-            if (hasEntries) {
-                const wasOpen = dayInsight?.open ?? false;
-                void fetchDayInsights(currentDate, true, { open: wasOpen }).then(() => {
-                    if (!dayInsight?.open && dayInsight?.text) {
-                        dayInsightFresh = true;
-                        writeFresh(currentDate);
-                    }
-                });
-            }
+            const wasOpen = dayInsight?.open ?? false;
+            void fetchDayInsights(currentDate, true, { open: wasOpen }).then(() => {
+                if (!dayInsight?.open && dayInsight?.text) {
+                    dayInsightFresh = true;
+                    writeFresh(currentDate);
+                }
+            });
         }
     }
 
@@ -1450,7 +1444,7 @@ type TimelineItem =
 
     .wrap.coach-view {
         padding-bottom: 0;
-        height: 100dvh;
+        height: var(--vvh, 100dvh);
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -1852,11 +1846,16 @@ section {
         color: var(--ink);
         letter-spacing: 0.08em;
         font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
     }
 
     .event-caret {
         color: var(--mute-3);
         font-size: 0.7rem;
+        flex-shrink: 0;
     }
 
     @media (hover: hover) {
