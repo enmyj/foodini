@@ -20,6 +20,7 @@
     let input = $state("");
     let pinned = $state<string | null>(null);
     let pinnedExpanded = $state(false);
+    let abortController: AbortController | null = null;
 
     $effect(() => {
         if (pinnedContext) {
@@ -48,6 +49,10 @@
         if (active) focusInput();
     });
 
+    // Abort any in-flight stream when the component unmounts (e.g. user
+    // navigates away from the Coach tab).
+    $effect(() => () => abortController?.abort());
+
     $effect(() => {
         const len = messages.length;
         const last = messages[len - 1];
@@ -73,9 +78,12 @@
         pinned = null;
         pinnedExpanded = false;
         sending = true;
+        abortController?.abort();
+        abortController = new AbortController();
+        const signal = abortController.signal;
         let started = false;
         try {
-            for await (const chunk of coachChatStream(next, date, weeks * 7)) {
+            for await (const chunk of coachChatStream(next, date, weeks * 7, signal)) {
                 if (!started) {
                     messages = [...next, { role: "model", text: chunk }];
                     started = true;
@@ -95,6 +103,7 @@
                 input = text;
             }
         } catch (err) {
+            if (signal.aborted) return;
             if (!started) {
                 messages = next.slice(0, -1);
                 input = text;
@@ -258,6 +267,7 @@
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
+        overflow-anchor: auto;
         scroll-behavior: smooth;
         -webkit-overflow-scrolling: touch;
         display: flex;

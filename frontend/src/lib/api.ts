@@ -184,15 +184,18 @@ export async function* coachChatStream(
     messages: CoachMessage[],
     date: string | null = null,
     days: number | null = null,
+    signal: AbortSignal | null = null,
 ): AsyncGenerator<string, void, void> {
     const body: { messages: CoachMessage[]; date?: string; days?: number } = { messages };
     if (date) body.date = date;
     if (days) body.days = days;
-    const res = await apiFetch("/api/coach/chat", {
+    const init: RequestInit = {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify(body),
-    });
+    };
+    if (signal) init.signal = signal;
+    const res = await apiFetch("/api/coach/chat", init);
     if (!res.body) return;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

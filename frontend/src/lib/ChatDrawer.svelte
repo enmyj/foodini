@@ -527,7 +527,7 @@
     ontouchend={onDragEnd}
 >
 {#if open}
-        <button class="handle" onclick={onClose} aria-label="Close drawer">
+        <button class="handle" onclick={onClose} aria-label="Close drawer" tabindex="-1">
             <span class="handle-bar"></span>
         </button>
 
@@ -758,6 +758,8 @@
                                             class="msg-thumb"
                                             src={url}
                                             alt=""
+                                            loading="lazy"
+                                            decoding="async"
                                         />
                                     {/each}
                                 </div>
@@ -805,7 +807,7 @@
                 <div class="thumb-strip">
                     {#each pendingImages as img, i}
                         <div class="thumb">
-                            <img src={img.previewUrl} alt="Photo {i + 1}" />
+                            <img src={img.previewUrl} alt="Photo {i + 1}" loading="lazy" decoding="async" />
                             <button
                                 class="thumb-remove"
                                 onclick={() => removeImage(i)}
@@ -1359,6 +1361,7 @@
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
+        overflow-anchor: auto;
         scroll-behavior: smooth;
         -webkit-overflow-scrolling: touch;
         display: flex;

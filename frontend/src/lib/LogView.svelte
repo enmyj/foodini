@@ -1003,10 +1003,10 @@ type TimelineItem =
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <div class="menu-backdrop" aria-hidden="true" onclick={() => (menuOpen = false)}></div>
                     <nav class="nav-menu">
-                        <button class:active={view === "day"} onclick={() => { setView("day"); menuOpen = false; }}>Day</button>
-                        <button class:active={view === "history"} onclick={() => { setView("history"); menuOpen = false; }}>History</button>
-                        <button class:active={view === "favorites"} onclick={() => { setView("favorites"); menuOpen = false; }}>Favorites</button>
-                        <button class:active={view === "coach"} onclick={() => { setView("coach"); menuOpen = false; }}>Coach</button>
+                        <button class:active={view === "day"} aria-current={view === "day" ? "page" : undefined} onclick={() => { setView("day"); menuOpen = false; }}>Day</button>
+                        <button class:active={view === "history"} aria-current={view === "history" ? "page" : undefined} onclick={() => { setView("history"); menuOpen = false; }}>History</button>
+                        <button class:active={view === "favorites"} aria-current={view === "favorites" ? "page" : undefined} onclick={() => { setView("favorites"); menuOpen = false; }}>Favorites</button>
+                        <button class:active={view === "coach"} aria-current={view === "coach" ? "page" : undefined} onclick={() => { setView("coach"); menuOpen = false; }}>Coach</button>
                     </nav>
                 {/if}
             </div>
@@ -1026,7 +1026,7 @@ type TimelineItem =
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <div class="menu-backdrop" aria-hidden="true" onclick={() => (gearOpen = false)}></div>
                         <nav class="gear-menu">
-                            <button class:active={view === "profile"} onclick={() => { setView("profile"); gearOpen = false; }}>Profile</button>
+                            <button class:active={view === "profile"} aria-current={view === "profile" ? "page" : undefined} onclick={() => { setView("profile"); gearOpen = false; }}>Profile</button>
                             <button onclick={() => { promptOpen = true; gearOpen = false; }}>System prompt</button>
                             {#if spreadsheetUrl}
                                 <a href={spreadsheetUrl} target="_blank" rel="noopener" onclick={() => (gearOpen = false)}>Open Google Sheet</a>
@@ -1443,7 +1443,14 @@ type TimelineItem =
     }
 
     .wrap.coach-view {
-        padding-bottom: 0;
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        margin: 0 auto;
+        padding-top: 0;
+        padding-bottom: env(safe-area-inset-bottom, 0);
         height: var(--vvh, 100dvh);
         display: flex;
         flex-direction: column;
@@ -1748,6 +1755,7 @@ section {
     .tl-row {
         position: relative;
         margin: 0;
+        scroll-margin-top: 5rem;
     }
 
     .tl-dot {

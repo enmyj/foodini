@@ -1,13 +1,20 @@
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+@layer reset, tokens, base, components, utilities;
+
+@layer reset {
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
 }
 
 :root {
     color-scheme: light dark;
+    accent-color: light-dark(#2d2d2d, #d0d0ce);
+    scrollbar-color: light-dark(#bbb, #444) transparent;
+    scrollbar-width: thin;
 
     /* Ink (text) */
     --ink: light-dark(#1c1c1c, #e8e8e6);
@@ -81,6 +88,14 @@
 
 html {
     scrollbar-gutter: stable;
+}
+
+/* When the Coach view is active, lock body scrolling. The .coach-view wrap
+   itself is position:fixed so iOS treats it like a modal overlay — same
+   keyboard handling as the chat drawer. */
+html:has(.coach-view) body {
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 body {
