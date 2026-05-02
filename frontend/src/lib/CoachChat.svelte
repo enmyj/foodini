@@ -267,7 +267,7 @@
         min-height: 0;
         overflow-y: auto;
         overscroll-behavior: contain;
-        overflow-anchor: auto;
+        overflow-anchor: none;
         scroll-behavior: smooth;
         -webkit-overflow-scrolling: touch;
         display: flex;
