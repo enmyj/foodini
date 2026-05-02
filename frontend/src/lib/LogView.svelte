@@ -1444,14 +1444,14 @@ type TimelineItem =
 
     .wrap.coach-view {
         position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
+        bottom: var(--vvb, 0);
         left: 0;
+        right: 0;
         margin: 0 auto;
         padding-top: 0;
         padding-bottom: env(safe-area-inset-bottom, 0);
         height: var(--vvh, 100dvh);
+        max-height: var(--vvh, 100dvh);
         display: flex;
         flex-direction: column;
         overflow: hidden;

@@ -895,7 +895,7 @@
 <style>
     .drawer {
         position: fixed;
-        bottom: 0;
+        bottom: var(--vvb, 0);
         left: 0;
         right: 0;
         top: auto;
