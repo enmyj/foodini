@@ -895,7 +895,7 @@
 <style>
     .drawer {
         position: fixed;
-        top: calc(var(--vvh, 100dvh) - min(calc(var(--vvh, 100dvh) * 0.82), 720px));
+        top: calc(var(--vvt, 0px) + var(--vvh, 100dvh) - min(calc(var(--vvh, 100dvh) * 0.82), 720px));
         left: 0;
         right: 0;
         bottom: auto;
@@ -916,7 +916,6 @@
         transition:
             transform 0.22s ease,
             opacity 0.22s ease,
-            top 0.28s cubic-bezier(0.32, 0.72, 0, 1),
             display 0.22s allow-discrete,
             overlay 0.22s allow-discrete;
         will-change: transform;

@@ -195,6 +195,7 @@
             bind:this={inputEl}
             bind:value={input}
             onkeydown={onKeyDown}
+            onfocus={() => inputEl?.scrollIntoView({ block: "nearest" })}
             placeholder={pinned ? "Add details (optional)…" : `Ask about your last ${weeks * 7} days…`}
             rows="1"
             enterkeyhint="send"

@@ -1444,7 +1444,7 @@ type TimelineItem =
 
     .wrap.coach-view {
         position: fixed;
-        top: 0;
+        top: var(--vvt, 0);
         left: 0;
         right: 0;
         bottom: auto;
@@ -1456,13 +1456,6 @@ type TimelineItem =
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        transition: height 0.28s cubic-bezier(0.32, 0.72, 0, 1);
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-        .wrap.coach-view {
-            transition: none;
-        }
     }
 
     .coach-pane {
