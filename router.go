@@ -128,7 +128,6 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.DELETE("/favorites/:id", apiHandler.DeleteFavorite)
 
 	// --- Serve Svelte SPA ---
-	// Serve static files first; fall back to index.html for client-side routes.
 	fileServer := http.FileServerFS(frontendFS)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -137,15 +136,38 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/auth/") {
 				return next(c)
 			}
-			// Try serving a real file (JS, CSS, favicon, etc.).
-			if f, err := frontendFS.Open(strings.TrimPrefix(p, "/")); err == nil {
-				f.Close()
-				fileServer.ServeHTTP(c.Response(), c.Request())
-				return nil
+
+			w := c.Response()
+
+			// Hashed assets are content-addressed: cache forever, 404 if the
+			// hash is gone. Falling through to index.html here would return
+			// HTML for a script request — with nosniff the browser silently
+			// rejects it and the page never mounts.
+			if strings.HasPrefix(p, "/assets/") {
+				if f, err := frontendFS.Open(strings.TrimPrefix(p, "/")); err == nil {
+					f.Close()
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					fileServer.ServeHTTP(w, c.Request())
+					return nil
+				}
+				return c.NoContent(http.StatusNotFound)
 			}
-			// SPA fallback: serve index.html for client-side routes.
+
+			// Other real files (favicon, manifest, icon).
+			if p != "/" {
+				if f, err := frontendFS.Open(strings.TrimPrefix(p, "/")); err == nil {
+					f.Close()
+					fileServer.ServeHTTP(w, c.Request())
+					return nil
+				}
+			}
+
+			// SPA fallback: serve index.html with no-cache so deploys with new
+			// asset hashes are picked up on the next visit instead of being
+			// pinned by Safari's heuristic cache.
+			w.Header().Set("Cache-Control", "no-cache")
 			c.Request().URL.Path = "/"
-			fileServer.ServeHTTP(c.Response(), c.Request())
+			fileServer.ServeHTTP(w, c.Request())
 			return nil
 		}
 	})

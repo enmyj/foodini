@@ -14,7 +14,7 @@ import (
 	"google.golang.org/genai"
 )
 
-const geminiModel = "gemini-3-flash-preview"
+const geminiModel = "gemini-3.1-flash-lite-preview"
 
 // Entry is a structured food log entry.
 type Entry struct {
