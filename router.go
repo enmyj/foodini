@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -45,13 +47,15 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 		HSTSMaxAge:            31536000,
 		HSTSExcludeSubdomains: false,
 		HSTSPreloadEnabled:    false,
-		ContentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:; connect-src 'self'; form-action 'self' https://accounts.google.com; frame-ancestors 'none'; base-uri 'self'",
 		ReferrerPolicy:        "same-origin",
 		Skipper: func(c *echo.Context) bool {
 			return !cfg.CookieSecure // skip HSTS in dev
 		},
 	}.ToMiddleware()
 	e.Use(secureMw)
+	if cfg.CookieSecure {
+		e.Use(contentSecurityPolicy())
+	}
 
 	// CSRF via Sec-Fetch-Site (same approach as the old CrossOriginProtection).
 	// In dev, Vite serves from :5173 and proxies API to :8080 — skip CSRF locally.
@@ -173,6 +177,38 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	})
 
 	return e
+}
+
+func contentSecurityPolicy() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			nonce, err := cspNonce()
+			if err != nil {
+				return err
+			}
+			c.Response().Header().Set(
+				"Content-Security-Policy",
+				"default-src 'self'; "+
+					"script-src 'self' 'nonce-"+nonce+"'; "+
+					"style-src 'self' 'unsafe-inline'; "+
+					"img-src 'self' data: blob:; "+
+					"media-src 'self' blob: data:; "+
+					"connect-src 'self'; "+
+					"form-action 'self' https://accounts.google.com; "+
+					"frame-ancestors 'none'; "+
+					"base-uri 'self'",
+			)
+			return next(c)
+		}
+	}
+}
+
+func cspNonce() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawStdEncoding.EncodeToString(b[:]), nil
 }
 
 // requestLogger logs method, path, status, and latency — skipping healthz.
