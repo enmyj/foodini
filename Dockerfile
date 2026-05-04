@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: Build Svelte frontend ─────────────────────────────────────────────
-FROM oven/bun:1-alpine AS frontend
+FROM oven/bun:1.3.13-alpine AS frontend
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/bun.lock* ./
 RUN bun install --frozen-lockfile

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
     import {
         getLog,
@@ -157,11 +158,37 @@
         (view === "day" && dayQuery.isPending) ||
         (view === "history" && historyQuery.isPending),
     );
+    let refreshing = $derived(
+        (view === "day" && dayQuery.isFetching) ||
+        (view === "history" && historyQuery.isFetching),
+    );
     let spreadsheetUrl = $derived(
         dayQuery.data?.spreadsheet_url ||
         historyQuery.data?.spreadsheet_url ||
         "",
     );
+
+    onMount(() => {
+        function onPageShow(e: PageTransitionEvent) {
+            if (!e.persisted) return;
+            queryClient.invalidateQueries({ queryKey: queryKeys.log() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.favorites });
+            queryClient.invalidateQueries({ queryKey: queryKeys.profile });
+            queryClient.invalidateQueries({ queryKey: queryKeys.events(currentDate) });
+        }
+
+        window.addEventListener("pageshow", onPageShow);
+        return () => window.removeEventListener("pageshow", onPageShow);
+    });
+
+    function refreshCurrentView(): void {
+        if (view === "day") {
+            dayQuery.refetch();
+            queryClient.invalidateQueries({ queryKey: queryKeys.events(currentDate) });
+        } else if (view === "history") {
+            historyQuery.refetch();
+        }
+    }
 
     // Derive load error from active query
     let loadError = $derived.by(() => {
@@ -1005,6 +1032,19 @@ type TimelineItem =
                 {/if}
             </div>
             <div class="header-actions">
+                {#if view === "day" || view === "history"}
+                    <button
+                        class="refresh-btn"
+                        class:refreshing
+                        type="button"
+                        onclick={refreshCurrentView}
+                        disabled={refreshing}
+                        aria-label={refreshing ? "Refreshing" : "Refresh"}
+                        title={refreshing ? "Refreshing" : "Refresh"}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" /><path d="M3 21v-5h5" /><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8" /><path d="M21 3v5h-5" /></svg>
+                    </button>
+                {/if}
                 <ThemeToggle />
                 <div class="gear-wrap">
                     <button
@@ -1115,10 +1155,7 @@ type TimelineItem =
                 <button
                     class="state-link"
                     type="button"
-                    onclick={() => {
-                        if (view === "day") dayQuery.refetch();
-                        else if (view === "history") historyQuery.refetch();
-                    }}>Retry</button>
+                    onclick={refreshCurrentView}>Retry</button>
             {/if}
         </div>
     {:else if view === "day"}
@@ -2181,9 +2218,11 @@ section {
         align-items: center;
     }
 
+    .refresh-btn,
     .gear-btn {
         display: flex;
         align-items: center;
+        justify-content: center;
         background: none;
         border: none;
         color: var(--mute);
@@ -2194,7 +2233,22 @@ section {
         font-family: inherit;
     }
 
+    .refresh-btn:disabled {
+        cursor: default;
+    }
+
+    .refresh-btn.refreshing svg {
+        animation: refresh-spin 0.85s linear infinite;
+    }
+
+    @keyframes refresh-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
     @media (hover: hover) {
+        .refresh-btn:hover,
         .gear-btn:hover {
             color: var(--ink-2);
         }

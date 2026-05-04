@@ -18,53 +18,19 @@
     const legalHtml = marked.parse(legalMd) as string;
 
     let authed = $state<boolean | null>(null); // null=loading, false=logged out, true=logged in
-    let scopeError = $state(false);
-    let legacySheetError = $state(false);
-    let sessionExpired = $state(false);
     let loadError = $state("");
 
     let path = $derived<RoutePath>(getCurrent());
 
-    async function readError(res: Response): Promise<string> {
-        const contentType = res.headers.get("content-type") || "";
-        if (contentType.includes("application/json")) {
-            const body = await res.json() as { error?: string };
-            return body.error || `Could not load the app (${res.status})`;
-        }
-        const text = await res.text();
-        return text || `Could not load the app (${res.status})`;
-    }
-
     async function checkAuth() {
-        scopeError = false;
-        legacySheetError = false;
-        sessionExpired = false;
         loadError = "";
         try {
-            const res = await fetch("/api/log");
+            const res = await fetch("/auth/check", { cache: "no-store" });
             if (res.ok) {
                 authed = true;
             } else if (res.status === 401) {
-                sessionExpired = (await readError(res)) === "session_expired";
                 authed = false;
-            } else if (res.status === 403) {
-                if ((await readError(res)) === "insufficient_scopes") {
-                    scopeError = true;
-                    authed = false;
-                } else {
-                    loadError = "Could not load the app. Try reloading, or sign out and back in.";
-                    authed = false;
-                }
-            } else if (res.status === 409) {
-                if ((await readError(res)) === "unsupported_legacy_sheet") {
-                    legacySheetError = true;
-                    authed = false;
-                } else {
-                    loadError = "Could not load the app. Try reloading, or sign out and back in.";
-                    authed = false;
-                }
             } else {
-                await readError(res);
                 loadError = "Could not load the app. Try reloading, or sign out and back in.";
                 authed = false;
             }
@@ -83,11 +49,10 @@
             // Redirect to app if user already has a session.
             // No loading gate — the cookie check is fast and the landing
             // page renders immediately either way.
-            fetch("/auth/check").then((res) => {
+            fetch("/auth/check", { cache: "no-store" }).then((res) => {
                 if (res.ok && getCurrent() === "/") {
-                    authed = null;
+                    authed = true;
                     navigate("/app");
-                    checkAuth();
                 }
             }).catch(() => {});
         }
@@ -108,11 +73,10 @@
     async function startApp(e: MouseEvent) {
         e.preventDefault();
         try {
-            const res = await fetch("/auth/check");
+            const res = await fetch("/auth/check", { cache: "no-store" });
             if (res.ok) {
-                authed = null;
+                authed = true;
                 navigate("/app");
-                checkAuth();
                 return;
             }
         } catch {}
@@ -128,47 +92,6 @@
 {:else if path === "/app"}
     {#if authed === null}
         <div class="center">Loading...</div>
-    {:else if scopeError}
-        <div class="landing">
-            <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
-                <a href="/auth/logout" class="btn">Sign out</a>
-            </header>
-            <main class="content">
-                <p class="error-msg">
-                    Missing required Google permissions.<br />
-                    <a href="/auth/login?consent=1" class="btn" style="display:inline-block;margin-top:1rem;">Re-authorize</a>
-                </p>
-            </main>
-        </div>
-    {:else if legacySheetError}
-        <div class="landing">
-            <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
-                <a href="/auth/logout" class="btn">Sign out</a>
-            </header>
-            <main class="content">
-                <p class="error-msg">
-                    Your existing Food Tracker spreadsheet is from an older,
-                    no-longer-supported schema.<br />
-                    Rename it (or move it out of the way) in Google Drive, then
-                    reload — a fresh spreadsheet will be created automatically.
-                </p>
-            </main>
-        </div>
-    {:else if sessionExpired}
-        <div class="landing">
-            <header class="top-nav">
-                <a href="/" class="nav-title" onclick={(e) => go(e, '/')}>simplelog.food</a>
-                <a href="/auth/login" class="btn">Sign in with Google</a>
-            </header>
-            <main class="content">
-                <p class="error-msg">
-                    Your session expired or became invalid.<br />
-                    Sign in again to reload your data.
-                </p>
-            </main>
-        </div>
     {:else if loadError}
         <div class="landing">
             <header class="top-nav">

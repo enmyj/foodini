@@ -56,6 +56,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	if cfg.CookieSecure {
 		e.Use(contentSecurityPolicy())
 	}
+	e.Use(noStoreDynamicResponses())
 
 	// CSRF via Sec-Fetch-Site (same approach as the old CrossOriginProtection).
 	// In dev, Vite serves from :5173 and proxies API to :8080 — skip CSRF locally.
@@ -177,6 +178,21 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	})
 
 	return e
+}
+
+func noStoreDynamicResponses() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			p := c.Request().URL.Path
+			if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/auth/") {
+				h := c.Response().Header()
+				h.Set("Cache-Control", "no-store, max-age=0")
+				h.Set("Pragma", "no-cache")
+				h.Set("Expires", "0")
+			}
+			return next(c)
+		}
+	}
 }
 
 func contentSecurityPolicy() echo.MiddlewareFunc {

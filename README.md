@@ -90,7 +90,7 @@ mise run dev-frontend  # terminal 2: Vite dev server on :5173 (open this in brow
 export $(grep -v '^#' .env | xargs) && go run main.go
 
 # Terminal 2 — Svelte frontend
-cd frontend && npm run dev
+cd frontend && bun run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173) in your browser.
@@ -109,12 +109,13 @@ mise run run     # runs ./foodtracker
 ### Without mise
 
 ```bash
-cd frontend && npm run build && cd ..
+cd frontend && bun run build && cd ..
 go build -o foodtracker .
 export $(grep -v '^#' .env | xargs) && ./foodtracker
 ```
 
 The resulting `foodtracker` binary embeds the built frontend and serves everything from a single process on the configured `PORT`.
+`frontend/dist` is generated output and is intentionally not committed; build the frontend before running `go build` directly.
 
 ---
 

@@ -1,5 +1,4 @@
 frontend/dist
-!frontend/dist/index.html
 frontend/node_modules
 .env
 foodtracker
