@@ -58,9 +58,8 @@
     let promptOpen = $state(false);
     let drawerOpen = $state(false);
     let drawerDate = $state<string | null>(null);
-    let drawerMeal = $state<MealType | null>(null);
-    let drawerEditEntries = $state<Entry[] | null>(null);
-    let drawerEditMealType = $state<MealType | null>(null);
+    let drawerMealType = $state<MealType | null>(null);
+    let drawerEntries = $state<Entry[] | null>(null);
     let drawerEditEvent = $state<LogEvent | null>(null);
     let drawerInitialMode = $state<"meal" | "event" | null>(null);
     let dateInputEl = $state<HTMLInputElement | null>(null);
@@ -689,11 +688,10 @@ type TimelineItem =
         );
     }
 
-    function openEditDrawer(meal: MealType, group: Entry[]) {
-        drawerEditEntries = group;
-        drawerEditMealType = meal;
+    function openMealDrawer(meal: MealType, existing: Entry[] | null = null) {
+        drawerMealType = meal;
+        drawerEntries = existing && existing.length ? existing : [];
         drawerDate = currentDate;
-        drawerMeal = meal;
         drawerInitialMode = "meal";
         drawerOpen = true;
     }
@@ -701,9 +699,8 @@ type TimelineItem =
     function openEditEventDrawer(ev: LogEvent) {
         drawerEditEvent = ev;
         drawerDate = ev.date || currentDate;
-        drawerMeal = null;
-        drawerEditEntries = null;
-        drawerEditMealType = null;
+        drawerMealType = null;
+        drawerEntries = null;
         drawerInitialMode = "event";
         drawerOpen = true;
     }
@@ -711,8 +708,7 @@ type TimelineItem =
     function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | null = null) {
         const mealType =
             editedMealType ??
-            drawerEditMealType ??
-            drawerMeal ??
+            drawerMealType ??
             updatedEntries[0]?.meal_type ??
             null;
         applyDayLogMutation(updatedEntries[0]?.date ?? currentDate, (old: LogResponse | undefined) =>
@@ -763,18 +759,16 @@ type TimelineItem =
     function onSwitchMeal(meal: MealType): Entry[] | null {
         const grouped = groupedByMeal(dayData?.entries);
         const list = grouped[meal] ?? null;
-        drawerEditMealType = meal;
-        drawerEditEntries = list ?? null;
-        drawerMeal = meal;
+        drawerMealType = meal;
+        drawerEntries = list ?? null;
         return list && list.length ? list : null;
     }
 
     function closeDrawer() {
         drawerOpen = false;
         drawerDate = null;
-        drawerMeal = null;
-        drawerEditEntries = null;
-        drawerEditMealType = null;
+        drawerMealType = null;
+        drawerEntries = null;
         drawerEditEvent = null;
         drawerInitialMode = null;
         if (dayInsightStale && view === "day") {
@@ -1227,7 +1221,7 @@ type TimelineItem =
                         </button>
                         <button
                             class="meal-action-btn"
-                            onclick={() => openEditDrawer(meal, group)}
+                            onclick={() => openMealDrawer(meal, group)}
                             >Edit</button
                         >
                     </div>
@@ -1258,15 +1252,8 @@ type TimelineItem =
                             {/each}
                             <button
                                 class="add-row"
-                                onclick={() => {
-                                    drawerMeal = meal;
-                                    drawerDate = currentDate;
-                                    drawerEditEntries = null;
-                                    drawerEditMealType = null;
-                                    drawerEditEvent = null;
-                                    drawerInitialMode = "meal";
-                                    drawerOpen = true;
-                                }}>+ add item</button
+                                onclick={() => openMealDrawer(meal, group)}
+                                >+ add item</button
                             >
                         </div>
                     {/if}
@@ -1394,9 +1381,8 @@ type TimelineItem =
     class="fab"
     onclick={() => {
         drawerDate = currentDate;
-        drawerMeal = null;
-        drawerEditEntries = null;
-        drawerEditMealType = null;
+        drawerMealType = null;
+        drawerEntries = null;
         drawerEditEvent = null;
         drawerInitialMode = null;
         drawerOpen = true;
@@ -1428,9 +1414,8 @@ type TimelineItem =
     {onEventChanged}
     {onSwitchMeal}
     date={drawerDate}
-    meal={drawerMeal}
-    editEntries={drawerEditEntries}
-    editMealType={drawerEditMealType}
+    mealType={drawerMealType}
+    entries={drawerEntries}
     editEvent={drawerEditEvent}
     initialMode={drawerInitialMode}
 />

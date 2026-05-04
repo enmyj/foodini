@@ -118,9 +118,10 @@ export async function agent(
         currentEntries?: Entry[] | null;
         images?: File[] | null;
         reset?: boolean;
+        signal?: AbortSignal | null;
     } = {},
 ): Promise<AgentResponse> {
-    const { date = null, meal = null, time = null, currentEntries = null, images = null, reset = false } = options;
+    const { date = null, meal = null, time = null, currentEntries = null, images = null, reset = false, signal = null } = options;
     if (images?.length) {
         const body = new FormData();
         body.append("message", message ?? "");
@@ -130,7 +131,7 @@ export async function agent(
         if (reset) body.append("reset", "true");
         if (currentEntries) body.append("current_entries", JSON.stringify(currentEntries));
         for (const image of images) body.append("images", image);
-        return apiFetchJson<AgentResponse>("/api/agent", { method: "POST", body });
+        return apiFetchJson<AgentResponse>("/api/agent", { method: "POST", body, signal });
     }
     const body: {
         message: string | null;
@@ -149,7 +150,12 @@ export async function agent(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal,
     });
+}
+
+export function isAbortError(err: unknown): boolean {
+    return err instanceof DOMException && err.name === "AbortError";
 }
 
 export async function confirmChat(

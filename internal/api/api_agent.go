@@ -154,6 +154,17 @@ func (h *Handler) Agent(c *echo.Context) error {
 		now:             LocalNow(r),
 	}
 
+	// If sheet writes already succeeded but the model can't close out,
+	// reply 200 with the actions so the client refreshes its UI — otherwise
+	// the data is on the sheet but the user sees a toast and stale state.
+	respondPartial := func() error {
+		h.cacheInvalidate(session.SpreadsheetID)
+		return c.JSON(http.StatusOK, agentResponse{
+			Message: "Saved your changes. (Couldn't generate a reply.)",
+			Actions: executor.actions,
+		})
+	}
+
 	// Tool-call loop. If we exit with pending tool calls, the model wanted to
 	// keep going but we capped it — surface that rather than silently dropping
 	// the unfinished work and returning a stale Message.
@@ -169,6 +180,9 @@ func (h *Handler) Agent(c *echo.Context) error {
 		next, err := h.gemini.AgentContinue(ctx, agentSess, results, turn.ToolCalls)
 		if err != nil {
 			h.gemini.ResetAgentSession(sessionKey)
+			if len(executor.actions) > 0 {
+				return respondPartial()
+			}
 			return writeErr(c, http.StatusInternalServerError, "agent error: "+err.Error())
 		}
 		turn = next
@@ -177,11 +191,13 @@ func (h *Handler) Agent(c *echo.Context) error {
 		// Reset the session — its history now ends on a model turn with unsent
 		// tool results, which would confuse the next request.
 		h.gemini.ResetAgentSession(sessionKey)
+		if len(executor.actions) > 0 {
+			return respondPartial()
+		}
 		return writeErr(c, http.StatusInternalServerError,
 			fmt.Sprintf("agent exceeded %d tool-call iterations", maxAgentIterations))
 	}
 
-	// If any side-effects occurred, invalidate caches and clear convo on terminal action.
 	if len(executor.actions) > 0 {
 		h.cacheInvalidate(session.SpreadsheetID)
 	}

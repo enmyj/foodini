@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { agent, deleteEntry, patchEntry } from "./api.ts";
+    import { agent, deleteEntry, isAbortError, patchEntry } from "./api.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
@@ -36,9 +36,8 @@
         onEventChanged = null,
         onSwitchMeal = null,
         date = null,
-        meal = null,
-        editEntries = null,
-        editMealType = null,
+        mealType: initialMealType = null,
+        entries: initialEntries = null,
         editEvent = null,
         initialMode = null,
     }: {
@@ -51,9 +50,8 @@
         onEventChanged?: ((change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) => void) | null;
         onSwitchMeal?: ((meal: MealType) => Entry[] | null) | null;
         date?: string | null;
-        meal?: MealType | null;
-        editEntries?: Entry[] | null;
-        editMealType?: MealType | null;
+        mealType?: MealType | null;
+        entries?: Entry[] | null;
         editEvent?: LogEvent | null;
         initialMode?: DrawerMode | null;
     } = $props();
@@ -108,6 +106,7 @@
     let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
     let mealMenuEl = $state<HTMLElement | null>(null);
+    let agentAbort: AbortController | null = null;
 
     const agentMutation = createMutation(() => ({
         mutationFn: ({
@@ -118,6 +117,7 @@
             time,
             currentEntries,
             reset,
+            signal,
         }: {
             message: string;
             date: string;
@@ -126,6 +126,7 @@
             time: string | null;
             currentEntries: Entry[] | null;
             reset: boolean;
+            signal: AbortSignal;
         }) =>
             agent(message, {
                 date,
@@ -134,9 +135,12 @@
                 images,
                 currentEntries,
                 reset,
+                signal,
             }),
-        onError: (err) =>
-            showError(err, "Something went wrong. Please try again."),
+        onError: (err) => {
+            if (isAbortError(err)) return;
+            showError(err, "Something went wrong. Please try again.");
+        },
     }));
 
     const patchEntryMutation = createMutation(() => ({
@@ -158,8 +162,8 @@
         untrack(() => {
             if (isOpen) {
                 selectedDate = date || todayStr();
-                mealType = editMealType ?? meal ?? null;
-                entries = editEntries ? [...editEntries] : [];
+                mealType = initialMealType ?? null;
+                entries = initialEntries ? [...initialEntries] : [];
                 messages = [];
                 input = "";
                 sending = false;
@@ -168,17 +172,20 @@
                 deletingEntryIds = new Set();
                 closeMealMenu();
                 if (editEvent) mode = "event";
-                else if (editEntries || meal) mode = "meal";
+                else if (mealType !== null) mode = "meal";
                 else if (initialMode) mode = initialMode;
                 else mode = null;
-                entryTime = editEvent?.time || editEntries?.[0]?.time || nowHHMM();
-                // Auto-focus only when composing a fresh meal. Skip when
-                // editing an existing meal so the keyboard doesn't pop up
-                // over the entries the user came to look at.
-                if (mode === "meal" && !editEntries) {
+                entryTime = editEvent?.time || entries[0]?.time || nowHHMM();
+                // Skip the keyboard pop-up when there are existing entries
+                // for the user to look at; otherwise focus so they can type.
+                if (mode === "meal" && entries.length === 0) {
                     setTimeout(() => inputEl?.focus(), 60);
                 }
             } else {
+                if (agentAbort) {
+                    agentAbort.abort();
+                    agentAbort = null;
+                }
                 selectedDate = "";
                 mealType = null;
                 entries = [];
@@ -342,11 +349,20 @@
         sending = false;
     }
 
+    function cancelSend(): void {
+        if (agentAbort) {
+            agentAbort.abort();
+            agentAbort = null;
+        }
+    }
+
     async function sendAgent(
         text: string,
         imgs: File[] | null,
         sentImages: PendingImage[],
     ): Promise<void> {
+        const controller = new AbortController();
+        agentAbort = controller;
         try {
             const res = await agentMutation.mutateAsync({
                 message: text,
@@ -356,6 +372,7 @@
                 time: entryTime || null,
                 currentEntries: entries.length ? [...entries] : null,
                 reset: firstSend,
+                signal: controller.signal,
             });
             firstSend = false;
             for (const action of res.actions ?? []) {
@@ -366,8 +383,9 @@
                 messages = [...messages, { role: "agent", text: res.message }];
             }
         } catch {
-            // mutation onError already surfaced toast
+            // mutation onError already surfaced toast (or suppressed for abort)
         } finally {
+            if (agentAbort === controller) agentAbort = null;
             for (const img of sentImages) revokePreview(img.previewUrl);
         }
     }
@@ -879,13 +897,21 @@
                     spellcheck="true"
                     disabled={sending}
                 ></textarea>
-                <button
-                    type="submit"
-                    class="send-btn"
-                    disabled={sending ||
-                        (!input.trim() && !pendingImages.length)}
-                    >Send</button
-                >
+                {#if sending}
+                    <button
+                        type="button"
+                        class="send-btn cancel"
+                        onclick={cancelSend}
+                        >Cancel</button
+                    >
+                {:else}
+                    <button
+                        type="submit"
+                        class="send-btn"
+                        disabled={!input.trim() && !pendingImages.length}
+                        >Send</button
+                    >
+                {/if}
             </form>
         </div>
         {/if}
@@ -1639,6 +1665,12 @@
     .send-btn:disabled {
         opacity: 0.35;
         cursor: default;
+    }
+
+    .send-btn.cancel {
+        background: var(--paper);
+        color: var(--ink-2);
+        border: 1px solid var(--rule);
     }
 
     button:focus-visible,
