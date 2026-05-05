@@ -921,10 +921,10 @@
 <style>
     .drawer {
         position: fixed;
-        top: calc(var(--vvt, 0px) + var(--vvh, 100dvh) - min(calc(var(--vvh, 100dvh) * 0.82), 720px));
+        top: auto;
         left: 0;
         right: 0;
-        bottom: auto;
+        bottom: calc(100dvh - var(--vvt, 0px) - var(--vvh, 100dvh));
         max-width: 640px;
         margin: 0 auto;
         background: var(--paper);
@@ -936,6 +936,7 @@
         height: min(82vh, 720px);
         height: min(calc(var(--vvh, 100dvh) * 0.82), 720px);
         max-height: calc(var(--vvh, 100dvh) - 0.5rem);
+        overflow: hidden;
         padding: 0.75rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
         transform: translateY(0);
         opacity: 1;
@@ -1151,6 +1152,12 @@
     .date-input:focus {
         outline: none;
         border-color: var(--ink-2);
+    }
+
+    @media (min-width: 481px) {
+        .drawer {
+            padding-bottom: 1.75rem;
+        }
     }
 
     @media (max-width: 480px) {
@@ -1603,6 +1610,8 @@
     .composer-input {
         flex: 1;
         min-height: 2.75rem;
+        field-sizing: content;
+        max-height: 8rem;
     }
 
     .attach-btn {
