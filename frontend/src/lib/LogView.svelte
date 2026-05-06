@@ -1338,6 +1338,9 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
                 {@const ev = item.event}
                 {@const evRowKey = `event:${ev.id}`}
                 {@const evCollapsed = !expandedRows.has(evRowKey)}
+                {@const fuelRows = ev.kind === "workout" ? fuelingForEvent(ev.id) : []}
+                {@const fuelTot = fuelingTotals(fuelRows)}
+                {@const ghr = ev.kind === "workout" ? gPerHour(fuelRows, ev.num ?? 0) : ""}
                 <section class="tl-row tl-event" class:expanded={!evCollapsed}>
                     <div class="event-head">
                         <span class="tl-dot" style="background:{EVENT_DOT_COLORS[ev.kind]}" aria-hidden="true"></span>
@@ -1364,6 +1367,14 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
                             <span class="event-name">{EVENT_KIND_LABELS[ev.kind]}</span>
                             <span class="event-caret" aria-hidden="true">{evCollapsed ? "▸" : "▾"}</span>
                         </button>
+                        {#if fuelRows.length}
+                            <span
+                                class="fuel-pill"
+                                title={ghr
+                                    ? `${fuelTot.carbs}g carbs · ${ghr}`
+                                    : `${fuelTot.carbs}g carbs`}
+                            >{fuelTot.carbs}g{ghr ? ` · ${ghr}` : ""}</span>
+                        {/if}
                         <button
                             class="meal-action-btn"
                             onclick={() => openEditEventDrawer(ev)}
@@ -1372,9 +1383,6 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
                     </div>
                     {#if !evCollapsed}
                         {@const detail = eventDetail(ev)}
-                        {@const fuelRows = ev.kind === "workout" ? fuelingForEvent(ev.id) : []}
-                        {@const fuelTot = fuelingTotals(fuelRows)}
-                        {@const ghr = ev.kind === "workout" ? gPerHour(fuelRows, ev.num ?? 0) : ""}
                         <div class="event-body">
                             {#if detail || ev.notes}
                                 {#if detail}
@@ -1387,12 +1395,6 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
                                 <div class="tl-event-detail tl-event-notes">no details</div>
                             {/if}
                             {#if ev.kind === "workout" && fuelRows.length}
-                                <div class="fuel-summary">
-                                    <span class="fuel-tot">{fuelTot.carbs}g carbs · {fuelTot.calories} kcal</span>
-                                    {#if ghr}
-                                        <span class="fuel-ghr">{ghr}</span>
-                                    {/if}
-                                </div>
                                 <ul class="fuel-list">
                                     {#each fuelRows as f (f.id)}
                                         <li class="fuel-row">
@@ -2039,6 +2041,19 @@ section {
         color: var(--ink-2);
     }
 
+    .fuel-pill {
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--mute);
+        font-size: 0.68rem;
+        padding: 0.15rem 0.55rem;
+        font-family: inherit;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+    }
+
     @media (hover: hover) {
         .meal-macros-pill:hover {
             border-color: var(--ink-2);
@@ -2074,22 +2089,6 @@ section {
         }
     }
 
-    .fuel-summary {
-        display: flex;
-        gap: 0.6rem;
-        align-items: baseline;
-        font-size: var(--t-meta);
-        color: var(--mute);
-        padding: 0.25rem 0;
-    }
-    .fuel-ghr {
-        font-family: var(--font-mono, ui-monospace, monospace);
-        background: var(--paper-2);
-        border: 1px solid var(--rule-3);
-        border-radius: var(--r-pill);
-        padding: 0.05rem 0.5rem;
-        color: var(--ink-2);
-    }
     .fuel-list {
         list-style: none;
         margin: 0;
