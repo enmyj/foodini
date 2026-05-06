@@ -26,7 +26,7 @@ const agentSystemPrompt = `You are the user's food + daily log assistant. They'r
 Pick the right tool based on intent. If no tool fits, reply in plain text.
 
 Meals:
-- meal_type ∈ {breakfast, snack, lunch, dinner, supplements}. Use "supplements" for vitamins/protein powders.
+- meal_type ∈ {breakfast, snack, lunch, dinner, supplements}. Use "supplements" for vitamins. Protein powder, fiber, and other supplements meant to ride along with a meal should attach to that meal's meal_type, not "supplements" — e.g. protein powder added with breakfast should be logged as breakfast.
 - All numeric macros are integers (round estimates fine). Fiber: 0 if unknown.
 - "edit_meal" replaces the meal currently being edited — return the FULL replacement entry list (omit removed items, include unchanged items unchanged). Only call edit_meal when the context says "Currently editing: <meal>" AND lists current entries for that meal. There is no tool to switch the selected meal. If the user refers to an existing meal but the current context is not editing it, ask them to open that meal or use log_meal for new food.
 - "log_meal": if the user is editing a specific meal (context shows "Currently editing"), default to that meal_type; else infer from the user's wording or time of day.
@@ -34,10 +34,10 @@ Meals:
 - If the user gives a clock time ("had lunch at 12:30", "around 7pm"), pass it via the optional "time" arg as 24h HH:MM. This anchors the entry on the timeline.
 - When logging a meal for a date OTHER than today, always pass "time" — pick a sensible clock time for the meal (breakfast ~08:00, lunch ~12:30, snack ~15:00, dinner ~18:30, supplements ~09:00) unless the user mentions one. Otherwise the entry gets stamped with the current time, which is wrong for retroactive logs.
 - If the user says "same as yesterday's <meal>" or "repeat my <meal> from yesterday", look at "Yesterday's meals" and call log_meal with those exact items.
-- If the user references a favorite by name (or asks to "add my usual <thing>"), look at "Available favorites" and call log_meal using that favorite's macros and meal_type.
+- If the user references a favorite by name (or asks to "add my usual <thing>"), look at "Available favorites" and call log_meal using that favorite's macros and meal_type. Some favorites are listed with meal_type "(any)" — these are flexible (e.g. protein powder, fiber). For a flexible favorite, infer meal_type from context: prefer "Currently editing" if set, else the meal the user is talking about, else infer from time of day.
 - "Scale" / portion-size requests ("make it 1.5x", "double the rice", "half the portion", "I had two plates of this", "actually it was a bigger serving"): if the context shows "Currently editing: <meal>", you MUST call edit_meal with the SAME items, only with macros multiplied — do NOT call log_meal (that would create a duplicate meal alongside the existing one). If not editing, use log_meal. Round to integers.
 - If a photo is provided, estimate from the image — don't ask about anything visible. Only ask ONE clarifying question if quantities are genuinely impossible to tell.
-- "add_favorite" saves a meal item for later quick re-logging. Use when the user explicitly asks to save/favorite something.
+- "add_favorite" saves a meal item for later quick re-logging. Use when the user explicitly asks to save/favorite something. Pass meal_type when the item belongs to one specific meal (e.g. "save my usual breakfast"). Omit meal_type for items the user typically pairs with whichever meal they're eating (protein powder, fiber supplements) so the favorite stays flexible.
 
 Portion sizing (important — LLMs systematically under-estimate, especially as portions get larger):
 - Before producing macros, decide the portion in concrete units (grams, ml, cups, slices, "palm-sized piece", etc.). Don't jump straight to a calorie number — the portion is the dominant source of error.
@@ -168,14 +168,14 @@ var agentTools = sync.OnceValue(func() []*genai.Tool {
 					Type: genai.TypeObject,
 					Properties: map[string]*genai.Schema{
 						"description": {Type: genai.TypeString},
-						"meal_type":   {Type: genai.TypeString, Description: "breakfast | snack | lunch | dinner | supplements"},
+						"meal_type":   {Type: genai.TypeString, Description: "breakfast | snack | lunch | dinner | supplements. Omit for a flexible favorite that can ride along with any meal (e.g. protein powder, fiber)."},
 						"calories":    {Type: genai.TypeInteger},
 						"protein":     {Type: genai.TypeInteger},
 						"carbs":       {Type: genai.TypeInteger},
 						"fat":         {Type: genai.TypeInteger},
 						"fiber":       {Type: genai.TypeInteger},
 					},
-					Required: []string{"description", "meal_type", "calories", "protein", "carbs", "fat", "fiber"},
+					Required: []string{"description", "calories", "protein", "carbs", "fat", "fiber"},
 				},
 			},
 			{
@@ -369,8 +369,12 @@ func formatAgentContext(ac AgentContext) string {
 	if len(ac.Favorites) > 0 {
 		b.WriteString("Available favorites:\n")
 		for _, f := range ac.Favorites {
+			meal := f.MealType
+			if meal == "" {
+				meal = "any"
+			}
 			fmt.Fprintf(&b, "  - %s [%s] (%dcal, %dgP, %dgC, %dgF, %dgFib)\n",
-				f.Description, f.MealType, f.Calories, f.Protein, f.Carbs, f.Fat, f.Fiber)
+				f.Description, meal, f.Calories, f.Protein, f.Carbs, f.Fat, f.Fiber)
 		}
 	}
 	if len(ac.TodaysEvents) > 0 {

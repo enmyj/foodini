@@ -1,12 +1,33 @@
 <script lang="ts">
     import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
-    import { getFavorites, deleteFavorite, confirmChat } from "./api.ts";
+    import {
+        getFavorites,
+        deleteFavorite,
+        updateFavoriteMealType,
+        confirmChat,
+    } from "./api.ts";
     import { appendEntriesToLogCache, removeFavoriteFromCache } from "./cache.ts";
     import { todayStr } from "./date.ts";
     import { queryKeys } from "./queryKeys.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
-    import type { EntryInput, Favorite, LogResponse, MealType } from "./types.ts";
+    import type {
+        EntryInput,
+        Favorite,
+        FavoritesResponse,
+        LogResponse,
+        MealType,
+    } from "./types.ts";
+
+    // Pick a default meal_type for a flexible favorite based on the current
+    // local time. Mirrors the time-of-day buckets the agent uses server-side.
+    function inferMealFromTime(): MealType {
+        const h = new Date().getHours();
+        if (h < 10) return "breakfast";
+        if (h < 14) return "lunch";
+        if (h < 17) return "snack";
+        return "dinner";
+    }
 
     const MEALS = [...MEAL_ORDER];
 
@@ -19,6 +40,36 @@
     const favoritesQuery = createQuery(() => ({
         queryKey: queryKeys.favorites,
         queryFn: getFavorites,
+    }));
+
+    const updateMealMutation = createMutation(() => ({
+        mutationFn: ({ id, mealType }: { id: string; mealType: MealType | "" }) =>
+            updateFavoriteMealType(id, mealType),
+        onMutate: async ({ id, mealType }) => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.favorites });
+            const snapshot = queryClient.getQueryData<FavoritesResponse>(
+                queryKeys.favorites,
+            );
+            queryClient.setQueryData(
+                queryKeys.favorites,
+                (old: FavoritesResponse | undefined) =>
+                    old
+                        ? {
+                              ...old,
+                              favorites: old.favorites.map((f) =>
+                                  f.id === id ? { ...f, meal_type: mealType } : f,
+                              ),
+                          }
+                        : old,
+            );
+            return { snapshot };
+        },
+        onError: (err, _vars, ctx) => {
+            if (ctx?.snapshot !== undefined) {
+                queryClient.setQueryData(queryKeys.favorites, ctx.snapshot);
+            }
+            showError(err, "Failed to update favorite.");
+        },
     }));
 
     const deleteMutation = createMutation(() => ({
@@ -106,7 +157,13 @@
     function openAddModal(fav: Favorite) {
         addModal = { fav };
         addDate = todayStr();
-        addMeal = fav.meal_type || "breakfast";
+        addMeal = fav.meal_type || inferMealFromTime();
+    }
+
+    function onMealChange(fav: Favorite, value: string) {
+        const next = value as MealType | "";
+        if (next === fav.meal_type) return;
+        updateMealMutation.mutate({ id: fav.id, mealType: next });
     }
 
     async function confirmAdd() {
@@ -163,7 +220,19 @@
                             ? ` · ${fav.fiber}g Fb`
                             : ""}</span
                     >
-                    <span class="fav-meal">{fav.meal_type}</span>
+                    <select
+                        class="fav-meal"
+                        value={fav.meal_type}
+                        onclick={(e) => e.stopPropagation()}
+                        onchange={(e) =>
+                            onMealChange(fav, (e.target as HTMLSelectElement).value)}
+                        aria-label="Meal type"
+                    >
+                        <option value="">any</option>
+                        {#each MEALS as m}
+                            <option value={m}>{m}</option>
+                        {/each}
+                    </select>
                 </div>
                 <button
                     class="fav-del"
@@ -293,6 +362,21 @@
         font-size: 0.72rem;
         color: var(--mute-4);
         text-transform: capitalize;
+        align-self: flex-start;
+        background: transparent;
+        background-image: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        width: auto;
+        font-family: inherit;
+        cursor: pointer;
+        appearance: none;
+        outline: none;
+    }
+
+    .fav-meal:focus {
+        color: var(--ink-2);
     }
 
     .fav-del {

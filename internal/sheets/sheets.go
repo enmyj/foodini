@@ -272,6 +272,35 @@ func (s *Service) AddFavorite(ctx context.Context, f FavoriteEntry) error {
 	return err
 }
 
+// UpdateFavoriteMealType writes a new meal_type value (column C) for the
+// favorite row with the given id. Empty mealType is allowed and means the
+// favorite is "flexible" — when logged, the agent infers the meal from
+// context (currently editing meal, or time of day).
+func (s *Service) UpdateFavoriteMealType(ctx context.Context, id, mealType string) error {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, favoritesSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get ids: %w", err)
+	}
+	rowIdx := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		return fmt.Errorf("favorite %q not found", id)
+	}
+	cell := fmt.Sprintf("%s!C%d", favoritesSheet, rowIdx+1)
+	vr := &googlesheets.ValueRange{Values: [][]any{{mealType}}}
+	_, err = s.svc.Spreadsheets.Values.Update(s.spreadsheetID, cell, vr).
+		ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
 // DeleteFavorite removes the favorite entry row with the given ID.
 func (s *Service) DeleteFavorite(ctx context.Context, id string) error {
 	ss, err := s.svc.Spreadsheets.Get(s.spreadsheetID).Context(ctx).Do()

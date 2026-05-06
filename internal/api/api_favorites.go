@@ -79,6 +79,34 @@ func (h *Handler) AddFavorite(c *echo.Context) error {
 	return c.JSON(http.StatusOK, fav)
 }
 
+// PATCH /api/favorites/:id
+// Currently only meal_type is mutable. Empty string is allowed and marks the
+// favorite as flexible (no associated meal — agent infers on log).
+func (h *Handler) UpdateFavorite(c *echo.Context) error {
+	session := auth.SessionFrom(c)
+	id := c.Param("id")
+	if id == "" {
+		return writeErr(c, http.StatusBadRequest, "missing id")
+	}
+	var req struct {
+		MealType *string `json:"meal_type"`
+	}
+	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
+		return writeErr(c, http.StatusBadRequest, "invalid request body")
+	}
+	if req.MealType == nil {
+		return writeErr(c, http.StatusBadRequest, "no fields to update")
+	}
+	svc, err := h.sheetsSvc(c, session)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if err := svc.UpdateFavoriteMealType(c.Request().Context(), id, *req.MealType); err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
 // DELETE /api/favorites/:id
 func (h *Handler) DeleteFavorite(c *echo.Context) error {
 	session := auth.SessionFrom(c)

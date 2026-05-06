@@ -42,8 +42,13 @@ export interface EntryInput extends MacroFields {
     meal_type: MealType;
 }
 
-export interface Favorite extends EntryInput {
+export interface Favorite extends MacroFields {
     id: string;
+    description: string;
+    // Empty string ("") marks the favorite as flexible — it has no fixed
+    // meal_type and is logged under whichever meal the user is editing or
+    // talking about (e.g. protein powder, fiber).
+    meal_type: MealType | "";
 }
 
 export const EVENT_KINDS = ["workout", "stool", "water", "feeling"] as const;

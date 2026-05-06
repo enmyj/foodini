@@ -131,6 +131,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.GET("/system-prompt", apiHandler.GetSystemPrompt)
 	apiGroup.GET("/favorites", apiHandler.GetFavorites)
 	apiGroup.POST("/favorites", apiHandler.AddFavorite)
+	apiGroup.PATCH("/favorites/:id", apiHandler.UpdateFavorite)
 	apiGroup.DELETE("/favorites/:id", apiHandler.DeleteFavorite)
 
 	// --- Serve Svelte SPA ---

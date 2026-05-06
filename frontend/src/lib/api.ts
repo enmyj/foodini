@@ -427,6 +427,17 @@ export async function addFavorite(entry: EntryInput): Promise<Favorite> {
     });
 }
 
+export async function updateFavoriteMealType(
+    id: string,
+    mealType: MealType | "",
+): Promise<void> {
+    await apiFetch(`/api/favorites/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meal_type: mealType }),
+    });
+}
+
 export async function deleteFavorite(id: string): Promise<void> {
     await apiFetch(`/api/favorites/${id}`, { method: "DELETE" });
 }
