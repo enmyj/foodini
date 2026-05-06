@@ -67,6 +67,29 @@ export function appendEntriesToLogCache(
     };
 }
 
+export function removeEventFromLogCache(
+    log: LogResponse | undefined,
+    id: string,
+): LogResponse | undefined {
+    if (!log) return log;
+    return {
+        ...log,
+        events: log.events.filter((event) => event.id !== id),
+        fueling: log.fueling.filter((f) => f.event_id !== id),
+    };
+}
+
+export function removeFuelingFromCache(
+    log: LogResponse | undefined,
+    id: string,
+): LogResponse | undefined {
+    if (!log) return log;
+    return {
+        ...log,
+        fueling: log.fueling.filter((f) => f.id !== id),
+    };
+}
+
 export function removeFavoriteFromCache(
     data: FavoritesResponse | undefined,
     id: string,

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
-    import { patchEntry, deleteEntry } from "./api.ts";
+    import { patchEntry } from "./api.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
     import type { Entry, Favorite, MealType } from "./types.ts";
@@ -31,7 +31,6 @@
     let editFiber = $state(0);
     let editTime = $state("");
     let saving = $state(false);
-    let deleting = $state(false);
     let favoriting = $state(false);
     let pendingDelete = $state(false);
     let deleteTimer = $state<ReturnType<typeof setTimeout> | null>(null);
@@ -39,11 +38,6 @@
     const saveMutation = createMutation(() => ({
         mutationFn: (updated: Entry) => patchEntry(updated.id, updated),
         onError: (err) => showError(err, "Failed to save entry."),
-    }));
-
-    const deleteMutation = createMutation(() => ({
-        mutationFn: (id: string) => deleteEntry(id),
-        onError: (err) => showError(err, "Failed to delete entry."),
     }));
 
     function openModal() {
@@ -83,7 +77,6 @@
     }
 
     function handleDelete() {
-        if (deleting) return;
         if (!pendingDelete) {
             pendingDelete = true;
             deleteTimer = setTimeout(() => {
@@ -93,17 +86,8 @@
         }
         if (deleteTimer) clearTimeout(deleteTimer);
         pendingDelete = false;
-        doDelete();
-    }
-
-    async function doDelete() {
-        deleting = true;
-        try {
-            await deleteMutation.mutateAsync(entry.id);
-            onDelete(entry.id);
-        } catch {
-            deleting = false;
-        }
+        modalOpen = false;
+        onDelete(entry.id);
     }
 
     function onKeyDown(e: KeyboardEvent) {
@@ -122,7 +106,7 @@
     }
 </script>
 
-<div class="row" class:fading={deleting}>
+<div class="row">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="main" role="button" tabindex="0" onclick={openModal}>
         <span class="desc">{entry.description}</span>
@@ -229,7 +213,6 @@
             class="modal-delete"
             class:confirm={pendingDelete}
             onclick={handleDelete}
-            disabled={deleting}
         >{pendingDelete ? "Tap again to confirm" : "Delete entry"}</button>
     </div>
 {/if}
@@ -241,10 +224,6 @@
         padding: 0.75rem 0;
         border-bottom: 1px solid var(--rule);
         gap: 0.5rem;
-    }
-
-    .row.fading {
-        opacity: 0.4;
     }
 
     .main {

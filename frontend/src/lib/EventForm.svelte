@@ -1,6 +1,6 @@
 <script lang="ts">
     import { untrack } from "svelte";
-    import { addEvent, deleteEvent, deleteFueling, estimateFueling, patchEvent } from "./api.ts";
+    import { addEvent, estimateFueling, patchEvent } from "./api.ts";
     import { showError } from "./toast.ts";
     import { EVENT_KINDS } from "./types.ts";
     import type { EventKind, FuelingEntry, LogEvent } from "./types.ts";
@@ -15,6 +15,7 @@
         onDone,
         onSaveAndStay = null,
         onFuelingChanged = null,
+        onFuelingDeleted = null,
     }: {
         date: string;
         time: string;
@@ -25,6 +26,7 @@
         onDone: () => void;
         onSaveAndStay?: ((saved: LogEvent) => void) | null;
         onFuelingChanged?: (() => void) | null;
+        onFuelingDeleted?: ((f: FuelingEntry) => void) | null;
     } = $props();
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
@@ -40,7 +42,6 @@
     let feelingScore = $state(7);
     let durationMin = $state<number | null>(null);
     let saving = $state(false);
-    let deleting = $state(false);
 
     $effect(() => {
         const ev = editEvent;
@@ -63,7 +64,6 @@
                 durationMin = null;
             }
             saving = false;
-            deleting = false;
         });
     });
 
@@ -132,7 +132,6 @@
         }
     }
 
-    let deletingFuelIds = $state<Set<string>>(new Set());
     let fuelInput = $state("");
     let fuelAdding = $state(false);
 
@@ -153,19 +152,8 @@
             : null,
     );
 
-    async function removeFuel(f: FuelingEntry) {
-        if (deletingFuelIds.has(f.id)) return;
-        deletingFuelIds = new Set([...deletingFuelIds, f.id]);
-        try {
-            await deleteFueling(f.id);
-            onFuelingChanged?.();
-        } catch (err) {
-            showError(err, "Failed to delete fuel.");
-        } finally {
-            deletingFuelIds = new Set(
-                [...deletingFuelIds].filter((id) => id !== f.id),
-            );
-        }
+    function removeFuel(f: FuelingEntry) {
+        onFuelingDeleted?.(f);
     }
 
     async function addFuelFromText() {
@@ -198,18 +186,10 @@
         }
     }
 
-    async function deleteEditing() {
-        if (!editEvent || deleting || saving) return;
-        deleting = true;
-        try {
-            await deleteEvent(editEvent.id);
-            onDeleted(editEvent.id);
-            onDone();
-        } catch (err) {
-            showError(err, "Failed to delete event.");
-        } finally {
-            deleting = false;
-        }
+    function deleteEditing() {
+        if (!editEvent || saving) return;
+        onDeleted(editEvent.id);
+        onDone();
     }
 </script>
 
@@ -280,7 +260,7 @@
                         {#if existingFueling.length}
                             <ul class="fueling-list">
                                 {#each existingFueling as f (f.id)}
-                                    <li class="fueling-row" class:dimmed={deletingFuelIds.has(f.id)}>
+                                    <li class="fueling-row">
                                         <span class="fueling-desc">{f.description}</span>
                                         <span class="fueling-carbs">{f.carbs_g}g carbs</span>
                                         <button
@@ -288,7 +268,6 @@
                                             class="fueling-del"
                                             aria-label="Delete fuel"
                                             title="Delete"
-                                            disabled={deletingFuelIds.has(f.id)}
                                             onclick={() => removeFuel(f)}
                                         >×</button>
                                     </li>
@@ -315,19 +294,19 @@
             {/if}
             <div class="event-actions">
                 {#if editEvent}
-                    <button class="event-delete" onclick={deleteEditing} disabled={saving || deleting}>
-                        {deleting ? "Deleting…" : "Delete"}
+                    <button class="event-delete" onclick={deleteEditing} disabled={saving}>
+                        Delete
                     </button>
                 {/if}
                 {#if kind === "workout" && !editEvent && onSaveAndStay}
                     <button
                         class="event-save-fuel"
                         onclick={() => save(true)}
-                        disabled={saving || deleting}
+                        disabled={saving}
                         title="Save activity and add fuel"
                     >Save & add fuel</button>
                 {/if}
-                <button class="event-save" onclick={() => save(false)} disabled={saving || deleting}>
+                <button class="event-save" onclick={() => save(false)} disabled={saving}>
                     {saving ? "Saving…" : "Save"}
                 </button>
             </div>
@@ -587,10 +566,6 @@
         align-items: baseline;
         gap: 0.6rem;
         font-size: var(--t-body-sm);
-    }
-
-    .fueling-row.dimmed {
-        opacity: 0.5;
     }
 
     .fueling-desc {

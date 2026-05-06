@@ -23,7 +23,11 @@
 
     const deleteMutation = createMutation(() => ({
         mutationFn: (id: string) => deleteFavorite(id),
-        onSuccess: (_data, id) => {
+        onMutate: async (id: string) => {
+            await queryClient.cancelQueries({ queryKey: queryKeys.favorites });
+            const snapshot = queryClient.getQueryData<{ favorites?: Favorite[] }>(
+                queryKeys.favorites,
+            );
             queryClient.setQueryData(
                 queryKeys.favorites,
                 (old: { favorites?: Favorite[] } | undefined) =>
@@ -34,8 +38,14 @@
                           )
                         : old,
             );
+            return { snapshot };
         },
-        onError: (err) => showError(err, "Failed to delete favorite."),
+        onError: (err, _id, ctx) => {
+            if (ctx?.snapshot !== undefined) {
+                queryClient.setQueryData(queryKeys.favorites, ctx.snapshot);
+            }
+            showError(err, "Failed to delete favorite.");
+        },
     }));
 
     const addToLogMutation = createMutation(() => ({

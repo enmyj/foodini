@@ -13,7 +13,9 @@
         generateDayInsights,
         generateInsights,
         generateWeekSuggestions,
+        deleteEntry,
         deleteEvent,
+        deleteFueling,
         patchEvent,
         patchEntry,
     } from "./api.ts";
@@ -24,7 +26,7 @@
     import CoachChat from "./CoachChat.svelte";
     import { EVENT_KINDS } from "./types.ts";
     import type { EventKind } from "./types.ts";
-    import { appendEntriesToLogCache, removeEntryFromLogCache, replaceMealEntriesInLogCache, updateEntryInLogCache } from "./cache.ts";
+    import { appendEntriesToLogCache, removeEntryFromLogCache, removeEventFromLogCache, removeFuelingFromCache, replaceMealEntriesInLogCache, updateEntryInLogCache } from "./cache.ts";
     import { addDays, formatDateNav, formatTimeShort, getMonday, todayStr } from "./date.ts";
     import ProfilePanel from "./ProfilePanel.svelte";
     import FavoritesView from "./FavoritesView.svelte";
@@ -439,25 +441,28 @@ type TimelineItem =
         }
     }
 
-    async function handleDeleteEvent(ev: LogEvent) {
-        try {
-            await deleteEvent(ev.id);
-        } catch (e) {
+    function handleDeleteEvent(id: string) {
+        const key = queryKeys.logDay(currentDate);
+        const snapshot = queryClient.getQueryData<LogResponse>(key);
+        applyDayLogMutation(currentDate, (old) => removeEventFromLogCache(old, id));
+        deleteEvent(id).catch((e) => {
+            if (snapshot !== undefined) {
+                queryClient.setQueryData(key, snapshot);
+            }
             showError(e, "Failed to delete event.");
-            return;
-        }
-        if (ev.date === currentDate) {
-            queryClient.setQueryData<LogResponse>(
-                queryKeys.logDay(currentDate),
-                (old) =>
-                    old
-                        ? { ...old, events: old.events.filter((e) => e.id !== ev.id) }
-                        : old,
-            );
-            dayInsightStale = true;
-        }
-        queryClient.invalidateQueries({ queryKey: queryKeys.events(ev.date) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.log() });
+        });
+    }
+
+    function handleDeleteFueling(f: FuelingEntry) {
+        const key = queryKeys.logDay(currentDate);
+        const snapshot = queryClient.getQueryData<LogResponse>(key);
+        applyDayLogMutation(currentDate, (old) => removeFuelingFromCache(old, f.id));
+        deleteFueling(f.id).catch((e) => {
+            if (snapshot !== undefined) {
+                queryClient.setQueryData(key, snapshot);
+            }
+            showError(e, "Failed to delete fuel.");
+        });
     }
 
     let emptyMeals = $derived<MealType[]>(
@@ -792,9 +797,17 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
     }
 
     function handleDelete(id: string) {
+        const key = queryKeys.logDay(currentDate);
+        const snapshot = queryClient.getQueryData<LogResponse>(key);
         applyDayLogMutation(currentDate, (old: LogResponse | undefined) =>
             removeEntryFromLogCache(old, id),
         );
+        deleteEntry(id).catch((e) => {
+            if (snapshot !== undefined) {
+                queryClient.setQueryData(key, snapshot);
+            }
+            showError(e, "Failed to delete entry.");
+        });
     }
 
     function normalizeFavoriteKey(desc: string | null | undefined): string {
@@ -1511,6 +1524,8 @@ function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | nul
     {onEntriesEdited}
     {onEventChanged}
     {onSwitchMeal}
+    onEventDeleted={handleDeleteEvent}
+    onFuelingDeleted={handleDeleteFueling}
     date={drawerDate}
     mealType={drawerMealType}
     entries={drawerEntries}

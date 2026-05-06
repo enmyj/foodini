@@ -35,6 +35,8 @@
         onEntriesAdded,
         onEntriesEdited = null,
         onEventChanged = null,
+        onEventDeleted = null,
+        onFuelingDeleted = null,
         onSwitchMeal = null,
         date = null,
         mealType: initialMealType = null,
@@ -52,6 +54,8 @@
             | ((entries: Entry[], mealType: MealType | null) => void)
             | null;
         onEventChanged?: ((change: { added?: LogEvent; updated?: LogEvent; deletedId?: string }) => void) | null;
+        onEventDeleted?: ((id: string) => void) | null;
+        onFuelingDeleted?: ((f: FuelingEntry) => void) | null;
         onSwitchMeal?: ((meal: MealType) => Entry[] | null) | null;
         date?: string | null;
         mealType?: MealType | null;
@@ -735,13 +739,14 @@
                 editEvent={editingEvent}
                 {existingFueling}
                 onSaved={(change) => onEventChanged?.(change)}
-                onDeleted={(id) => onEventChanged?.({ deletedId: id })}
+                onDeleted={(id) => onEventDeleted?.(id)}
                 onDone={onClose}
                 onSaveAndStay={(saved) => {
                     editingEvent = saved;
                     onEventChanged?.({ added: saved });
                 }}
                 onFuelingChanged={() => onEventChanged?.({})}
+                onFuelingDeleted={(f) => onFuelingDeleted?.(f)}
             />
         {/if}
 
