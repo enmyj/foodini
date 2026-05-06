@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createMutation } from "@tanstack/svelte-query";
     import { untrack } from "svelte";
-    import { agent, deleteEntry, isAbortError, patchEntry } from "./api.ts";
+    import { agent, deleteEntry, deleteFueling, isAbortError, patchEntry } from "./api.ts";
     import { todayStr } from "./date.ts";
     import { showError } from "./toast.ts";
     import { MEAL_ORDER } from "./types.ts";
@@ -70,6 +70,10 @@
     let fuelMode = $state(false);
     let fuelEventId = $state<string | null>(null);
     let entryTime = $state("");
+    // editingEvent shadows the editEvent prop so the form can be kept open after
+    // saving a brand-new workout — the parent doesn't know to push the saved
+    // event back as a prop, so we track it locally and update on save-and-stay.
+    let editingEvent = $state<LogEvent | null>(null);
 
     function nowHHMM(): string {
         const d = new Date();
@@ -114,6 +118,7 @@
     let mealType = $state<MealType | null>(null);
     let firstSend = $state(true);
     let deletingEntryIds = $state<Set<string>>(new Set());
+    let deletingFuelIds = $state<Set<string>>(new Set());
 
     let dragStartY = $state<number | null>(null);
     let dragCurrentY = 0;
@@ -185,6 +190,7 @@
                 closeMealMenu();
                 fuelMode = false;
                 fuelEventId = null;
+                editingEvent = editEvent;
                 if (editEvent) mode = "event";
                 else if (mealType !== null) mode = "meal";
                 else if (initialMode) mode = initialMode;
@@ -208,6 +214,7 @@
                 clearPendingImages();
                 deletingEntryIds = new Set();
                 mode = null;
+                editingEvent = null;
             }
         });
     });
@@ -511,6 +518,21 @@
         }
     }
 
+    async function removeFuel(id: string): Promise<void> {
+        if (deletingFuelIds.has(id)) return;
+        deletingFuelIds = new Set([...deletingFuelIds, id]);
+        try {
+            await deleteFueling(id);
+            onEventChanged?.({});
+        } catch (err) {
+            showError(err, "Failed to delete fuel.");
+        } finally {
+            deletingFuelIds = new Set(
+                [...deletingFuelIds].filter((x) => x !== id),
+            );
+        }
+    }
+
     async function deleteEntry_(index: number): Promise<void> {
         const entry = entries[index];
         if (!entry || deletingEntryIds.has(entry.id)) return;
@@ -710,13 +732,16 @@
             <EventForm
                 date={selectedDate}
                 time={entryTime}
-                {editEvent}
+                editEvent={editingEvent}
                 {existingFueling}
                 onSaved={(change) => onEventChanged?.(change)}
                 onDeleted={(id) => onEventChanged?.({ deletedId: id })}
                 onDone={onClose}
-                onSaveAndFuel={(saved) => enterFuelMode(saved.id)}
-                onFuelingDeleted={() => onEventChanged?.({})}
+                onSaveAndStay={(saved) => {
+                    editingEvent = saved;
+                    onEventChanged?.({ added: saved });
+                }}
+                onFuelingChanged={() => onEventChanged?.({})}
             />
         {/if}
 
@@ -849,10 +874,17 @@
                             <span class="fuel-card-tot">{totalCarbs}g carbs</span>
                         </div>
                         {#each g.rows as f (f.id)}
-                            <div class="fuel-card-row">
-                                <span class="fuel-card-time">{f.time}</span>
+                            <div class="fuel-card-row" class:dimmed={deletingFuelIds.has(f.id)}>
                                 <span class="fuel-card-desc">{f.description}</span>
-                                <span class="fuel-card-carbs">{f.carbs_g}g</span>
+                                <span class="fuel-card-carbs">{f.carbs_g}g carbs</span>
+                                <button
+                                    type="button"
+                                    class="fuel-card-del"
+                                    aria-label="Delete fuel"
+                                    title="Delete"
+                                    disabled={deletingFuelIds.has(f.id)}
+                                    onclick={() => removeFuel(f.id)}
+                                >×</button>
                             </div>
                         {/each}
                     </div>
@@ -861,6 +893,34 @@
         {/snippet}
 
         {#if mode === "meal"}
+        {#if fuelMode}
+            <div class="fuel-anchor">
+                {#if dayWorkouts.length === 0}
+                    <span class="fuel-anchor-warn">No workout logged today — add a workout first.</span>
+                {:else if fuelEventId}
+                    <span class="fuel-anchor-label">Fueling</span>
+                    <span class="fuel-anchor-target">→ {workoutLabel(fuelEventId)}</span>
+                    {#if dayWorkouts.length > 1}
+                        <button
+                            type="button"
+                            class="fuel-anchor-change"
+                            onclick={() => (fuelEventId = null)}
+                        >change</button>
+                    {/if}
+                {:else}
+                    <span class="fuel-anchor-label">Which workout?</span>
+                    <div class="fuel-anchor-picker">
+                        {#each dayWorkouts as w (w.id)}
+                            <button
+                                type="button"
+                                class="fuel-anchor-pick"
+                                onclick={() => (fuelEventId = w.id)}
+                            >{workoutLabel(w.id)}</button>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
+        {/if}
         <div
             class="messages"
             bind:this={scrollEl}
@@ -1365,6 +1425,70 @@
         line-height: 1.3;
     }
 
+    /* --- Fuel anchor strip --- */
+    .fuel-anchor {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        padding: 0.4rem 0.6rem;
+        margin-bottom: 0.4rem;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-sm);
+        background: var(--paper-2);
+        font-size: var(--t-meta);
+    }
+
+    .fuel-anchor-label {
+        color: var(--mute);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+    }
+
+    .fuel-anchor-target {
+        color: var(--ink);
+        font-weight: 500;
+    }
+
+    .fuel-anchor-warn {
+        color: var(--mute);
+    }
+
+    .fuel-anchor-change {
+        background: none;
+        border: none;
+        color: var(--mute);
+        font-size: var(--t-meta);
+        text-decoration: underline;
+        cursor: pointer;
+        font-family: inherit;
+        padding: 0;
+    }
+
+    .fuel-anchor-picker {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+    }
+
+    .fuel-anchor-pick {
+        background: none;
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: var(--t-meta);
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+    }
+
+    @media (hover: hover) {
+        .fuel-anchor-pick:hover {
+            border-color: var(--ink-2);
+        }
+    }
+
     /* --- Result ledger --- */
     .result-card {
         border-top: 1px solid var(--rule);
@@ -1405,12 +1529,10 @@
         padding: 0.25rem 0.6rem;
         font-size: var(--t-body-sm);
         align-items: baseline;
+        transition: opacity 0.15s;
     }
-    .fuel-card-time {
-        font-variant-numeric: tabular-nums;
-        color: var(--mute);
-        font-size: var(--t-meta);
-        min-width: 3rem;
+    .fuel-card-row.dimmed {
+        opacity: 0.45;
     }
     .fuel-card-desc {
         flex: 1;
@@ -1419,6 +1541,22 @@
     .fuel-card-carbs {
         font-variant-numeric: tabular-nums;
         color: var(--mute);
+        font-size: var(--t-meta);
+        white-space: nowrap;
+    }
+    .fuel-card-del {
+        background: none;
+        border: none;
+        color: var(--mute);
+        cursor: pointer;
+        font-size: 1rem;
+        padding: 0 0.25rem;
+        font-family: inherit;
+        line-height: 1;
+    }
+    .fuel-card-del:disabled {
+        opacity: 0.45;
+        cursor: default;
     }
 
     .result-card.dimmed {

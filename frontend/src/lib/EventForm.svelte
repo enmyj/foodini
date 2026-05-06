@@ -1,6 +1,6 @@
 <script lang="ts">
     import { untrack } from "svelte";
-    import { addEvent, deleteEvent, deleteFueling, patchEvent } from "./api.ts";
+    import { addEvent, deleteEvent, deleteFueling, estimateFueling, patchEvent } from "./api.ts";
     import { showError } from "./toast.ts";
     import { EVENT_KINDS } from "./types.ts";
     import type { EventKind, FuelingEntry, LogEvent } from "./types.ts";
@@ -13,8 +13,8 @@
         onSaved,
         onDeleted,
         onDone,
-        onSaveAndFuel = null,
-        onFuelingDeleted = null,
+        onSaveAndStay = null,
+        onFuelingChanged = null,
     }: {
         date: string;
         time: string;
@@ -23,8 +23,8 @@
         onSaved: (change: { added?: LogEvent; updated?: LogEvent }) => void;
         onDeleted: (id: string) => void;
         onDone: () => void;
-        onSaveAndFuel?: ((saved: LogEvent) => void) | null;
-        onFuelingDeleted?: ((id: string) => void) | null;
+        onSaveAndStay?: ((saved: LogEvent) => void) | null;
+        onFuelingChanged?: (() => void) | null;
     } = $props();
 
     const EVENT_KIND_LABELS: Record<EventKind, string> = {
@@ -80,7 +80,7 @@
         return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     }
 
-    async function save(thenFuel = false) {
+    async function save(thenStay = false) {
         if (!kind || saving) return;
         const t = time || nowHHMM();
         const trimmed = text.trim();
@@ -120,8 +120,8 @@
                 saved = await addEvent(payload);
                 onSaved({ added: saved });
             }
-            if (thenFuel && onSaveAndFuel) {
-                onSaveAndFuel(saved);
+            if (thenStay && onSaveAndStay) {
+                onSaveAndStay(saved);
             } else {
                 onDone();
             }
@@ -133,19 +133,68 @@
     }
 
     let deletingFuelIds = $state<Set<string>>(new Set());
+    let fuelInput = $state("");
+    let fuelAdding = $state(false);
+
+    let fuelTotals = $derived(
+        existingFueling.reduce(
+            (acc, f) => {
+                acc.carbs += f.carbs_g;
+                acc.calories += f.calories ?? 0;
+                return acc;
+            },
+            { carbs: 0, calories: 0 },
+        ),
+    );
+
+    let fuelGperHour = $derived(
+        durationMin && durationMin > 0 && fuelTotals.carbs > 0
+            ? Math.round(fuelTotals.carbs / (durationMin / 60))
+            : null,
+    );
 
     async function removeFuel(f: FuelingEntry) {
         if (deletingFuelIds.has(f.id)) return;
         deletingFuelIds = new Set([...deletingFuelIds, f.id]);
         try {
             await deleteFueling(f.id);
-            onFuelingDeleted?.(f.id);
+            onFuelingChanged?.();
         } catch (err) {
             showError(err, "Failed to delete fuel.");
         } finally {
             deletingFuelIds = new Set(
                 [...deletingFuelIds].filter((id) => id !== f.id),
             );
+        }
+    }
+
+    async function addFuelFromText() {
+        if (!editEvent || fuelAdding) return;
+        const text = fuelInput.trim();
+        if (!text) return;
+        fuelAdding = true;
+        try {
+            const added = await estimateFueling(editEvent.id, text, date);
+            if (added.length === 0) {
+                showError(
+                    new Error("Couldn't parse fuel from that description."),
+                    "Couldn't parse fuel.",
+                );
+            } else {
+                fuelInput = "";
+                onFuelingChanged?.();
+            }
+        } catch (err) {
+            showError(err, "Failed to add fuel.");
+        } finally {
+            fuelAdding = false;
+        }
+    }
+
+    function onFuelKeyDown(e: KeyboardEvent) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void addFuelFromText();
         }
     }
 
@@ -216,29 +265,51 @@
                         max="1440"
                         step="5"
                         bind:value={durationMin}
-                        placeholder="optional"
                     />
                 </label>
-                {#if editEvent && existingFueling.length}
+                {#if editEvent}
                     <div class="fueling-block">
-                        <div class="fueling-block-label">Fuel logged</div>
-                        <ul class="fueling-list">
-                            {#each existingFueling as f (f.id)}
-                                <li class="fueling-row" class:dimmed={deletingFuelIds.has(f.id)}>
-                                    <span class="fueling-time">{f.time}</span>
-                                    <span class="fueling-desc">{f.description}</span>
-                                    <span class="fueling-carbs">{f.carbs_g}g</span>
-                                    <button
-                                        type="button"
-                                        class="fueling-del"
-                                        aria-label="Delete fuel"
-                                        title="Delete"
-                                        disabled={deletingFuelIds.has(f.id)}
-                                        onclick={() => removeFuel(f)}
-                                    >×</button>
-                                </li>
-                            {/each}
-                        </ul>
+                        <div class="fueling-block-head">
+                            <span class="fueling-block-label">Fuel</span>
+                            {#if existingFueling.length}
+                                <span class="fueling-block-tot">
+                                    {fuelTotals.carbs}g carbs · {fuelTotals.calories}kcal{fuelGperHour !== null ? ` · ${fuelGperHour} g/hr` : ""}
+                                </span>
+                            {/if}
+                        </div>
+                        {#if existingFueling.length}
+                            <ul class="fueling-list">
+                                {#each existingFueling as f (f.id)}
+                                    <li class="fueling-row" class:dimmed={deletingFuelIds.has(f.id)}>
+                                        <span class="fueling-desc">{f.description}</span>
+                                        <span class="fueling-carbs">{f.carbs_g}g carbs</span>
+                                        <button
+                                            type="button"
+                                            class="fueling-del"
+                                            aria-label="Delete fuel"
+                                            title="Delete"
+                                            disabled={deletingFuelIds.has(f.id)}
+                                            onclick={() => removeFuel(f)}
+                                        >×</button>
+                                    </li>
+                                {/each}
+                            </ul>
+                        {/if}
+                        <div class="fueling-add">
+                            <textarea
+                                rows="1"
+                                bind:value={fuelInput}
+                                onkeydown={onFuelKeyDown}
+                                placeholder="e.g. 3 GU gels"
+                                disabled={fuelAdding}
+                            ></textarea>
+                            <button
+                                type="button"
+                                class="fueling-add-btn"
+                                onclick={addFuelFromText}
+                                disabled={fuelAdding || !fuelInput.trim()}
+                            >{#if fuelAdding}<span class="fueling-add-spin" aria-hidden="true"></span>Adding…{:else}Add{/if}</button>
+                        </div>
                     </div>
                 {/if}
             {/if}
@@ -248,15 +319,13 @@
                         {deleting ? "Deleting…" : "Delete"}
                     </button>
                 {/if}
-                {#if kind === "workout" && onSaveAndFuel}
+                {#if kind === "workout" && !editEvent && onSaveAndStay}
                     <button
                         class="event-save-fuel"
                         onclick={() => save(true)}
                         disabled={saving || deleting}
-                        title="Save activity details and open fuel chat"
-                    >
-                        {existingFueling.length ? "Edit fuel" : "Add fuel"}
-                    </button>
+                        title="Save activity and add fuel"
+                    >Save & add fuel</button>
                 {/if}
                 <button class="event-save" onclick={() => save(false)} disabled={saving || deleting}>
                     {saving ? "Saving…" : "Save"}
@@ -482,12 +551,26 @@
         border-radius: var(--r-sm);
     }
 
+    .fueling-block-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.5rem;
+    }
+
     .fueling-block-label {
         font-size: var(--t-meta);
         color: var(--mute);
         text-transform: uppercase;
         letter-spacing: 0.04em;
         font-weight: 600;
+    }
+
+    .fueling-block-tot {
+        font-size: var(--t-meta);
+        color: var(--ink-2);
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
     }
 
     .fueling-list {
@@ -510,13 +593,6 @@
         opacity: 0.5;
     }
 
-    .fueling-time {
-        font-variant-numeric: tabular-nums;
-        color: var(--mute);
-        font-size: var(--t-meta);
-        min-width: 3rem;
-    }
-
     .fueling-desc {
         flex: 1;
         color: var(--ink);
@@ -525,6 +601,8 @@
     .fueling-carbs {
         font-variant-numeric: tabular-nums;
         color: var(--mute);
+        font-size: var(--t-meta);
+        white-space: nowrap;
     }
 
     .fueling-del {
@@ -540,6 +618,68 @@
     .fueling-del:disabled {
         opacity: 0.45;
         cursor: default;
+    }
+
+    .fueling-add {
+        display: flex;
+        gap: 0.4rem;
+        align-items: flex-end;
+        margin-top: 0.35rem;
+    }
+
+    .fueling-add textarea {
+        flex: 1;
+        border: 1px solid var(--rule);
+        border-radius: var(--r-sm);
+        padding: 0.4rem 0.55rem;
+        font-family: inherit;
+        font-size: 16px;
+        background: var(--paper);
+        color: var(--ink);
+        resize: none;
+        min-height: 2.25rem;
+        field-sizing: content;
+        max-height: 6rem;
+    }
+
+    .fueling-add textarea:focus {
+        outline: none;
+        border-color: var(--ink-2);
+    }
+
+    .fueling-add-btn {
+        background: none;
+        color: var(--ink-2);
+        border: 1px solid var(--ink-2);
+        border-radius: var(--r-sm);
+        padding: 0.4rem 0.85rem;
+        font-size: var(--t-body-sm);
+        font-family: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 2.25rem;
+        white-space: nowrap;
+    }
+
+    .fueling-add-btn:disabled {
+        opacity: 0.7;
+        cursor: default;
+    }
+
+    .fueling-add-spin {
+        display: inline-block;
+        width: 0.7rem;
+        height: 0.7rem;
+        border: 1.5px solid var(--rule-3);
+        border-top-color: var(--ink-2);
+        border-radius: 50%;
+        animation: fueling-spin 0.7s linear infinite;
+        margin-right: 0.4rem;
+        vertical-align: -1px;
+    }
+
+    @keyframes fueling-spin {
+        to { transform: rotate(360deg); }
     }
 
     .event-save:disabled {

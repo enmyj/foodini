@@ -299,6 +299,23 @@ export async function deleteFueling(id: string): Promise<void> {
     await apiFetch(`/api/fueling/${id}`, { method: "DELETE" });
 }
 
+// estimateFueling routes a free-text description through the agent so the model
+// can parse "3 GU gels" into structured rows. Returns whatever fueling entries
+// the agent saved this turn (drawn from action.fuelings on fueling_added).
+export async function estimateFueling(
+    eventId: string,
+    text: string,
+    date: string,
+): Promise<import("./types.ts").FuelingEntry[]> {
+    const message = `(fueling event_id=${eventId}) ${text}`;
+    const res = await agent(message, { date, reset: true });
+    const out: import("./types.ts").FuelingEntry[] = [];
+    for (const a of res.actions ?? []) {
+        if (a.type === "fueling_added" && a.fuelings) out.push(...a.fuelings);
+    }
+    return out;
+}
+
 export async function fetchStoredDayInsight(
     date: string,
 ): Promise<InsightResponse> {

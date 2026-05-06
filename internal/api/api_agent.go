@@ -542,7 +542,12 @@ func (ex *agentExecutor) addFueling(args map[string]any) map[string]any {
 	if len(p.Items) == 0 {
 		return map[string]any{"error": "items required"}
 	}
+	// Default fuel timestamp to the workout's time — fuel happens during the
+	// workout, not at the moment the user logs it. Explicit p.Time overrides.
 	timeStr := sheets.TimeString(ex.now)
+	if ev, _, ok := ex.findEvent(p.EventID); ok && ev.Time != "" {
+		timeStr = ev.Time
+	}
 	if t := strings.TrimSpace(p.Time); t != "" {
 		if parsed, err := time.Parse("15:04", t); err == nil {
 			timeStr = parsed.Format("15:04")
