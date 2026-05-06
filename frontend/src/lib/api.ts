@@ -295,6 +295,10 @@ export async function deleteEvent(id: string): Promise<void> {
     await apiFetch(`/api/events/${id}`, { method: "DELETE" });
 }
 
+export async function deleteFueling(id: string): Promise<void> {
+    await apiFetch(`/api/fueling/${id}`, { method: "DELETE" });
+}
+
 export async function fetchStoredDayInsight(
     date: string,
 ): Promise<InsightResponse> {

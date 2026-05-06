@@ -38,6 +38,7 @@
     import { MEAL_ORDER } from "./types.ts";
     import type {
         Entry,
+        FuelingEntry,
         LogEvent,
         Favorite,
         InsightPanelState,
@@ -65,6 +66,28 @@
     let drawerInitialMode = $state<"meal" | "event" | null>(null);
     let dateInputEl = $state<HTMLInputElement | null>(null);
     let coachPrefill = $state("");
+
+    function fuelingForEvent(eventID: string): FuelingEntry[] {
+        const all = dayData?.fueling ?? [];
+        return all.filter((f) => f.event_id === eventID);
+    }
+
+    function fuelingTotals(rows: FuelingEntry[]): { carbs: number; calories: number } {
+        let carbs = 0;
+        let calories = 0;
+        for (const f of rows) {
+            carbs += f.carbs_g;
+            calories += f.calories ?? f.carbs_g * 4;
+        }
+        return { carbs, calories };
+    }
+
+    function gPerHour(rows: FuelingEntry[], durationMin: number): string {
+        if (!durationMin || durationMin <= 0) return "";
+        const carbs = rows.reduce((s, f) => s + f.carbs_g, 0);
+        const hr = durationMin / 60;
+        return `${Math.round(carbs / hr)} g/hr`;
+    }
 
     let dayInsight = $state<InsightPanelState | null>(null);
     let dayInsightExpanded = $state(false);
@@ -388,8 +411,12 @@ type TimelineItem =
     // a "no details" placeholder instead of repeating the label.
     function eventDetail(ev: LogEvent): string {
         switch (ev.kind) {
-            case "workout":
-                return ev.text || "";
+            case "workout": {
+                const txt = ev.text || "";
+                const dur = ev.num && ev.num > 0 ? `${Math.round(ev.num)} min` : "";
+                if (txt && dur) return `${txt} · ${dur}`;
+                return txt || dur;
+            }
             case "stool":
                 return ev.text || "";
             case "water":
@@ -668,14 +695,16 @@ type TimelineItem =
 
     function weekGroups(data: LogResponse | null, numWeeks = 8): WeekGroup[] {
         if (!data) return [];
-        const { entries = [], events = [] } = data;
-        const byDate: Record<string, { entries: Entry[]; events: LogEvent[] }> = {};
-        for (const e of entries) {
-            (byDate[e.date] ??= { entries: [], events: [] }).entries.push(e);
-        }
-        for (const ev of events) {
-            (byDate[ev.date] ??= { entries: [], events: [] }).events.push(ev);
-        }
+        const { entries = [], events = [], fueling = [] } = data;
+        const byDate: Record<
+            string,
+            { entries: Entry[]; events: LogEvent[]; fueling: FuelingEntry[] }
+        > = {};
+        const ensure = (d: string) =>
+            (byDate[d] ??= { entries: [], events: [], fueling: [] });
+        for (const e of entries) ensure(e.date).entries.push(e);
+        for (const ev of events) ensure(ev.date).events.push(ev);
+        for (const f of fueling) ensure(f.date).fueling.push(f);
 
         const today = todayStr();
         let monday = getMonday(addDays(today, -(numWeeks * 7 - 1)));
@@ -689,8 +718,12 @@ type TimelineItem =
                     date,
                     future,
                     ...(future
-                        ? { entries: [], events: [] }
-                        : (byDate[date] ?? { entries: [], events: [] })),
+                        ? { entries: [], events: [], fueling: [] }
+                        : (byDate[date] ?? {
+                              entries: [],
+                              events: [],
+                              fueling: [],
+                          })),
                 };
             });
             const sunday = addDays(monday, 6);
@@ -723,6 +756,12 @@ type TimelineItem =
         drawerOpen = true;
     }
 
+    let drawerExistingFueling = $derived<FuelingEntry[]>(
+        drawerEditEvent?.kind === "workout"
+            ? fuelingForEvent(drawerEditEvent.id)
+            : [],
+    );
+
     function openEditEventDrawer(ev: LogEvent) {
         drawerEditEvent = ev;
         drawerDate = ev.date || currentDate;
@@ -732,7 +771,7 @@ type TimelineItem =
         drawerOpen = true;
     }
 
-    function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | null = null) {
+function onEntriesEdited(updatedEntries: Entry[], editedMealType: MealType | null = null) {
         const mealType =
             editedMealType ??
             drawerMealType ??
@@ -1333,6 +1372,9 @@ type TimelineItem =
                     </div>
                     {#if !evCollapsed}
                         {@const detail = eventDetail(ev)}
+                        {@const fuelRows = ev.kind === "workout" ? fuelingForEvent(ev.id) : []}
+                        {@const fuelTot = fuelingTotals(fuelRows)}
+                        {@const ghr = ev.kind === "workout" ? gPerHour(fuelRows, ev.num ?? 0) : ""}
                         <div class="event-body">
                             {#if detail || ev.notes}
                                 {#if detail}
@@ -1341,8 +1383,25 @@ type TimelineItem =
                                 {#if ev.notes}
                                     <div class="tl-event-detail tl-event-notes">{ev.notes}</div>
                                 {/if}
-                            {:else}
+                            {:else if ev.kind !== "workout"}
                                 <div class="tl-event-detail tl-event-notes">no details</div>
+                            {/if}
+                            {#if ev.kind === "workout" && fuelRows.length}
+                                <div class="fuel-summary">
+                                    <span class="fuel-tot">{fuelTot.carbs}g carbs · {fuelTot.calories} kcal</span>
+                                    {#if ghr}
+                                        <span class="fuel-ghr">{ghr}</span>
+                                    {/if}
+                                </div>
+                                <ul class="fuel-list">
+                                    {#each fuelRows as f (f.id)}
+                                        <li class="fuel-row">
+                                            <span class="fuel-time">{f.time}</span>
+                                            <span class="fuel-desc">{f.description}</span>
+                                            <span class="fuel-carbs">{f.carbs_g}g</span>
+                                        </li>
+                                    {/each}
+                                </ul>
                             {/if}
                         </div>
                     {/if}
@@ -1454,6 +1513,9 @@ type TimelineItem =
     mealType={drawerMealType}
     entries={drawerEntries}
     editEvent={drawerEditEvent}
+    existingFueling={drawerExistingFueling}
+    dayFueling={dayData?.fueling ?? []}
+    dayWorkouts={(dayData?.events ?? []).filter((e) => e.kind === "workout")}
     initialMode={drawerInitialMode}
 />
 
@@ -2012,6 +2074,49 @@ section {
         }
     }
 
+    .fuel-summary {
+        display: flex;
+        gap: 0.6rem;
+        align-items: baseline;
+        font-size: var(--t-meta);
+        color: var(--mute);
+        padding: 0.25rem 0;
+    }
+    .fuel-ghr {
+        font-family: var(--font-mono, ui-monospace, monospace);
+        background: var(--paper-2);
+        border: 1px solid var(--rule-3);
+        border-radius: var(--r-pill);
+        padding: 0.05rem 0.5rem;
+        color: var(--ink-2);
+    }
+    .fuel-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        border-left: 2px solid var(--rule-3);
+    }
+    .fuel-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+        padding: 0.3rem 0 0.3rem 0.6rem;
+        font-size: var(--t-body-sm);
+    }
+    .fuel-time {
+        font-variant-numeric: tabular-nums;
+        color: var(--mute);
+        font-size: var(--t-meta);
+        min-width: 3rem;
+    }
+    .fuel-desc {
+        flex: 1;
+        color: var(--ink);
+    }
+    .fuel-carbs {
+        font-variant-numeric: tabular-nums;
+        color: var(--mute);
+    }
     .state {
         color: var(--mute-2);
         text-align: center;

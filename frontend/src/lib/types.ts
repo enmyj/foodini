@@ -59,9 +59,22 @@ export interface LogEvent {
     notes?: string;
 }
 
+export interface FuelingEntry {
+    id: string;
+    date: string;
+    time: string;
+    event_id: string;
+    description: string;
+    carbs_g: number;
+    calories?: number;
+    sodium_mg?: number;
+    source?: string;
+}
+
 export interface LogResponse {
     entries: Entry[];
     events: LogEvent[];
+    fueling: FuelingEntry[];
     spreadsheet_url?: string;
     date?: string;
     start?: string;
@@ -74,7 +87,8 @@ export type AgentActionType =
     | "event_added"
     | "event_edited"
     | "event_deleted"
-    | "favorite_added";
+    | "favorite_added"
+    | "fueling_added";
 
 export interface AgentAction {
     type: AgentActionType;
@@ -83,6 +97,7 @@ export interface AgentAction {
     date?: string;
     event?: LogEvent;
     event_id?: string;
+    fuelings?: FuelingEntry[];
 }
 
 export interface AgentResponse {
@@ -149,6 +164,7 @@ export interface WeekDay {
     future: boolean;
     entries: Entry[];
     events: LogEvent[];
+    fueling: FuelingEntry[];
 }
 
 export interface WeekGroup {

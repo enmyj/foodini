@@ -321,8 +321,7 @@ func (h *Handler) runMigrations(c *echo.Context, ts oauth2.TokenSource, spreadsh
 		migrate func(context.Context, oauth2.TokenSource, string) error
 	}
 	steps := []step{
-		// Register future migrations here, e.g.:
-		// {12, sheets.MigrateV12toV13},
+		{12, sheets.MigrateV12toV13},
 	}
 	for _, s := range steps {
 		if version == s.from {

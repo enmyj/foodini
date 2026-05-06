@@ -46,6 +46,14 @@ Portion sizing (important — LLMs systematically under-estimate, especially as 
 - For photos: identify any reference object (hand, fork, standard ~10–11" plate, can, phone) and scale to it. If no reference is visible, assume a normal adult portion for THIS user (using their profile) rather than a small one. Don't ask about portion if the photo is reasonably interpretable — just estimate on the higher side and let the user correct.
 - When genuinely uncertain between two portion sizes, pick the larger. Users find it easier to adjust down than up, and the systematic bias runs the other direction.
 
+Activity fueling:
+- "add_fueling" logs mid-activity fuel (gels, drink mix, chews, bars, banana, etc.) anchored to a workout event. Use this — NOT log_meal — for ANYTHING the user says they had *during* a ride/run/workout. This is the only path users have to log fueling, so be willing to infer carb counts from common products (a typical gel ≈ 22–30g carbs, a SIS Beta Fuel ≈ 40g, Maurten 100 = 25g, Maurten 160 = 40g, GU = 22g, Skratch hydration ≈ 20g/scoop, a banana ≈ 25g carbs).
+- Pass an "items" array. If the user says "I had 6 gels", pass 6 separate items (one per gel) — that way each one shows up on the timeline and the totals add up correctly. If they say "two bottles of Skratch", pass two items.
+- "event_id" is required. If multiple workout events exist for the day, ask the user which one. If only one workout exists, use its id without asking. If NO workout has been logged yet, tell the user to log the workout first (don't invent one with log_event).
+- The user's UI may prefix their message with "(fueling event_id=<uuid>) " — that's the system telling you exactly which workout this fuel belongs to. Use that event_id directly without asking, and silently strip the marker from how you interpret their request. Don't echo the marker back.
+- Don't log pre-workout breakfast or post-workout recovery meals as fueling — those are regular meals via log_meal. Only mid-activity fuel goes through add_fueling.
+- Mid-activity fuel is intentionally separate from regular meals: high-sugar by design and excluded from diet-quality analysis.
+
 Daily log (events):
 - "log_event" creates a single timeline event. kind ∈ {workout, stool, water, feeling}.
   - workout: text = description (e.g. "30min run"). num optional (minutes).
@@ -171,6 +179,32 @@ var agentTools = sync.OnceValue(func() []*genai.Tool {
 				},
 			},
 			{
+				Name:        "add_fueling",
+				Description: "Log one or more mid-activity fuel items (gel, drink mix, chew, bar, whole food) anchored to a workout event. Use this for fuel consumed DURING exercise — not for pre/post-workout meals. If the user says 'I had 6 gels', pass an items array with 6 entries (one per gel) so the timeline shows each one.",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"event_id": {Type: genai.TypeString, Description: "ID of the workout event the fuel belongs to (from Today's events). If multiple workouts exist and the user hasn't specified, ask first."},
+						"items": {
+							Type: genai.TypeArray,
+							Items: &genai.Schema{
+								Type: genai.TypeObject,
+								Properties: map[string]*genai.Schema{
+									"description": {Type: genai.TypeString, Description: "e.g. 'SIS Beta Fuel gel', '20oz Skratch', 'banana'"},
+									"carbs_g":     {Type: genai.TypeInteger, Description: "Grams of carbohydrate"},
+									"calories":    {Type: genai.TypeInteger, Description: "Optional. Defaults to carbs_g * 4."},
+									"sodium_mg":   {Type: genai.TypeInteger, Description: "Optional sodium in mg."},
+									"source":      {Type: genai.TypeString, Description: "gel | drink | chew | bar | whole_food | other"},
+								},
+								Required: []string{"description", "carbs_g"},
+							},
+						},
+						"time": {Type: genai.TypeString, Description: "Optional 24h time HH:MM applied to all items. Omit for now."},
+					},
+					Required: []string{"event_id", "items"},
+				},
+			},
+			{
 				Name:        "read_log",
 				Description: "Read the user's food log for a date or date range. Use when the user asks a question whose answer requires log data not already in context.",
 				Parameters: &genai.Schema{
@@ -229,11 +263,23 @@ type AgentSession struct {
 // Num is overloaded by Kind: workout=duration_min, water=millilitres,
 // feeling=score 1-10, stool=unused.
 type AgentEvent struct {
-	ID    string
-	Time  string
-	Kind  string
-	Text  string
-	Num   float64
+	ID   string
+	Time string
+	Kind string
+	Text string
+	Num  float64
+}
+
+// AgentFueling is a minimal fueling-row shape for agent context.
+type AgentFueling struct {
+	ID          string
+	Time        string
+	EventID     string
+	Description string
+	CarbsG      int
+	Calories    int
+	SodiumMg    int
+	Source      string
 }
 
 // AgentContext describes the drawer state passed to the agent each turn.
@@ -246,6 +292,7 @@ type AgentContext struct {
 	Favorites       []FavoriteRef      // model can match by name and use macros
 	Profile         string             // pre-formatted profile context
 	TodaysEvents    []AgentEvent       // workout/stool/water/feeling events for current date
+	TodaysFueling   []AgentFueling     // mid-activity fuel rows for current date
 	Extra           map[string]any
 }
 
@@ -335,6 +382,17 @@ func formatAgentContext(ac AgentContext) string {
 			}
 			if ev.Num != 0 {
 				fmt.Fprintf(&b, " num=%v", ev.Num)
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(ac.TodaysFueling) > 0 {
+		b.WriteString("Today's activity fueling:\n")
+		for _, f := range ac.TodaysFueling {
+			fmt.Fprintf(&b, "  - id=%s event_id=%s [%s] %s — %dg carbs",
+				f.ID, f.EventID, f.Time, f.Description, f.CarbsG)
+			if f.Source != "" {
+				fmt.Fprintf(&b, " (%s)", f.Source)
 			}
 			b.WriteString("\n")
 		}

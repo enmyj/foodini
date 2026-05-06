@@ -22,12 +22,23 @@ const (
 	profileSheet   = "Profile"
 	insightsSheet  = "Insights"
 	favoritesSheet = "Favorites"
+	fuelingSheet   = "Fueling"
 
 	// CurrentSchemaVersion is the schema the running code expects. Bump this
 	// and register a step in runMigrations whenever the sheet layout changes.
 	// Historical V1→V12 migration bodies were dropped — a sheet older than
 	// v12 has no migration path and is rejected as unsupported.
-	CurrentSchemaVersion = 12
+	CurrentSchemaVersion = 13
+)
+
+// Fuel sources. Each maps to FuelingEntry.Source.
+const (
+	FuelSourceGel       = "gel"
+	FuelSourceDrink     = "drink"
+	FuelSourceChew      = "chew"
+	FuelSourceBar       = "bar"
+	FuelSourceWholeFood = "whole_food"
+	FuelSourceOther     = "other"
 )
 
 // Event kinds. Each maps to a row in the Events sheet.
@@ -489,6 +500,7 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 			{Properties: &googlesheets.SheetProperties{Title: profileSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: insightsSheet}},
 			{Properties: &googlesheets.SheetProperties{Title: favoritesSheet}},
+			{Properties: &googlesheets.SheetProperties{Title: fuelingSheet}},
 		},
 	}
 	created, err := sheetsSvc.Spreadsheets.Create(ss).Context(ctx).Do()
@@ -559,6 +571,17 @@ func CreateSpreadsheet(ctx context.Context, ts oauth2.TokenSource, userEmail str
 	).ValueInputOption("RAW").Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("favorites headers: %w", err)
+	}
+
+	// Fueling sheet: headers row
+	fuelHeaders := &googlesheets.ValueRange{
+		Values: [][]any{{"id", "date", "time", "event_id", "description", "carbs_g", "calories", "sodium_mg", "source"}},
+	}
+	_, err = sheetsSvc.Spreadsheets.Values.Update(
+		created.SpreadsheetId, fuelingSheet+"!A1:I1", fuelHeaders,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("fueling headers: %w", err)
 	}
 
 	return created.SpreadsheetId, nil
@@ -845,6 +868,191 @@ func (s *Service) DeleteFood(ctx context.Context, id string) error {
 	return err
 }
 
+
+// FuelingEntry is one row in the Fueling sheet — a mid-activity fuel item
+// (gel, drink mix, chew, bar, whole food) anchored to a workout event so the
+// coach can compute g/hr separately from regular diet.
+// Schema: id | date | time | event_id | description | carbs_g | calories | sodium_mg | source
+type FuelingEntry struct {
+	ID          string `json:"id"`
+	Date        string `json:"date"`
+	Time        string `json:"time"`
+	EventID     string `json:"event_id"`
+	Description string `json:"description"`
+	CarbsG      int    `json:"carbs_g"`
+	Calories    int    `json:"calories"`
+	SodiumMg    int    `json:"sodium_mg"`
+	Source      string `json:"source"`
+}
+
+func (f FuelingEntry) ToRow() []any {
+	return []any{
+		f.ID, f.Date, f.Time, f.EventID, f.Description,
+		strconv.Itoa(f.CarbsG), strconv.Itoa(f.Calories),
+		strconv.Itoa(f.SodiumMg), f.Source,
+	}
+}
+
+func FuelingEntryFromRow(row []any) (*FuelingEntry, error) {
+	if len(row) < 6 {
+		return nil, fmt.Errorf("fueling row has %d columns, need at least 6", len(row))
+	}
+	str := func(i int) string {
+		if i >= len(row) {
+			return ""
+		}
+		return fmt.Sprintf("%v", row[i])
+	}
+	num := func(i int) int {
+		n, _ := strconv.Atoi(str(i))
+		return n
+	}
+	return &FuelingEntry{
+		ID: str(0), Date: str(1), Time: str(2),
+		EventID: str(3), Description: str(4),
+		CarbsG: num(5), Calories: num(6),
+		SodiumMg: num(7), Source: str(8),
+	}, nil
+}
+
+// AppendFuelings appends multiple fueling entry rows in one Sheets API call.
+func (s *Service) AppendFuelings(ctx context.Context, entries []FuelingEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	values := make([][]any, 0, len(entries))
+	for _, f := range entries {
+		values = append(values, f.ToRow())
+	}
+	vr := &googlesheets.ValueRange{Values: values}
+	_, err := s.svc.Spreadsheets.Values.Append(
+		s.spreadsheetID, fuelingSheet+"!A:I", vr,
+	).ValueInputOption("RAW").Context(ctx).Do()
+	return err
+}
+
+func (s *Service) getFuelingFiltered(ctx context.Context, keep func(row []any) bool) ([]FuelingEntry, error) {
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fuelingSheet+"!A:I").Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	var out []FuelingEntry
+	for i, row := range resp.Values {
+		if i == 0 || len(row) < 6 {
+			continue
+		}
+		if !keep(row) {
+			continue
+		}
+		f, err := FuelingEntryFromRow(row)
+		if err != nil {
+			continue
+		}
+		out = append(out, *f)
+	}
+	return out, nil
+}
+
+// GetFuelingByDate returns all fueling entries for the given date.
+func (s *Service) GetFuelingByDate(ctx context.Context, date string) ([]FuelingEntry, error) {
+	return s.getFuelingFiltered(ctx, func(row []any) bool {
+		return len(row) > 1 && fmt.Sprintf("%v", row[1]) == date
+	})
+}
+
+// GetFuelingByDateRange returns fueling entries with start <= date <= end.
+func (s *Service) GetFuelingByDateRange(ctx context.Context, start, end string) ([]FuelingEntry, error) {
+	return s.getFuelingFiltered(ctx, func(row []any) bool {
+		if len(row) < 2 {
+			return false
+		}
+		d := fmt.Sprintf("%v", row[1])
+		return d >= start && d <= end
+	})
+}
+
+// DeleteFueling removes the fueling row with the given ID.
+func (s *Service) DeleteFueling(ctx context.Context, id string) error {
+	ss, err := s.svc.Spreadsheets.Get(s.spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get spreadsheet: %w", err)
+	}
+	var sheetID int64 = -1
+	for _, sh := range ss.Sheets {
+		if sh.Properties.Title == fuelingSheet {
+			sheetID = sh.Properties.SheetId
+			break
+		}
+	}
+	if sheetID < 0 {
+		return fmt.Errorf("fueling sheet not found")
+	}
+
+	resp, err := s.svc.Spreadsheets.Values.Get(s.spreadsheetID, fuelingSheet+"!A:A").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get ids: %w", err)
+	}
+	rowIdx := -1
+	for i, row := range resp.Values {
+		if i == 0 {
+			continue
+		}
+		if len(row) > 0 && fmt.Sprintf("%v", row[0]) == id {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		return fmt.Errorf("fueling %q not found", id)
+	}
+
+	req := &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			DeleteDimension: &googlesheets.DeleteDimensionRequest{
+				Range: &googlesheets.DimensionRange{
+					SheetId:    sheetID,
+					Dimension:  "ROWS",
+					StartIndex: int64(rowIdx),
+					EndIndex:   int64(rowIdx + 1),
+				},
+			},
+		}},
+	}
+	_, err = s.svc.Spreadsheets.BatchUpdate(s.spreadsheetID, req).Context(ctx).Do()
+	return err
+}
+
+// MigrateV12toV13 adds the Fueling sheet to an existing v12 spreadsheet.
+func MigrateV12toV13(ctx context.Context, ts oauth2.TokenSource, spreadsheetID string) error {
+	svc, err := googlesheets.NewService(ctx, option.WithTokenSource(ts))
+	if err != nil {
+		return fmt.Errorf("sheets client: %w", err)
+	}
+	req := &googlesheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*googlesheets.Request{{
+			AddSheet: &googlesheets.AddSheetRequest{
+				Properties: &googlesheets.SheetProperties{Title: fuelingSheet},
+			},
+		}},
+	}
+	if _, err := svc.Spreadsheets.BatchUpdate(spreadsheetID, req).Context(ctx).Do(); err != nil {
+		return fmt.Errorf("add fueling sheet: %w", err)
+	}
+	headers := &googlesheets.ValueRange{
+		Values: [][]any{{"id", "date", "time", "event_id", "description", "carbs_g", "calories", "sodium_mg", "source"}},
+	}
+	if _, err := svc.Spreadsheets.Values.Update(
+		spreadsheetID, fuelingSheet+"!A1:I1", headers,
+	).ValueInputOption("RAW").Context(ctx).Do(); err != nil {
+		return fmt.Errorf("fueling headers: %w", err)
+	}
+	if _, err := svc.Spreadsheets.Values.Update(
+		spreadsheetID, metaSheet+"!A2", &googlesheets.ValueRange{Values: [][]any{{"13"}}},
+	).ValueInputOption("RAW").Context(ctx).Do(); err != nil {
+		return fmt.Errorf("meta bump: %w", err)
+	}
+	return nil
+}
 
 // GetSchemaVersion reads the schema_version value from the Meta sheet.
 // Returns 0 if the Meta sheet doesn't exist or has no value.

@@ -35,12 +35,13 @@ type agentRequest struct {
 // AgentAction is one observable side-effect the agent performed during this turn.
 // The frontend uses these to refresh affected UI without re-fetching everything.
 type AgentAction struct {
-	Type    string             `json:"type"` // "meal_added" | "meal_edited" | "event_added" | "event_edited" | "event_deleted" | "favorite_added"
-	Entries []sheets.FoodEntry `json:"entries,omitempty"`
-	Removed []string           `json:"removed_ids,omitempty"`
-	Date    string             `json:"date,omitempty"`
-	Event   *sheets.Event      `json:"event,omitempty"`
-	EventID string             `json:"event_id,omitempty"`
+	Type    string               `json:"type"` // "meal_added" | "meal_edited" | "event_added" | "event_edited" | "event_deleted" | "favorite_added" | "fueling_added"
+	Entries []sheets.FoodEntry   `json:"entries,omitempty"`
+	Removed []string             `json:"removed_ids,omitempty"`
+	Date    string               `json:"date,omitempty"`
+	Event    *sheets.Event         `json:"event,omitempty"`
+	EventID  string                `json:"event_id,omitempty"`
+	Fuelings []sheets.FuelingEntry `json:"fuelings,omitempty"`
 }
 
 // agentResponse is the output of /api/agent for one user message.
@@ -113,6 +114,15 @@ func (h *Handler) Agent(c *echo.Context) error {
 		})
 	}
 
+	todaysFueling, _ := svc.GetFuelingByDate(ctx, targetDate)
+	agentFueling := make([]gemini.AgentFueling, 0, len(todaysFueling))
+	for _, f := range todaysFueling {
+		agentFueling = append(agentFueling, gemini.AgentFueling{
+			ID: f.ID, Time: f.Time, EventID: f.EventID, Description: f.Description,
+			CarbsG: f.CarbsG, Calories: f.Calories, SodiumMg: f.SodiumMg, Source: f.Source,
+		})
+	}
+
 	current := make([]gemini.Entry, 0, len(req.CurrentEntries))
 	for _, e := range req.CurrentEntries {
 		current = append(current, foodEntryToGemini(e))
@@ -127,6 +137,7 @@ func (h *Handler) Agent(c *echo.Context) error {
 		Favorites:       favRefs,
 		Profile:         profileCtx,
 		TodaysEvents:    agentEvents,
+		TodaysFueling:   agentFueling,
 	}
 
 	sessionKey := session.UserEmail + "|" + targetDate
@@ -237,6 +248,8 @@ func (ex *agentExecutor) execute(call gemini.AgentToolCall) map[string]any {
 		return ex.deleteEvent(call.Args)
 	case "add_favorite":
 		return ex.addFavorite(call.Args)
+	case "add_fueling":
+		return ex.addFueling(call.Args)
 	case "read_log":
 		return ex.readLog(call.Args)
 	default:
@@ -506,6 +519,58 @@ func (ex *agentExecutor) addFavorite(args map[string]any) map[string]any {
 	}
 	ex.actions = append(ex.actions, AgentAction{Type: "favorite_added", Date: ex.date})
 	return map[string]any{"status": "added"}
+}
+
+func (ex *agentExecutor) addFueling(args map[string]any) map[string]any {
+	var p struct {
+		EventID string `json:"event_id"`
+		Time    string `json:"time"`
+		Items   []struct {
+			Description string `json:"description"`
+			CarbsG      int    `json:"carbs_g"`
+			Calories    int    `json:"calories"`
+			SodiumMg    int    `json:"sodium_mg"`
+			Source      string `json:"source"`
+		} `json:"items"`
+	}
+	if err := gemini.MarshalToolArgs(args, &p); err != nil {
+		return map[string]any{"error": "invalid args: " + err.Error()}
+	}
+	if strings.TrimSpace(p.EventID) == "" {
+		return map[string]any{"error": "event_id required"}
+	}
+	if len(p.Items) == 0 {
+		return map[string]any{"error": "items required"}
+	}
+	timeStr := sheets.TimeString(ex.now)
+	if t := strings.TrimSpace(p.Time); t != "" {
+		if parsed, err := time.Parse("15:04", t); err == nil {
+			timeStr = parsed.Format("15:04")
+		}
+	}
+	saved := make([]sheets.FuelingEntry, 0, len(p.Items))
+	for _, it := range p.Items {
+		if strings.TrimSpace(it.Description) == "" {
+			return map[string]any{"error": "description required for each item"}
+		}
+		if it.CarbsG <= 0 {
+			return map[string]any{"error": "carbs_g must be > 0 for each item"}
+		}
+		if it.Calories == 0 {
+			it.Calories = it.CarbsG * 4
+		}
+		saved = append(saved, sheets.FuelingEntry{
+			ID: uuid.NewString(), Date: ex.date, Time: timeStr,
+			EventID: p.EventID, Description: it.Description,
+			CarbsG: it.CarbsG, Calories: it.Calories,
+			SodiumMg: it.SodiumMg, Source: it.Source,
+		})
+	}
+	if err := ex.svc.AppendFuelings(ex.ctx, saved); err != nil {
+		return map[string]any{"error": "sheet write: " + err.Error()}
+	}
+	ex.actions = append(ex.actions, AgentAction{Type: "fueling_added", Date: ex.date, Fuelings: saved})
+	return map[string]any{"status": "logged", "count": len(saved)}
 }
 
 func (ex *agentExecutor) readLog(args map[string]any) map[string]any {

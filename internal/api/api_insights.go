@@ -114,12 +114,13 @@ func (h *Handler) DayInsights(c *echo.Context) error {
 		return writeErr(c, http.StatusBadRequest, "no data for this day")
 	}
 
+	fueling, _ := svc.GetFuelingByDateRange(ctx, req.Date, req.Date)
 	prevDate := addDaysStr(req.Date, -1)
 	prevEntries, _ := svc.GetFoodByDateRange(ctx, prevDate, prevDate)
 	prevEvents, _ := svc.GetEventsByDateRange(ctx, prevDate, prevDate)
 
 	today := sheets.DateString(LocalNow(r))
-	summary := buildDaySummary(req.Date, entries, dailyLogs, prevDate, prevEntries, prevEvents, req.Date == today)
+	summary := buildDaySummary(req.Date, entries, dailyLogs, fueling, prevDate, prevEntries, prevEvents, req.Date == today)
 
 	profileCacheKey := session.SpreadsheetID + "|profile"
 	var profileCtx string
@@ -660,7 +661,71 @@ func buildWeekSummary(start, end string, entries []sheets.FoodEntry, events []sh
 	return b.String()
 }
 
-func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Event, prevDate string, prevEntries []sheets.FoodEntry, prevEvents []sheets.Event, inProgress bool) string {
+// workoutDurationByID returns a map from workout event id → duration_min,
+// for events with a positive duration.
+func workoutDurationByID(events []sheets.Event) map[string]float64 {
+	out := map[string]float64{}
+	for _, e := range events {
+		if e.Kind == sheets.EventKindWorkout && e.Num > 0 {
+			out[e.ID] = e.Num
+		}
+	}
+	return out
+}
+
+func writeFuelingSection(b *strings.Builder, fueling []sheets.FuelingEntry, events []sheets.Event) {
+	if len(fueling) == 0 {
+		return
+	}
+	durByID := workoutDurationByID(events)
+	textByID := map[string]string{}
+	for _, e := range events {
+		if e.Kind == sheets.EventKindWorkout {
+			textByID[e.ID] = e.Text
+		}
+	}
+	byEvent := map[string][]sheets.FuelingEntry{}
+	order := []string{}
+	for _, f := range fueling {
+		if _, seen := byEvent[f.EventID]; !seen {
+			order = append(order, f.EventID)
+		}
+		byEvent[f.EventID] = append(byEvent[f.EventID], f)
+	}
+	b.WriteString("\nActivity fueling (excluded from diet-quality analysis — high-sugar by design, mid-effort):\n")
+	for _, eid := range order {
+		entries := byEvent[eid]
+		totalCarbs := 0
+		totalCal := 0
+		for _, f := range entries {
+			totalCarbs += f.CarbsG
+			totalCal += f.Calories
+		}
+		dur := durByID[eid]
+		desc := textByID[eid]
+		if desc == "" {
+			desc = "workout"
+		}
+		fmt.Fprintf(b, "  %s", desc)
+		if dur > 0 {
+			hrs := dur / 60.0
+			ghr := float64(totalCarbs) / hrs
+			fmt.Fprintf(b, " (%dmin): %dg carbs / %dkcal — %.0f g/hr", int(dur), totalCarbs, totalCal, ghr)
+		} else {
+			fmt.Fprintf(b, ": %dg carbs / %dkcal (no duration logged — g/hr unknown)", totalCarbs, totalCal)
+		}
+		b.WriteString("\n")
+		for _, f := range entries {
+			fmt.Fprintf(b, "    - [%s] %s — %dg carbs", f.Time, f.Description, f.CarbsG)
+			if f.SodiumMg > 0 {
+				fmt.Fprintf(b, ", %dmg sodium", f.SodiumMg)
+			}
+			b.WriteString("\n")
+		}
+	}
+}
+
+func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Event, fueling []sheets.FuelingEntry, prevDate string, prevEntries []sheets.FoodEntry, prevEvents []sheets.Event, inProgress bool) string {
 	t, _ := time.Parse("2006-01-02", date)
 
 	var b strings.Builder
@@ -720,6 +785,7 @@ func buildDaySummary(date string, entries []sheets.FoodEntry, events []sheets.Ev
 		}
 		formatEvent(&b, ev, "")
 	}
+	writeFuelingSection(&b, fueling, events)
 	return b.String()
 }
 

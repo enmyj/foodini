@@ -58,6 +58,7 @@ export function appendEntriesToLogCache(
         return {
             entries: newEntries,
             events: [],
+            fueling: [],
         };
     }
     return {

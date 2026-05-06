@@ -42,9 +42,17 @@ func (h *Handler) GetLog(c *echo.Context) error {
 		if err != nil {
 			return h.writeAPIErr(c, err)
 		}
+		fueling, err := svc.GetFuelingByDateRange(ctx, start, today)
+		if err != nil {
+			return h.writeAPIErr(c, err)
+		}
+		if fueling == nil {
+			fueling = []sheets.FuelingEntry{}
+		}
 		data, _ := json.Marshal(map[string]any{
 			"entries":         entries,
 			"events":          events,
+			"fueling":         fueling,
 			"start":           start,
 			"end":             today,
 			"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
@@ -72,9 +80,17 @@ func (h *Handler) GetLog(c *echo.Context) error {
 	if err != nil {
 		return h.writeAPIErr(c, err)
 	}
+	fueling, err := svc.GetFuelingByDate(ctx, date)
+	if err != nil {
+		return h.writeAPIErr(c, err)
+	}
+	if fueling == nil {
+		fueling = []sheets.FuelingEntry{}
+	}
 	data, _ := json.Marshal(map[string]any{
 		"entries":         entries,
 		"events":          events,
+		"fueling":         fueling,
 		"date":            date,
 		"spreadsheet_url": "https://docs.google.com/spreadsheets/d/" + session.SpreadsheetID,
 	})

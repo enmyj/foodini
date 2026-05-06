@@ -108,6 +108,7 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.POST("/events", apiHandler.PostEvent)
 	apiGroup.PATCH("/events/:id", apiHandler.PatchEvent)
 	apiGroup.DELETE("/events/:id", apiHandler.DeleteEvent)
+	apiGroup.DELETE("/fueling/:id", apiHandler.DeleteFueling)
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
 	apiGroup.POST("/agent", apiHandler.Agent, middleware.BodyLimit(chatBodyLimit))
 	apiGroup.POST("/coach/chat", apiHandler.CoachChat)

@@ -8,6 +8,7 @@
     import type {
         AgentAction,
         Entry,
+        FuelingEntry,
         LogEvent,
         MealType,
         PendingImage,
@@ -39,6 +40,9 @@
         mealType: initialMealType = null,
         entries: initialEntries = null,
         editEvent = null,
+        existingFueling = [],
+        dayFueling = [],
+        dayWorkouts = [],
         initialMode = null,
     }: {
         open: boolean;
@@ -53,10 +57,18 @@
         mealType?: MealType | null;
         entries?: Entry[] | null;
         editEvent?: LogEvent | null;
+        existingFueling?: FuelingEntry[];
+        dayFueling?: FuelingEntry[];
+        dayWorkouts?: LogEvent[];
         initialMode?: DrawerMode | null;
     } = $props();
 
     let mode = $state<DrawerMode | null>(null);
+    // When true, drawer is in "fuel" pseudo-meal mode: chat input is shown,
+    // mealType is ignored, the pill displays "fuel", and the agent context
+    // omits selected-meal so it reaches for add_fueling instead of log_meal.
+    let fuelMode = $state(false);
+    let fuelEventId = $state<string | null>(null);
     let entryTime = $state("");
 
     function nowHHMM(): string {
@@ -171,6 +183,8 @@
                 firstSend = true;
                 deletingEntryIds = new Set();
                 closeMealMenu();
+                fuelMode = false;
+                fuelEventId = null;
                 if (editEvent) mode = "event";
                 else if (mealType !== null) mode = "meal";
                 else if (initialMode) mode = initialMode;
@@ -200,7 +214,9 @@
 
     function selectMeal(m: MealType) {
         closeMealMenu();
-        if (m === mealType) return;
+        if (!fuelMode && m === mealType) return;
+        fuelMode = false;
+        fuelEventId = null;
         if (onSwitchMeal) {
             const switched = onSwitchMeal(m);
             entries = switched ? [...switched] : [];
@@ -216,6 +232,8 @@
     function clearMeal() {
         closeMealMenu();
         mealType = null;
+        fuelMode = false;
+        fuelEventId = null;
         entries = [];
         messages = [];
         firstSend = true;
@@ -225,6 +243,54 @@
         mode = next;
         if (next === "meal") setTimeout(() => inputEl?.focus(), 60);
     }
+
+    function enterFuelMode(workoutEventId: string | null = null) {
+        fuelMode = true;
+        fuelEventId = workoutEventId;
+        mealType = null;
+        entries = [];
+        mode = "meal";
+        messages = [];
+        firstSend = true;
+        closeMealMenu();
+        setTimeout(() => inputEl?.focus(), 60);
+    }
+
+    function pickFuel() {
+        // If exactly one workout exists today, auto-anchor to it. Otherwise
+        // leave fuelEventId null and let the agent ask which one.
+        const workouts = dayWorkouts;
+        const anchor = workouts.length === 1 ? workouts[0]!.id : null;
+        enterFuelMode(anchor);
+    }
+
+    let visibleFueling = $derived<FuelingEntry[]>(
+        fuelEventId
+            ? dayFueling.filter((f) => f.event_id === fuelEventId)
+            : dayFueling,
+    );
+
+    function workoutLabel(eventId: string): string {
+        const ev = dayWorkouts.find((e) => e.id === eventId);
+        if (!ev) return "workout";
+        const t = (ev.text ?? "").trim();
+        return t || "workout";
+    }
+
+    let groupedFueling = $derived<{ eventId: string; rows: FuelingEntry[] }[]>(
+        (() => {
+            const map = new Map<string, FuelingEntry[]>();
+            const order: string[] = [];
+            for (const f of visibleFueling) {
+                if (!map.has(f.event_id)) {
+                    map.set(f.event_id, []);
+                    order.push(f.event_id);
+                }
+                map.get(f.event_id)!.push(f);
+            }
+            return order.map((id) => ({ eventId: id, rows: map.get(id)! }));
+        })(),
+    );
 
     $effect(() => {
         const len = messages.length;
@@ -363,9 +429,15 @@
     ): Promise<void> {
         const controller = new AbortController();
         agentAbort = controller;
+        // In fuel mode with a known workout event, anchor the agent so it
+        // calls add_fueling against that specific event without re-asking.
+        const outgoing =
+            fuelMode && fuelEventId && text
+                ? `(fueling event_id=${fuelEventId}) ${text}`
+                : text;
         try {
             const res = await agentMutation.mutateAsync({
-                message: text,
+                message: outgoing,
                 date: selectedDate,
                 images: imgs,
                 meal: mealType,
@@ -413,6 +485,8 @@
             if (onEventChanged) onEventChanged({ updated: action.event });
         } else if (action.type === "event_deleted" && action.event_id) {
             if (onEventChanged) onEventChanged({ deletedId: action.event_id });
+        } else if (action.type === "fueling_added") {
+            if (onEventChanged) onEventChanged({});
         }
     }
 
@@ -501,6 +575,15 @@
                 return "Event deleted";
             case "favorite_added":
                 return "Saved to favorites";
+            case "fueling_added": {
+                const fs = a.fuelings ?? [];
+                if (fs.length === 0) return "Logged fuel";
+                const totalCarbs = fs.reduce((s, f) => s + f.carbs_g, 0);
+                if (fs.length === 1) {
+                    return `Logged fuel: ${fs[0]!.description} (${totalCarbs}g carbs)`;
+                }
+                return `Logged ${fs.length} fuel items (${totalCarbs}g carbs)`;
+            }
             default:
                 return "";
         }
@@ -568,9 +651,9 @@
                 {#if mode === "meal"}
                     <button
                         class="meal-pill"
-                        class:active={mealType !== null}
+                        class:active={mealType !== null || fuelMode}
                         popovertarget="meal-menu-popover"
-                    >{mealType ?? "Meal"}</button>
+                    >{fuelMode ? "fuel" : (mealType ?? "Meal")}</button>
                     <div
                         class="meal-menu"
                         role="menu"
@@ -581,12 +664,18 @@
                         {#each MEAL_ORDER as m}
                             <button
                                 class="meal-menu-item"
-                                class:selected={mealType === m}
+                                class:selected={!fuelMode && mealType === m}
                                 onclick={() => selectMeal(m)}
                                 role="menuitem"
                             >{m}</button>
                         {/each}
-                        {#if mealType !== null}
+                        <button
+                            class="meal-menu-item fuel-menu-item"
+                            class:selected={fuelMode}
+                            onclick={() => pickFuel()}
+                            role="menuitem"
+                        >fuel</button>
+                        {#if mealType !== null || fuelMode}
                             <button
                                 class="meal-menu-item clear"
                                 onclick={() => clearMeal()}
@@ -622,9 +711,12 @@
                 date={selectedDate}
                 time={entryTime}
                 {editEvent}
+                {existingFueling}
                 onSaved={(change) => onEventChanged?.(change)}
                 onDeleted={(id) => onEventChanged?.({ deletedId: id })}
                 onDone={onClose}
+                onSaveAndFuel={(saved) => enterFuelMode(saved.id)}
+                onFuelingDeleted={() => onEventChanged?.({})}
             />
         {/if}
 
@@ -747,6 +839,27 @@
             </div>
         {/snippet}
 
+        {#snippet fuelCard()}
+            <div class="result-card fuel-card" class:dimmed={sending}>
+                {#each groupedFueling as g (g.eventId)}
+                    {@const totalCarbs = g.rows.reduce((s, f) => s + f.carbs_g, 0)}
+                    <div class="fuel-card-group">
+                        <div class="fuel-card-head">
+                            <span class="fuel-card-label">{workoutLabel(g.eventId)}</span>
+                            <span class="fuel-card-tot">{totalCarbs}g carbs</span>
+                        </div>
+                        {#each g.rows as f (f.id)}
+                            <div class="fuel-card-row">
+                                <span class="fuel-card-time">{f.time}</span>
+                                <span class="fuel-card-desc">{f.description}</span>
+                                <span class="fuel-card-carbs">{f.carbs_g}g</span>
+                            </div>
+                        {/each}
+                    </div>
+                {/each}
+            </div>
+        {/snippet}
+
         {#if mode === "meal"}
         <div
             class="messages"
@@ -758,7 +871,11 @@
         >
             {#if messages.length === 0}
                 <p class="empty">
-                    {#if entries.length > 0}
+                    {#if fuelMode && visibleFueling.length > 0}
+                        Add more fuel, or tweak what's there.
+                    {:else if fuelMode}
+                        What did you have during the activity?
+                    {:else if entries.length > 0}
                         Tweak this meal, scale it, or add more.
                     {:else}
                         What did you eat?
@@ -806,7 +923,9 @@
                     </div>
                 </div>
             {/if}
-            {#if entries.length > 0}
+            {#if fuelMode && visibleFueling.length > 0}
+                {@render fuelCard()}
+            {:else if !fuelMode && entries.length > 0}
                 {@render entriesCard()}
             {/if}
         </div>
@@ -1252,6 +1371,54 @@
         border-bottom: 1px solid var(--rule);
         margin-bottom: 0.5rem;
         transition: opacity 0.15s;
+    }
+
+    .fuel-card {
+        padding: 0.5rem 0;
+    }
+    .fuel-card-group + .fuel-card-group {
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--rule-3);
+    }
+    .fuel-card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 0.2rem 0.6rem;
+        font-size: var(--t-meta);
+        color: var(--mute);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+    }
+    .fuel-card-tot {
+        font-variant-numeric: tabular-nums;
+        text-transform: none;
+        letter-spacing: 0;
+        font-weight: 500;
+        color: var(--ink-2);
+    }
+    .fuel-card-row {
+        display: flex;
+        gap: 0.6rem;
+        padding: 0.25rem 0.6rem;
+        font-size: var(--t-body-sm);
+        align-items: baseline;
+    }
+    .fuel-card-time {
+        font-variant-numeric: tabular-nums;
+        color: var(--mute);
+        font-size: var(--t-meta);
+        min-width: 3rem;
+    }
+    .fuel-card-desc {
+        flex: 1;
+        color: var(--ink);
+    }
+    .fuel-card-carbs {
+        font-variant-numeric: tabular-nums;
+        color: var(--mute);
     }
 
     .result-card.dimmed {
