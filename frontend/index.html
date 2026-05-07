@@ -7,16 +7,46 @@
     <link rel="manifest" href="/manifest.json" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <meta name="description" content="Log meals in plain English. Data stored in your own Google Sheets." />
+    <link rel="canonical" href="https://simplelog.food/" />
     <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#161616" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="simplelog.food" />
-    <title>simplelog.food</title>
+    <title>simplelog.food — Track meals in plain English</title>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "simplelog.food",
+      "url": "https://simplelog.food/",
+      "description": "Log meals in plain English. AI extracts calories and macros. Data stored in your own Google Sheet.",
+      "applicationCategory": "HealthApplication",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <main style="max-width:640px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5;">
+        <h1>Track what you eat, in plain English.</h1>
+        <p>Describe your meals however you want. AI handles the calories and macros. Your data lives in a Google Sheet you own — not our database.</p>
+        <h2>No food database to search</h2>
+        <p>Type "scrambled eggs with toast and a coffee" and get structured entries back. Edit anything before you save.</p>
+        <h2>Your spreadsheet, your data</h2>
+        <p>Everything is stored in Google Sheets on your own Drive. Export it, delete it, do whatever you want with it.</p>
+        <h2>Open source</h2>
+        <p><a href="https://github.com/enmyj/foodini">Fork it</a> or self-host with your own API key.</p>
+        <p>This site requires JavaScript to use. <a href="https://github.com/enmyj/foodini">View source on GitHub.</a></p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
