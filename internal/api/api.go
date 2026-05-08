@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,14 +37,33 @@ type cacheItem struct {
 	expires time.Time
 }
 
-const cacheTTL = 60 * time.Second
+const (
+	cacheTTL          = 60 * time.Second
+	cacheJanitorEvery = 5 * time.Minute
+)
 
 func NewHandler(authHandler *auth.Handler, geminiAPIKey string) *Handler {
-	return &Handler{
+	h := &Handler{
 		auth:        authHandler,
 		gemini:      gemini.NewService(geminiAPIKey),
 		cache:       make(map[string]cacheItem),
 		migratedIDs: make(map[string]bool),
+	}
+	go h.cacheJanitor(cacheJanitorEvery)
+	return h
+}
+
+func (h *Handler) cacheJanitor(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for now := range t.C {
+		h.cacheMu.Lock()
+		for k, item := range h.cache {
+			if now.After(item.expires) {
+				delete(h.cache, k)
+			}
+		}
+		h.cacheMu.Unlock()
 	}
 }
 
@@ -164,7 +184,12 @@ func (h *Handler) writeAPIErr(c *echo.Context, err error) error {
 	if isInsufficientScopesErr(err) {
 		return writeErr(c, http.StatusForbidden, "insufficient_scopes")
 	}
-	return writeErr(c, http.StatusInternalServerError, err.Error())
+	slog.Error("api error",
+		"path", c.Request().URL.Path,
+		"method", c.Request().Method,
+		"err", err,
+	)
+	return writeErr(c, http.StatusInternalServerError, "internal_error")
 }
 
 // LocalNow returns the current time in the user's local timezone.

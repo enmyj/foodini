@@ -20,7 +20,7 @@ import (
 
 const (
 	defaultBodyLimit int64 = 1 << 20  // 1 MB
-	chatBodyLimit    int64 = 20 << 20 // 20 MB
+	chatBodyLimit    int64 = 60 << 20 // 60 MB — fits 4 phone-camera JPEGs (~12 MB each)
 )
 
 func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, frontendFS fs.FS) *echo.Echo {
@@ -83,6 +83,10 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	userRL := ratelimit.New(rate.Limit(5), 20, 10*time.Minute)
 	userLimit := userRL.Middleware(ratelimit.UserKey)
 
+	// Tighter per-user limiter for Gemini-backed routes (cost ceiling).
+	agentRL := ratelimit.New(rate.Every(2*time.Second), 3, 10*time.Minute)
+	agentLimit := agentRL.Middleware(ratelimit.UserKey)
+
 	// --- Health check ---
 	e.GET("/api/healthz", func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok\n")
@@ -101,7 +105,10 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	})
 
 	// --- API routes (auth required + per-user rate limited) ---
-	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), apiHandler.EnsureSpreadsheetMiddleware(), userLimit)
+	// Order: authenticate → rate-limit → ensure spreadsheet. The rate limiter
+	// must precede EnsureSpreadsheet so a flood of authenticated requests
+	// can't hammer the Sheets API before being throttled.
+	apiGroup := e.Group("/api", authHandler.AuthMiddleware(), userLimit, apiHandler.EnsureSpreadsheetMiddleware())
 
 	apiGroup.GET("/log", apiHandler.GetLog)
 	apiGroup.GET("/events", apiHandler.GetEvents)
@@ -110,20 +117,20 @@ func NewRouter(cfg Config, authHandler *auth.Handler, apiHandler *api.Handler, f
 	apiGroup.DELETE("/events/:id", apiHandler.DeleteEvent)
 	apiGroup.DELETE("/fueling/:id", apiHandler.DeleteFueling)
 	apiGroup.POST("/chat/confirm", apiHandler.ConfirmChat)
-	apiGroup.POST("/agent", apiHandler.Agent, middleware.BodyLimit(chatBodyLimit))
-	apiGroup.POST("/coach/chat", apiHandler.CoachChat)
+	apiGroup.POST("/agent", apiHandler.Agent, agentLimit, middleware.BodyLimit(chatBodyLimit))
+	apiGroup.POST("/coach/chat", apiHandler.CoachChat, agentLimit)
 	apiGroup.GET("/insights", apiHandler.GetStoredInsights)
-	apiGroup.POST("/insights", apiHandler.Insights)
+	apiGroup.POST("/insights", apiHandler.Insights, agentLimit)
 	apiGroup.GET("/insights/day", apiHandler.GetStoredDayInsights)
-	apiGroup.POST("/insights/day", apiHandler.DayInsights)
+	apiGroup.POST("/insights/day", apiHandler.DayInsights, agentLimit)
 	apiGroup.GET("/insights/snapshots", apiHandler.GetInsightSnapshots)
 	apiGroup.GET("/insights/by-trigger", apiHandler.GetInsightByTrigger)
 	apiGroup.GET("/suggestions/day", apiHandler.GetStoredDaySuggestions)
-	apiGroup.POST("/suggestions/day", apiHandler.DaySuggestions)
+	apiGroup.POST("/suggestions/day", apiHandler.DaySuggestions, agentLimit)
 	apiGroup.GET("/suggestions/meal", apiHandler.GetStoredMealSuggestion)
-	apiGroup.POST("/suggestions/meal", apiHandler.MealSuggestion)
+	apiGroup.POST("/suggestions/meal", apiHandler.MealSuggestion, agentLimit)
 	apiGroup.GET("/suggestions/week", apiHandler.GetStoredWeekSuggestions)
-	apiGroup.POST("/suggestions/week", apiHandler.WeekSuggestions)
+	apiGroup.POST("/suggestions/week", apiHandler.WeekSuggestions, agentLimit)
 	apiGroup.PATCH("/entries/:id", apiHandler.PatchEntry)
 	apiGroup.DELETE("/entries/:id", apiHandler.DeleteEntry)
 	apiGroup.GET("/profile", apiHandler.GetProfile)

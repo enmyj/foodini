@@ -19,7 +19,11 @@ import (
 	"foodtracker/internal/sheets"
 )
 
-const maxAgentIterations = 6
+const (
+	maxAgentIterations = 6
+	maxAgentImages     = 4
+	maxAgentImageBytes = 12 << 20 // 12 MB per image, post-decode
+)
 
 // agentRequest is the input shape to /api/agent.
 type agentRequest struct {
@@ -60,6 +64,9 @@ func (h *Handler) Agent(c *echo.Context) error {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
+			return writeErr(c, http.StatusRequestEntityTooLarge, "upload_too_large")
+		}
+		if errors.Is(err, errTooManyImages) || errors.Is(err, errImageTooLarge) {
 			return writeErr(c, http.StatusRequestEntityTooLarge, "upload_too_large")
 		}
 		return writeErr(c, http.StatusBadRequest, "invalid request body")
@@ -702,6 +709,11 @@ func foodEntryToGemini(e sheets.FoodEntry) gemini.Entry {
 	}
 }
 
+var (
+	errTooManyImages = errors.New("too many images")
+	errImageTooLarge = errors.New("image too large")
+)
+
 func parseAgentRequest(r *http.Request) (agentRequest, error) {
 	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
@@ -730,10 +742,16 @@ func parseAgentJSON(r *http.Request) (agentRequest, error) {
 		Message: raw.Message, Date: raw.Date, Meal: raw.Meal, Time: raw.Time,
 		CurrentEntries: raw.CurrentEntries, Reset: raw.Reset,
 	}
+	if len(raw.Images) > maxAgentImages {
+		return agentRequest{}, errTooManyImages
+	}
 	for _, img := range raw.Images {
 		decoded, err := base64.StdEncoding.DecodeString(img.Data)
 		if err != nil {
 			return agentRequest{}, err
+		}
+		if len(decoded) > maxAgentImageBytes {
+			return agentRequest{}, errImageTooLarge
 		}
 		out.Images = append(out.Images, gemini.ImageData{MIMEType: img.MIMEType, Data: decoded})
 	}
@@ -744,6 +762,13 @@ func parseAgentMultipart(r *http.Request) (agentRequest, error) {
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		return agentRequest{}, err
 	}
+	// Image bytes are copied into Go-managed memory below, so disk temp files
+	// are safe to remove as soon as this function returns.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	out := agentRequest{
 		Message: r.FormValue("message"),
 		Date:    r.FormValue("date"),
@@ -759,6 +784,9 @@ func parseAgentMultipart(r *http.Request) (agentRequest, error) {
 	for _, field := range []string{"images", "image"} {
 		files := r.MultipartForm.File[field]
 		for _, fh := range files {
+			if fh.Size > maxAgentImageBytes {
+				return agentRequest{}, errImageTooLarge
+			}
 			file, err := fh.Open()
 			if err != nil {
 				return agentRequest{}, err
@@ -774,6 +802,9 @@ func parseAgentMultipart(r *http.Request) (agentRequest, error) {
 			if len(data) == 0 {
 				continue
 			}
+			if len(data) > maxAgentImageBytes {
+				return agentRequest{}, errImageTooLarge
+			}
 			mimeType := strings.TrimSpace(fh.Header.Get("Content-Type"))
 			if mimeType == "" {
 				mimeType = http.DetectContentType(data)
@@ -782,6 +813,9 @@ func parseAgentMultipart(r *http.Request) (agentRequest, error) {
 				return agentRequest{}, errors.New("invalid image upload")
 			}
 			out.Images = append(out.Images, gemini.ImageData{MIMEType: mimeType, Data: data})
+			if len(out.Images) > maxAgentImages {
+				return agentRequest{}, errTooManyImages
+			}
 		}
 	}
 	return out, nil

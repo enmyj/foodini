@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/securecookie"
 	"github.com/labstack/echo/v5"
@@ -18,6 +19,8 @@ const (
 	cookieName        = "ft_session"
 	sessionCookieAge  = 180 * 24 * 3600
 	missingRefreshMsg = "Google sign-in did not return offline access. Please try signing in again."
+	tsCacheTTL        = 1 * time.Hour
+	tsCacheJanitor    = 15 * time.Minute
 )
 
 var scopes = []string{
@@ -45,7 +48,12 @@ type Handler struct {
 	sc       *securecookie.SecureCookie
 	secure   bool
 	tsMu     sync.Mutex
-	tsCache  map[string]oauth2.TokenSource
+	tsCache  map[string]*tsEntry
+}
+
+type tsEntry struct {
+	ts       oauth2.TokenSource
+	lastUsed time.Time
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -55,7 +63,7 @@ func NewHandler(cfg Config) *Handler {
 	}
 	hashKey := secret[:32]
 	encKey := secret[32:64]
-	return &Handler{
+	h := &Handler{
 		oauthCfg: &oauth2.Config{
 			ClientID:     cfg.ClientID,
 			ClientSecret: cfg.ClientSecret,
@@ -64,7 +72,24 @@ func NewHandler(cfg Config) *Handler {
 		},
 		sc:      securecookie.New(hashKey, encKey),
 		secure:  cfg.Secure,
-		tsCache: make(map[string]oauth2.TokenSource),
+		tsCache: make(map[string]*tsEntry),
+	}
+	go h.tsCacheJanitor(tsCacheJanitor)
+	return h
+}
+
+func (h *Handler) tsCacheJanitor(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for now := range t.C {
+		cutoff := now.Add(-tsCacheTTL)
+		h.tsMu.Lock()
+		for k, e := range h.tsCache {
+			if e.lastUsed.Before(cutoff) {
+				delete(h.tsCache, k)
+			}
+		}
+		h.tsMu.Unlock()
 	}
 }
 
@@ -81,15 +106,20 @@ func redirectURL(r *http.Request) string {
 	return scheme + "://" + r.Host + "/auth/callback"
 }
 
-func generateState() string {
+func generateState() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (h *Handler) Login(c *echo.Context) error {
 	r := c.Request()
-	state := generateState()
+	state, err := generateState()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "state generation failed"})
+	}
 	c.SetCookie(&http.Cookie{
 		Name:     "oauth_state",
 		Value:    state,
@@ -160,6 +190,9 @@ func (h *Handler) Callback(c *echo.Context) error {
 }
 
 func (h *Handler) Logout(c *echo.Context) error {
+	if s, err := h.GetSession(c.Request()); err == nil {
+		h.dropTokenSource(s.RefreshToken)
+	}
 	h.ClearSession(c)
 	return c.Redirect(http.StatusTemporaryRedirect, "/")
 }
@@ -208,13 +241,24 @@ func (h *Handler) GetSession(r *http.Request) (*Session, error) {
 func (h *Handler) TokenSource(_ context.Context, session *Session) oauth2.TokenSource {
 	h.tsMu.Lock()
 	defer h.tsMu.Unlock()
-	if ts, ok := h.tsCache[session.RefreshToken]; ok {
-		return ts
+	if e, ok := h.tsCache[session.RefreshToken]; ok {
+		e.lastUsed = time.Now()
+		return e.ts
 	}
 	base := &oauth2.Token{RefreshToken: session.RefreshToken}
 	ts := oauth2.ReuseTokenSource(nil, h.oauthCfg.TokenSource(context.Background(), base))
-	h.tsCache[session.RefreshToken] = ts
+	h.tsCache[session.RefreshToken] = &tsEntry{ts: ts, lastUsed: time.Now()}
 	return ts
+}
+
+// dropTokenSource removes a refresh token's cached TokenSource, e.g. on logout.
+func (h *Handler) dropTokenSource(refreshToken string) {
+	if refreshToken == "" {
+		return
+	}
+	h.tsMu.Lock()
+	delete(h.tsCache, refreshToken)
+	h.tsMu.Unlock()
 }
 
 // AuthMiddleware returns Echo middleware that requires a valid session.
