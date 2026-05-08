@@ -29,7 +29,7 @@ Meals:
 - meal_type ∈ {breakfast, snack, lunch, dinner, supplements}. Use "supplements" for vitamins. Protein powder, fiber, and other supplements meant to ride along with a meal should attach to that meal's meal_type, not "supplements" — e.g. protein powder added with breakfast should be logged as breakfast.
 - All numeric macros are integers (round estimates fine). Fiber: 0 if unknown.
 - "edit_meal" replaces the meal currently being edited — return the FULL replacement entry list (omit removed items, include unchanged items unchanged). Only call edit_meal when the context says "Currently editing: <meal>" AND lists current entries for that meal. There is no tool to switch the selected meal. If the user refers to an existing meal but the current context is not editing it, ask them to open that meal or use log_meal for new food.
-- "log_meal": if the user is editing a specific meal (context shows "Currently editing"), default to that meal_type; else infer from the user's wording or time of day.
+- "log_meal": if the user is editing a specific meal (context shows "Currently editing"), default to that meal_type; else infer from the user's wording or, failing that, the user's current local time shown in context (rough buckets: breakfast <10:30, snack 10:30–11:30 or 14:30–17:00, lunch 11:30–14:30, dinner ≥17:00). Don't default to lunch when it's clearly evening — 19:00 with a salad is dinner, not lunch.
 - Additive phrasing ("I also had X", "and X", "plus X", "forgot to mention X", "oh and X") means add ONLY the new item(s). Never re-include items already present in "Currently editing" or "Today's meals so far" — that creates duplicates. If a meal is already being edited, call edit_meal with the existing items PLUS the new ones; otherwise call log_meal with just the new item(s).
 - If the user gives a clock time ("had lunch at 12:30", "around 7pm"), pass it via the optional "time" arg as 24h HH:MM. This anchors the entry on the timeline.
 - When logging a meal for a date OTHER than today, always pass "time" — pick a sensible clock time for the meal (breakfast ~08:00, lunch ~12:30, snack ~15:00, dinner ~18:30, supplements ~09:00) unless the user mentions one. Otherwise the entry gets stamped with the current time, which is wrong for retroactive logs.
@@ -45,6 +45,7 @@ Portion sizing (important — LLMs systematically under-estimate, especially as 
 - When the user's profile indicates a larger body, big appetite, or high activity, bias portion estimates to the upper end of the plausible range. Treat the profile (height, weight, notes about appetite) as a multiplier on default portions, not just background trivia.
 - For photos: identify any reference object (hand, fork, standard ~10–11" plate, can, phone) and scale to it. If no reference is visible, assume a normal adult portion for THIS user (using their profile) rather than a small one. Don't ask about portion if the photo is reasonably interpretable — just estimate on the higher side and let the user correct.
 - When genuinely uncertain between two portion sizes, pick the larger. Users find it easier to adjust down than up, and the systematic bias runs the other direction.
+- Sanity-check totals before emitting them. A meal containing meat, fish, eggs, or cheese is almost never under ~150 cal — the protein alone usually clears that. A "large" or "loaded" anything (salad, bowl, sandwich, burrito) is rarely under 400 cal. If your estimate looks suspiciously low for what was described, you've under-portioned — re-do it.
 
 Activity fueling:
 - "add_fueling" logs mid-activity fuel (gels, drink mix, chews, bars, banana, etc.) anchored to a workout event. Use this — NOT log_meal — for ANYTHING the user says they had *during* a ride/run/workout. This is the only path users have to log fueling, so be willing to infer carb counts from common products (a typical gel ≈ 22–30g carbs, a SIS Beta Fuel ≈ 40g, Maurten 100 = 25g, Maurten 160 = 40g, GU = 22g, Skratch hydration ≈ 20g/scoop, a banana ≈ 25g carbs).
@@ -285,6 +286,7 @@ type AgentFueling struct {
 // AgentContext describes the drawer state passed to the agent each turn.
 type AgentContext struct {
 	Date            string             // YYYY-MM-DD currently being viewed
+	Now             string             // user's current local time HH:MM (for time-of-day inference)
 	SelectedMeal    string             // breakfast/lunch/etc or ""
 	CurrentEntries  []Entry            // entries in selected meal (for edit_meal)
 	YesterdayByMeal map[string][]Entry // for "same as yesterday's lunch"
@@ -347,6 +349,9 @@ func formatAgentContext(ac AgentContext) string {
 	}
 	if ac.Date != "" {
 		fmt.Fprintf(&b, "Today's date (user's local): %s\n", ac.Date)
+	}
+	if ac.Now != "" {
+		fmt.Fprintf(&b, "User's current local time: %s\n", ac.Now)
 	}
 	if ac.SelectedMeal != "" {
 		fmt.Fprintf(&b, "Currently editing: %s\n", ac.SelectedMeal)

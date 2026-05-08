@@ -130,6 +130,7 @@ func (h *Handler) Agent(c *echo.Context) error {
 
 	ac := gemini.AgentContext{
 		Date:            targetDate,
+		Now:             LocalNow(r).Format("15:04"),
 		SelectedMeal:    req.Meal,
 		CurrentEntries:  current,
 		YesterdayByMeal: convertMealMap(yesterdayByMeal),
